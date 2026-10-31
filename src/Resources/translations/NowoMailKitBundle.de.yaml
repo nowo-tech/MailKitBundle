@@ -32,6 +32,7 @@ dsn:
     unsupported: 'Keine installierte Mailer-Bridge unterstützt dieses Schema (zum Beispiel: composer require symfony/resend-mailer).'
     host_not_allowed: 'Der Host dieses Mailservers ist privat, lokal oder reserviert und nicht erlaubt.'
     host_unresolvable: 'Der Hostname dieses Mailservers lässt sich nicht auflösen.'
+    option_not_allowed: 'Eine Option dieses DSN ist nicht erlaubt (Region außerhalb der Anbieterliste oder ein Wert, der die Serveradresse ändern könnte).'
 sender:
     not_deliverable: 'Verwenden Sie eine Adresse auf einer öffentlichen Domain: {{ value }} würde von Mail-Anbietern abgelehnt.'
 test_email:
@@ -47,6 +48,7 @@ test_email:
         failed: 'Die Test-E-Mail an %to% ist fehlgeschlagen: %error%'
 resend:
     check:
+        rate_limited: 'Zu viele Prüfungen; versuchen Sie es in ein paar Minuten erneut.'
         no_key: 'Speichern Sie zuerst einen Resend-API-Schlüssel.'
         failed: 'Der Resend-API-Schlüssel wurde abgelehnt: %error%'
         ok_sending_only: 'Der Resend-API-Schlüssel ist gültig (reiner Sende-Schlüssel: Domains können nicht aufgelistet werden).'

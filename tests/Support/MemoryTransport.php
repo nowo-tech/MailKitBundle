@@ -10,9 +10,9 @@ use Symfony\Component\Mailer\Transport\AbstractTransport;
 
 /**
  * Test transport `memory://<host>`: keeps the messages in {@see MemoryMailStore}; host `fail` throws a transport error
- * that carries a credential-like URL (the log must scrub it).
+ * that carries a credential-like URL (the log must scrub it); host `leak` echoes credentials.
  */
-final class MemoryTransport extends AbstractTransport
+class MemoryTransport extends AbstractTransport
 {
     public function __construct(
         private readonly string $host,
@@ -28,6 +28,10 @@ final class MemoryTransport extends AbstractTransport
 
     protected function doSend(SentMessage $message): void
     {
+        if ($this->host === 'leak') {
+            // Echoes the DSN credentials like an SMTP authentication failure, plus a provider key.
+            throw new TransportException('Failed to authenticate on SMTP server with username "mk-user" using password REDACTED-TEST-PASS and key SG.REDACTEDTESTAAAA.REDACTEDTESTBBBB.');
+        }
         if ($this->host === 'fail') {
             throw new TransportException('Connection refused by smtp://user:REDACTED-TEST@relay.example.com:25');
         }

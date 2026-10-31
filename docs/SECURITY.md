@@ -46,13 +46,14 @@ transports and provider bridges, or the content of the messages your application
 
 | Threat | Mitigation |
 | --- | --- |
+| **SSRF through the DSN query options** (CA M1: `?region=x@10.0.0.5:8443/` moved the Mailgun / SendGrid / SES API host) | Every query option is checked for every scheme: `region` only from a per-bridge allow-list (Mailgun `us` / `eu`, SendGrid `global` / `eu`, Scaleway `fr-par` / `nl-ams` / `pl-waw`, SES AWS region syntax; refused on other bridges), any other option value containing `@ / ? # : \\`, whitespace or control characters refused (credential options such as `session_token` may contain `/ + =`). Second line of defence: after the transport is built, its real endpoint host is read and must be a provider host (`*.mailgun.net`, `*.sendgrid.com`, `*.amazonaws.com`, `*.resend.com`, …) or pass the host guard. Regression tests replay the audit PoCs. |
 | **SSRF through the DSN** (an admin points SMTP at an internal service or cloud metadata) | Host guard on every stored / provided DSN: cloud-metadata names and addresses always refused; `localhost`, `*.local`, `*.localhost`, `*.internal`, loopback, RFC 1918, CGNAT, link-local, unique-local, documentation and reserved ranges refused unless `allow_private_hosts` / `allowed_hosts`; host names resolved (A / AAAA) and refused when any answer is private or nothing resolves; IPv4 spellings normalised (OutboundUrlGuard `PrivateNetworkTarget`). Validation runs on save, on import, and before the transport is built at send time. |
 | **Host command execution** (`sendmail://…?command=`, `native://`) | `sendmail`, `sendmail+smtp` and `native` are never accepted (not in the default list, refused in `allowed_schemes` at compile time). |
 | **Silent mail loss** (`null://`) | `null` refused in the settings; a refused stored DSN fails the send (no silent fallback). |
-| **Credential disclosure** | DSN and API key are Instance Settings secrets (encrypted, never rendered back, sealed in exports); MailKit never logs or renders them: `MailerDsnAudit` labels (`scheme://host[:port]`), `[redacted]` invalid values in violations, `#[SensitiveParameter]` on DSN / key parameters, transport errors scrubbed (`user:pass@`, `re_…` keys, `Bearer …`) before they are stored, flashed or printed. |
+| **Credential disclosure** | Transport failures are rethrown as `DeliveryFailedException`: a short message with a reference; API bridges answer "The mail provider answered HTTP <code>" — provider response bodies are never stored, flashed, printed or kept in the Messenger failure transport (no `previous`); the scrubbed detail is logged under the reference only. The scrubber masks the credentials of the DSN in use (user, password; raw, URL-encoded, base64), `username "…"`, `user:pass@`, `re_…`, `SG.…`, `xkeysib-…`, `key-…`, `Bearer …` and UUID tokens. DSN and API key are Instance Settings secrets (encrypted, never rendered back, sealed in exports); MailKit never logs or renders them: `MailerDsnAudit` labels (`scheme://host[:port]`), `[redacted]` invalid values in violations, `#[SensitiveParameter]` on DSN / key parameters, transport errors scrubbed (`user:pass@`, `re_…` keys, `Bearer …`) before they are stored, flashed or printed. |
 | **Unauthorized access** | UI private by default (`ROLE_ADMIN`); empty role lists refused at compile time (pattern P1); a listener guards every request under the prefix and every bundle controller wherever it is mounted; actions also require the Instance Settings access of their section (its public `AccessGuard`); the token is trusted only when a firewall matched the main request. |
 | **CSRF** | Every POST is a FormKit CSRF-only form (`csrf_only[_token]`, one token id per action); not submitted or invalid → 403. The container refuses to compile the UI without form CSRF or a token manager (pattern P2). |
-| **Mail bombing / quota burn through the test action** | Per-user sliding-window rate limit (`test_email.rate_limit` per `rate_interval`, client address for anonymous demo access); recipient is the configured test recipient or the user's own address (no free-form recipient in the UI). |
+| **Mail bombing / quota burn through the test action** | Per-user sliding-window rate limit, shared with the Resend key check (each check is an outbound call) (`test_email.rate_limit` per `rate_interval`, client address for anonymous demo access); recipient is the configured test recipient or the user's own address (no free-form recipient in the UI). |
 | **Stored XSS through logged content** | Subjects, addresses, tags and errors are escaped by Twig; the text body is escaped in a `<pre>`; the HTML body is never inlined in the admin page — it is served alone with `Content-Security-Policy: default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'; sandbox`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `no-store`. |
 | **Injection** | ORM QueryBuilder / DBAL with bound parameters; LIKE patterns escaped (`!` escape); table names come from the configured prefix (validated `[A-Za-z0-9_]*`). |
 | **Log write breaking delivery / host transactions** | Writes go through DBAL (never the host unit of work) and are best effort (warning on failure). |
@@ -81,8 +82,11 @@ when not every admin may change the transport.
 - The sent-mail log stores recipients' addresses and subjects (needed to answer "was it sent?"). Bodies are **off by
   default** (`log.store_bodies: false`); when on, use `MailHeaders::redact()` for one-time links and codes.
 - Retention: `nowo:mail-kit:log:purge` (default `log.retention_days: 30`) — schedule it.
-- Erasure: `nowo:mail-kit:log:forget <email>` / `SentMailRecorder::forgetRecipient()` deletes every row (and body)
-  addressed to a person; call it from your account-deletion flow.
+- Erasure: `nowo:mail-kit:log:forget <email>` / `SentMailRecorder::forgetAddress()` deletes every row (and body) the
+  person sent or received (to, cc, bcc, sender — matched on a normalised `recipient_index` column, so it works the same
+  on SQLite, MySQL / MariaDB and PostgreSQL, also for addresses with `/` or non-ASCII characters) and masks the address
+  in the subjects and stored bodies of the other rows (also URL-encoded). Internationalised addresses are accepted.
+  Call it from your account-deletion flow. Not covered: copies outside the log (provider dashboards, mailboxes).
 - `log.enabled: false` disables the log entirely.
 
 ## Logging
@@ -96,7 +100,9 @@ when not every admin may change the transport.
 
 ## Resource limits and timeouts
 
-- DNS lookup per DSN host: `dsn.dns_timeout` (2 s), once per DSN per process (memoized).
+- DNS lookup per DSN host: `dsn.dns_timeout` (2 s), on save / import and when the transport for a DSN is built
+  (once per DSN per worker until `kernel.reset` / a settings change). The readiness check (`isOutboundMailReady()`,
+  AuthKit login page) never resolves DNS: syntax and configuration only.
 - Resend key check: `resend.api_timeout` (10 s connect + total), `max_redirects: 0`.
 - SMTP / provider sends: Symfony transport timeouts (DSN `timeout` option); keep them below PHP `max_execution_time`
   ([CONFIGURATION — Timeouts](CONFIGURATION.md#timeouts-req-runtime-001)).
@@ -130,30 +136,41 @@ session and no CSRF.
 | Outbound I/O | SSRF host guard, scheme allow-list, fixed Resend URL, deadlines. |
 | Permissions / exposure | Opt-in routes, roles, section access for actions, firewall-only token trust, fail-closed compile checks. |
 | Limits / DoS | Rate limit, pagination, capped bodies and errors. |
-| AI security audit (REQ-SEC-004) | **Pending** independent audit before the first tag — see below. |
+| AI security audit (REQ-SEC-004) | Appendix CA: Pass (conditional) / Medium on `e30bcb9`; fixes on `fix/ca-audit`, re-audit pending — see below. |
 
 ## AI security audit (REQ-SEC-004)
 
 | Date | Revision | Auditor | Grade | Findings |
 | --- | --- | --- | --- | --- |
-| — | branch `feat/1.0.0` | Pending (independent auditor, not self-graded) | — | — |
+| 2026-10-31 | `e30bcb9` (PR #1) | Independent AI audit, Appendix CA | **Pass (conditional) / Medium** | M1 SSRF through provider `region` options; L1 DNS on every readiness check; L2 erasure / search missed rows (JSON escaping, PostgreSQL, IDN); L3 credentials echoed in errors, provider bodies kept; Info I1–I10 |
+| 2026-10-31 | branch `fix/ca-audit` | Fixes of M1, L1–L3, I1–I4, I7; I5, I6, I8–I10 documented below | Re-audit pending (expected Pass (good) / Low) | — |
 
-The first release (1.0.0) is tagged only after an independent audit records **Pass (good)** or **Pass (conditional)**
-in the monorepo `BUNDLES_SECURITY_ANALYSIS.md`.
+Recorded in the monorepo `BUNDLES_SECURITY_ANALYSIS.md` (Appendix CA). The first release (1.0.0) is tagged only after
+the re-audit confirms the fixes.
 
 ## Residual risks and host guidance
 
-- **DNS rebinding / TOCTOU.** The host is resolved when the DSN is validated; the transport resolves it again when it
+- **I9 — DNS rebinding / TOCTOU.** The host is resolved when the DSN is validated; the transport resolves it again when it
   connects. A host that changes its answer after validation could still reach a private address. Use IP-literal or
   provider DSNs for strict environments, or an egress firewall.
 - **`allowed_hosts` / `allow_private_hosts`** turn the guard off for those hosts: list only relays you operate.
+  Single-label names (`mailpit`, `redis`) are refused unless allow-listed, with or without `resolve_dns` (CA I2);
+  `allow_private_hosts: true` accepts them.
+- **I5 — HTML body viewer.** The stored HTML body is served alone with a sandboxing CSP (no script, no forms, no remote
+  loads); a click on a link inside it still navigates the tab (normal for an e-mail viewer).
+- **I6 — test e-mail content.** The test e-mail names the redacted transport (`smtp://host:port`) and goes to the
+  configured test recipient, which any admin of the section may set to an external address (rate-limited, fixed
+  content).
+- **I8 — demo tooling.** The Playwright screenshot converter (`sharp`, dev only, not shipped) may carry upstream
+  image-library advisories; it never processes untrusted images.
+- **I10 — log visibility.** Every user who passes the MailKit access checker sees every log row (an admin log, no
+  per-row ownership); Instance Settings `area_roles` for `mailer` restrict the settings, not the log — use
+  `security.access_roles` / `access_checker` for that.
 - **Admins choose the transport.** A user who may edit the `mailer` section can route all mail (including password
   resets) through a server they control. Restrict the section with Instance Settings `area_roles` and audit the
   `Mail settings changed.` notices.
 - **Framework fallback.** `MAILER_DSN` is not validated (ops configuration).
 - **Recipients in the log** are personal data even without bodies: protect the UI, purge, honour erasure requests.
-- **Demo tooling.** The Playwright screenshot converter (`sharp`, dev only, not shipped) never processes untrusted
-  images.
 
 ## Reporting a vulnerability
 

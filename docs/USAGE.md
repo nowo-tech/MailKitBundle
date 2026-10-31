@@ -72,9 +72,10 @@ Read them like any setting (`InstanceSettingsInterface::getString('mailer.from')
 1. the scheme is in `dsn.allowed_schemes` (SMTP and the API / SMTP bridges of Mailgun, Postmark, SendGrid, SES, Brevo, Resend, Mailjet, MailPace, Scaleway by default) — `sendmail`, `native` (they run host processes) and `null` (drops every message) are refused even if listed;
 2. it parses (`Symfony\Component\Mailer\Transport\Dsn`);
 3. its **host** passes the SSRF guard ([`DsnHostGuard`](../src/Dsn/DsnHostGuard.php), the rules of nowo-tech/outbound-url-guard-bundle): hosts in `dsn.allowed_hosts` pass; cloud-metadata names and addresses never pass; with `dsn.allow_private_hosts: false` (default) `localhost`, `*.local`, `*.localhost`, `*.internal`, loopback / private / link-local / CGNAT / reserved IPs are refused; with `dsn.resolve_dns: true` (default) a host name must resolve (bounded lookup, `dsn.dns_timeout`) and every address must be public. Provider DSNs whose host is `default` (`resend+api://KEY@default`) target the provider endpoint and are not resolved;
-4. a transport factory supports it (otherwise `dsn.unsupported`: install the bridge, e.g. `composer require symfony/resend-mailer`). Building the transport does not connect.
+4. its query options are safe: `region` only from the bridge allow-list (Mailgun `us` / `eu`, SendGrid `global` / `eu`, Scaleway `fr-par` / `nl-ams` / `pl-waw`, SES AWS region syntax; refused elsewhere), no other option value with `@ / ? # : \`, whitespace or control characters (credential options such as `session_token` excepted) — otherwise `dsn.option_not_allowed`;
+5. a transport factory supports it (otherwise `dsn.unsupported`: install the bridge, e.g. `composer require symfony/resend-mailer`), and the **endpoint the built transport targets** is a provider host or passes the host guard. Building the transport does not connect.
 
-Error keys (`NowoMailKitBundle` domain): `dsn.invalid`, `dsn.null_transport`, `dsn.scheme_not_allowed`, `dsn.host_not_allowed`, `dsn.host_unresolvable`, `dsn.unsupported`. The DSN is never part of a message.
+Error keys (`NowoMailKitBundle` domain): `dsn.invalid`, `dsn.null_transport`, `dsn.scheme_not_allowed`, `dsn.option_not_allowed`, `dsn.host_not_allowed`, `dsn.host_unresolvable`, `dsn.unsupported`. Single-label host names (`mailpit`) are refused unless listed in `dsn.allowed_hosts`. The DSN is never part of a message.
 
 ```php
 $error = $validator->validate('smtp://user:pass@10.0.0.5:25');   // 'dsn.host_not_allowed'
@@ -190,7 +191,7 @@ $status = $readiness->status();      // MailStatus: source (settings|resend|cust
 {{ nowo_mail_kit_status().label }}   {# smtp://smtp.example.com:587 — never credentials #}
 ```
 
-Ready means a runtime DSN is stored and valid. With nothing stored, the framework transport counts only with `mailer.fallback_counts_as_ready: true` (the framework transports cannot be inspected).
+Ready means a runtime DSN is stored and valid (checked without DNS: the readiness check runs on anonymous pages; the full check runs on save and before sending). With nothing stored, the framework transport counts only with `mailer.fallback_counts_as_ready: true` (the framework transports cannot be inspected).
 
 **AuthKit:** when `nowo-tech/auth-kit-bundle` is installed, MailKit registers `nowo_mail_kit.outbound_mail_ready_checker` (`MailKitOutboundMailReadyChecker`, implements `Nowo\AuthKitBundle\Mailer\OutboundMailReadyCheckerInterface`) and prepends `nowo_auth_kit.outbound_mail_ready_checker` to it, so magic-login and password-reset links appear only when mail can be delivered. Set your own id in `nowo_auth_kit.outbound_mail_ready_checker` to override it.
 
@@ -213,10 +214,12 @@ Switch the log off with `log.enabled: false` (no table writes, no log pages, no 
 ```bash
 php bin/console nowo:mail-kit:log:purge                       # rows older than log.retention_days (keyset batches)
 php bin/console nowo:mail-kit:log:purge --older-than-days=7
-php bin/console nowo:mail-kit:log:forget alice@example.com     # every row addressed to her (GDPR art. 17)
+php bin/console nowo:mail-kit:log:forget alice@example.com     # rows she sent or received deleted, address masked elsewhere (GDPR art. 17)
 ```
 
-Schedule the purge (cron or Symfony Scheduler). `SentMailRecorder::forgetRecipient()` is the same erasure for an account-deletion flow.
+Schedule the purge (cron or Symfony Scheduler). `SentMailRecorder::forgetAddress()` (`['deleted' => n, 'redacted' => n]`) is the same erasure for an account-deletion flow; search and erasure use the normalised `recipient_index` column and work on SQLite, MySQL / MariaDB and PostgreSQL.
+
+**Failures.** A failed send throws `Nowo\MailKitBundle\Mailer\DeliveryFailedException` (a `TransportException`): a short message with a reference (`The mail provider answered HTTP 403 (reference 1a2b3c4d).` for API bridges, the scrubbed SMTP answer otherwise). Provider response bodies and credentials never reach the log row, the flash or the Messenger failure transport; the scrubbed detail is logged (`Mail delivery failed.`, `reference`, `detail`).
 
 ## Reacting to changes and auditing
 

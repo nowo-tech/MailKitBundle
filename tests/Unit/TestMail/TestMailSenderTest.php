@@ -105,7 +105,7 @@ final class TestMailSenderTest extends TestCase
         $transport = new RuntimeTransport(
             new MemoryTransport('fallback', $this->store),
             new StaticDsnProvider($dsn),
-            new MailerDsnValidator(['memory'], new DsnHostGuard(resolveDns: false), $factory),
+            new MailerDsnValidator(['memory'], new DsnHostGuard(['fail'], resolveDns: false), $factory),
             $factory,
             new SenderPolicy($settings),
         );

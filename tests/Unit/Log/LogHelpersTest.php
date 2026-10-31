@@ -55,6 +55,8 @@ final class LogHelpersTest extends TestCase
         self::assertSame('id-1', $row->getId());
         self::assertSame(SentMailStatus::Queued, $row->getStatus());
         self::assertSame([], $row->getTo());
+        self::assertSame('', $row->getRecipientIndex());
+        self::assertSame('|a@x.example|b@x.example|', (new SentMail('id-2', new DateTimeImmutable(), recipients: ['to' => ['a@x.example'], 'cc' => ['b@x.example'], 'bcc' => ['a@x.example']]))->getRecipientIndex());
         self::assertNull($row->getTag());
         self::assertSame('', $row->getTransport());
         $body = new SentMailBody('id-1', '<p>x</p>', 'x');

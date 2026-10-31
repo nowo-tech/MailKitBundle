@@ -27,8 +27,10 @@ use Throwable;
 use function array_filter;
 use function array_keys;
 use function array_map;
+use function array_merge;
 use function array_unique;
 use function array_values;
+use function base64_encode;
 use function count;
 use function htmlspecialchars;
 use function implode;
@@ -36,14 +38,20 @@ use function is_string;
 use function json_encode;
 use function max;
 use function mb_strcut;
+use function mb_strtolower;
 use function mb_substr;
+use function preg_quote;
+use function preg_replace;
+use function rawurlencode;
 use function str_replace;
-use function strtolower;
 use function trim;
+use function urlencode;
 
 use const ENT_HTML5;
 use const ENT_QUOTES;
 use const JSON_THROW_ON_ERROR;
+use const JSON_UNESCAPED_SLASHES;
+use const JSON_UNESCAPED_UNICODE;
 
 /**
  * Writes the sent-mail log with DBAL (never through the host unit of work, so logging cannot flush or roll back
@@ -100,14 +108,15 @@ final readonly class SentMailRecorder
     }
 
     /**
-     * Marks the row failed with the scrubbed error (or inserts one when there is no queued row).
+     * Marks the row failed with the (already public) error, scrubbed again and capped (or inserts one when there is no
+     * queued row).
      */
-    public function failed(?string $id, RawMessage $message, string $transport, Throwable $error): void
+    public function failed(?string $id, RawMessage $message, string $transport, string $error): void
     {
         $this->resolve($id, $message, $transport, SentMailStatus::Failed, [
             'status'    => SentMailStatus::Failed->value,
             'transport' => mb_substr($transport, 0, 32),
-            'error'     => ErrorScrubber::scrub($error->getMessage()),
+            'error'     => ErrorScrubber::scrub($error),
             'failed_at' => $this->now(),
         ], ['failed_at' => Types::DATETIME_IMMUTABLE]);
     }
@@ -137,17 +146,62 @@ final readonly class SentMailRecorder
      */
     public function forgetRecipient(string $email): int
     {
-        $email = strtolower(trim($email));
+        return $this->forgetAddress($email)['deleted'];
+    }
+
+    /**
+     * Right to erasure (GDPR art. 17) for one address: deletes every row (and body) the address sent or received
+     * (to, cc, bcc — normalised index, no JSON matching) and masks the address in the subjects and stored bodies of the
+     * remaining rows. Works the same on SQLite, MySQL / MariaDB and PostgreSQL.
+     *
+     * @return array{deleted: int, redacted: int}
+     */
+    public function forgetAddress(string $email): array
+    {
+        $email = self::normalize($email);
         if ($email === '') {
-            return 0;
+            return ['deleted' => 0, 'redacted' => 0];
         }
         $connection = $this->connection();
         $ids        = $connection->fetchFirstColumn(
-            'SELECT id FROM ' . $this->table() . " WHERE recipients LIKE ? ESCAPE '!'",
-            ['%' . self::likeEscape('"' . $email . '"') . '%'],
+            'SELECT id FROM ' . $this->table() . " WHERE recipient_index LIKE ? ESCAPE '!' OR sender = ?",
+            ['%' . self::likeEscape('|' . $email . '|') . '%', $email],
         );
+        $deleted  = $this->deleteIds($connection, $ids);
+        $pattern  = '%' . self::likeEscape($email) . '%';
+        $redacted = 0;
 
-        return $this->deleteIds($connection, $ids);
+        foreach ($connection->fetchAllAssociative('SELECT id, subject FROM ' . $this->table() . " WHERE LOWER(subject) LIKE ? ESCAPE '!'", [$pattern]) as $row) {
+            $redacted += (int) $connection->update($this->table(), ['subject' => $this->mask((string) $row['subject'], $email)], ['id' => $row['id']]);
+        }
+        foreach ($connection->fetchAllAssociative('SELECT id, html_body, text_body FROM ' . $this->bodyTable() . " WHERE LOWER(html_body) LIKE ? ESCAPE '!' OR LOWER(text_body) LIKE ? ESCAPE '!'", [$pattern, $pattern]) as $row) {
+            $redacted += (int) $connection->update($this->bodyTable(), [
+                'html_body' => is_string($row['html_body']) ? $this->mask($row['html_body'], $email) : null,
+                'text_body' => is_string($row['text_body']) ? $this->mask($row['text_body'], $email) : null,
+            ], ['id' => $row['id']]);
+        }
+
+        return ['deleted' => $deleted, 'redacted' => $redacted];
+    }
+
+    /**
+     * Normalised form of an address (trimmed, lowercase, multibyte-aware) — the form stored in the log.
+     */
+    public static function normalize(string $email): string
+    {
+        return mb_strtolower(trim($email));
+    }
+
+    /**
+     * `|a@x|b@y|` index of the to / cc / bcc addresses (search and erasure without JSON matching).
+     *
+     * @param array{to?: list<string>, cc?: list<string>, bcc?: list<string>} $recipients
+     */
+    public static function recipientIndex(array $recipients): string
+    {
+        $all = array_merge($recipients['to'] ?? [], $recipients['cc'] ?? [], $recipients['bcc'] ?? []);
+
+        return $all === [] ? '' : '|' . implode('|', array_values(array_unique($all))) . '|';
     }
 
     /**
@@ -224,16 +278,18 @@ final readonly class SentMailRecorder
         $id = Uuid::v7()->toRfc4122();
         try {
             $connection = $this->connection();
+            $recipients = $this->recipients($message);
             $connection->insert($this->table(), [
-                'id'         => $id,
-                'status'     => $status->value,
-                'tag'        => $message instanceof Message ? MailHeaders::value($message, MailHeaders::TAG) : null,
-                'subject'    => $message instanceof Email ? mb_substr((string) $message->getSubject(), 0, 255) : '',
-                'sender'     => $message instanceof Email ? mb_substr($this->addresses($message->getFrom())[0] ?? '', 0, 255) : '',
-                'recipients' => json_encode($this->recipients($message), JSON_THROW_ON_ERROR),
-                'transport'  => mb_substr($transport, 0, 32),
-                'attempts'   => $attempts,
-                'queued_at'  => $this->now(),
+                'id'              => $id,
+                'status'          => $status->value,
+                'tag'             => $message instanceof Message ? MailHeaders::value($message, MailHeaders::TAG) : null,
+                'subject'         => $message instanceof Email ? mb_substr((string) $message->getSubject(), 0, 255) : '',
+                'sender'          => $message instanceof Email ? mb_substr($this->addresses($message->getFrom())[0] ?? '', 0, 255) : '',
+                'recipients'      => json_encode($recipients, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                'recipient_index' => self::recipientIndex($recipients),
+                'transport'       => mb_substr($transport, 0, 32),
+                'attempts'        => $attempts,
+                'queued_at'       => $this->now(),
             ] + $extra, ['queued_at' => Types::DATETIME_IMMUTABLE] + $types);
 
             if ($this->storeBodies && $message instanceof Email) {
@@ -258,7 +314,8 @@ final readonly class SentMailRecorder
             return null;
         }
         foreach (MailHeaders::secrets($message) as $secret) {
-            $body = str_replace(array_values(array_unique([$secret, htmlspecialchars($secret, ENT_QUOTES | ENT_HTML5), htmlspecialchars($secret)])), self::REDACTED, $body);
+            // Literal, HTML-escaped, URL-encoded and base64 forms (CA I4).
+            $body = str_replace(array_values(array_unique([$secret, htmlspecialchars($secret, ENT_QUOTES | ENT_HTML5), htmlspecialchars($secret), rawurlencode($secret), urlencode($secret), base64_encode($secret)])), self::REDACTED, $body);
         }
 
         return mb_strcut($body, 0, self::BODY_MAX);
@@ -287,7 +344,12 @@ final readonly class SentMailRecorder
      */
     private function addresses(array $addresses): array
     {
-        return array_values(array_map(static fn (Address $address): string => strtolower($address->getAddress()), $addresses));
+        return array_values(array_map(static fn (Address $address): string => self::normalize($address->getAddress()), $addresses));
+    }
+
+    private function mask(string $text, string $email): string
+    {
+        return (string) preg_replace('/' . preg_quote($email, '/') . '|' . preg_quote(rawurlencode($email), '/') . '/iu', self::REDACTED, $text);
     }
 
     private function connection(): Connection

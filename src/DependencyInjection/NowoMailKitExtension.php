@@ -300,7 +300,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
 
         $container->setDefinition(OutboundMailReadiness::class, (new Definition(OutboundMailReadiness::class, [
             new Reference(MailerDsnProviderInterface::class),
-            new Reference(RuntimeTransport::class),
+            new Reference(MailerDsnValidator::class),
             $mailer['fallback_counts_as_ready'],
         ]))->setPublic(true));
         $container->setDefinition(MailKitTwigExtension::class, (new Definition(MailKitTwigExtension::class, [new Reference(OutboundMailReadiness::class)]))

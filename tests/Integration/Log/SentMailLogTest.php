@@ -11,7 +11,6 @@ use Nowo\MailKitBundle\Log\SentMailRepository;
 use Nowo\MailKitBundle\Log\SentMailStatus;
 use Nowo\MailKitBundle\Mailer\MailHeaders;
 use Nowo\MailKitBundle\Tests\Integration\Kernel\KernelTestCase;
-use RuntimeException;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Component\Console\Tester\CommandTester;
 use Symfony\Component\Mime\Email;
@@ -33,7 +32,7 @@ final class SentMailLogTest extends KernelTestCase
         $id = $recorder->queued($email);
         self::assertNotNull($id);
         $recorder->sent($id, $email, 'smtp', 'provider-1', 1234);
-        $recorder->failed($id, $email, 'smtp', new RuntimeException('second attempt failed'));
+        $recorder->failed($id, $email, 'smtp', 'second attempt failed');
 
         $row = $repository->find($id);
         self::assertNotNull($row);
@@ -52,7 +51,7 @@ final class SentMailLogTest extends KernelTestCase
 
         // An unknown id (purged queued row) still records the outcome; raw messages have no envelope data.
         $recorder->sent('018f0000-0000-7000-8000-000000000000', new RawMessage('raw'), 'default', null, null);
-        $recorder->failed(null, new RawMessage('raw'), 'default', new RuntimeException('x'));
+        $recorder->failed(null, new RawMessage('raw'), 'default', 'x');
 
         $now = new DateTimeImmutable();
         self::assertSame(3, $repository->countFiltered(new SentMailFilters()));
@@ -72,7 +71,7 @@ final class SentMailLogTest extends KernelTestCase
             $recorder->sent(null, (new Email())->from('app@example.com')->to($to)->subject('S')->text('t'), 'smtp', null, null);
         }
         $db = $this->connection($kernel);
-        $db->executeStatement("UPDATE mail_kit_sent_mail SET queued_at = '2020-01-01 00:00:00' WHERE id IN (SELECT id FROM mail_kit_sent_mail WHERE recipients LIKE '%b@example.com%')");
+        $db->executeStatement("UPDATE mail_kit_sent_mail SET queued_at = '2020-01-01 00:00:00' WHERE recipient_index LIKE '%b@example.com%'");
 
         self::assertSame(0, $recorder->forgetRecipient('  '));
         self::assertSame(2, $recorder->forgetRecipient('A@example.com'));
@@ -109,7 +108,7 @@ final class SentMailLogTest extends KernelTestCase
         $forget = new CommandTester($application->find('nowo:mail-kit:log:forget'));
         self::assertSame(2, $forget->execute(['email' => 'not-an-address']));
         self::assertSame(0, $forget->execute(['email' => 'gone@example.com']));
-        self::assertStringContainsString('1 row(s) deleted', $forget->getDisplay());
+        self::assertStringContainsString('1 row(s) deleted, 0 row(s) redacted', $forget->getDisplay());
 
         $send = new CommandTester($application->find('nowo:mail-kit:send-test'));
         self::assertSame(1, $send->execute([]));

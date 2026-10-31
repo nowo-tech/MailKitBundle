@@ -12,16 +12,16 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
+use Symfony\Component\Mime\Address;
+use Throwable;
 
-use function filter_var;
 use function is_string;
 use function sprintf;
 
-use const FILTER_VALIDATE_EMAIL;
-
 /**
- * `nowo:mail-kit:log:forget <email>`: deletes every sent-mail log row (and stored body) addressed to an e-mail —
- * the right to erasure (GDPR art. 17). The address is not logged.
+ * `nowo:mail-kit:log:forget <email>`: deletes every sent-mail log row (and stored body) sent to or by an
+ * address and masks it in the remaining subjects / bodies — the right to erasure (GDPR art. 17). Internationalised
+ * addresses are accepted. The address is not logged.
  */
 #[AsCommand(name: self::NAME, description: 'Delete every sent-mail log row addressed to an e-mail address (right to erasure).')]
 final class ForgetRecipientCommand extends Command
@@ -54,15 +54,29 @@ final class ForgetRecipientCommand extends Command
     {
         $io    = new SymfonyStyle($input, $output);
         $email = $input->getArgument('email');
-        if (!is_string($email) || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+        if (!is_string($email) || !$this->isAddress($email)) {
             $io->error('The argument must be an e-mail address.');
 
             return Command::INVALID;
         }
-        $deleted = $this->recorder->forgetRecipient($email);
-        $this->logger?->info('Sent-mail log rows of one recipient deleted.', ['bundle' => 'NowoMailKitBundle', 'deleted' => $deleted]);
-        $io->success(sprintf('Sent-mail log: %d row(s) deleted.', $deleted));
+        $result = $this->recorder->forgetAddress($email);
+        $this->logger?->info('Sent-mail log rows of one address erased.', ['bundle' => 'NowoMailKitBundle'] + $result);
+        $io->success(sprintf('Sent-mail log: %d row(s) deleted, %d row(s) redacted.', $result['deleted'], $result['redacted']));
 
         return Command::SUCCESS;
+    }
+
+    /**
+     * Any address the mailer accepts (internationalised addresses included).
+     */
+    private function isAddress(string $email): bool
+    {
+        try {
+            new Address(trim($email));
+        } catch (Throwable) {
+            return false;
+        }
+
+        return true;
     }
 }

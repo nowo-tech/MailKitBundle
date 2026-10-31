@@ -195,7 +195,7 @@ final class AdminUiTest extends KernelTestCase
 
     public function testTheResendActions(): void
     {
-        $kernel = $this->bootKernel(['resend' => ['enabled' => true]], extra: static function (ContainerConfigurator $container): void {
+        $kernel = $this->bootKernel(['resend' => ['enabled' => true], 'test_email' => ['rate_limit' => 10]], extra: static function (ContainerConfigurator $container): void {
             $container->services()->set('http_client', MockHttpClient::class)->factory([ResendApiMock::class, 'create'])->public();
         });
         $client = $this->client($kernel);
@@ -217,6 +217,19 @@ final class AdminUiTest extends KernelTestCase
         $crawler = $client->request('GET', '/admin/settings/sections/resend');
         $client->submit($crawler->filter('[data-testid="nowo_mail_kit_resend_test"]')->closest('form')?->form() ?? self::fail('No test form.'));
         self::assertStringContainsString('The test e-mail to qa@example.com failed', (string) $client->getResponse()->getContent());
+    }
+
+    public function testTheResendCheckIsRateLimited(): void
+    {
+        $kernel = $this->bootKernel(['resend' => ['enabled' => true], 'test_email' => ['rate_limit' => 1]]);
+        $client = $this->client($kernel);
+        $client->followRedirects();
+        for ($i = 0; $i < 2; ++$i) {
+            $crawler = $client->request('GET', '/admin/settings/sections/resend');
+            $client->submit($crawler->filter('[data-testid="nowo_mail_kit_resend_check"]')->closest('form')?->form() ?? self::fail('No check form.'));
+        }
+
+        self::assertStringContainsString('Too many checks', (string) $client->getResponse()->getContent());
     }
 
     public function testTheRouteGroupsFollowTheConfiguration(): void

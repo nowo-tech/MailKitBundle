@@ -8,17 +8,11 @@ use Nowo\MailKitBundle\Dsn\DsnHostGuard;
 use Nowo\MailKitBundle\Dsn\DsnSource;
 use Nowo\MailKitBundle\Dsn\MailerDsnValidator;
 use Nowo\MailKitBundle\Integration\AuthKit\MailKitOutboundMailReadyChecker;
-use Nowo\MailKitBundle\Mailer\RuntimeTransport;
 use Nowo\MailKitBundle\Readiness\OutboundMailReadiness;
-use Nowo\MailKitBundle\Sender\SenderPolicy;
-use Nowo\MailKitBundle\Settings\MailSettings;
-use Nowo\MailKitBundle\Tests\Support\FakeSettings;
-use Nowo\MailKitBundle\Tests\Support\MemoryMailStore;
-use Nowo\MailKitBundle\Tests\Support\MemoryTransport;
 use Nowo\MailKitBundle\Tests\Support\StaticDsnProvider;
 use Nowo\MailKitBundle\Twig\MailKitTwigExtension;
+use Nowo\OutboundUrlGuardBundle\Dns\HostnameDnsLookup;
 use PHPUnit\Framework\TestCase;
-use Symfony\Component\Mailer\Transport;
 
 final class ReadinessTest extends TestCase
 {
@@ -46,17 +40,21 @@ final class ReadinessTest extends TestCase
         self::assertFalse($twig->status()->ready);
     }
 
+    /**
+     * CA L1: readiness runs on anonymous pages (AuthKit login): it never resolves DNS, even with resolve_dns on.
+     */
+    public function testReadinessNeverResolvesDns(): void
+    {
+        $dns = $this->createMock(HostnameDnsLookup::class);
+        $dns->expects(self::never())->method('dnsGetRecord');
+        $dns->expects(self::never())->method('hostByNameL');
+        $readiness = new OutboundMailReadiness(new StaticDsnProvider('smtp://smtp.example.com:587'), new MailerDsnValidator(['smtp'], new DsnHostGuard(dns: $dns)));
+
+        self::assertTrue($readiness->isOutboundMailReady());
+    }
+
     private function readiness(StaticDsnProvider $provider, bool $fallback = false): OutboundMailReadiness
     {
-        $store     = new MemoryMailStore();
-        $transport = new RuntimeTransport(
-            new MemoryTransport('fallback', $store),
-            $provider,
-            new MailerDsnValidator(['smtp'], new DsnHostGuard(resolveDns: false)),
-            new Transport([]),
-            new SenderPolicy(new MailSettings(new FakeSettings())),
-        );
-
-        return new OutboundMailReadiness($provider, $transport, $fallback);
+        return new OutboundMailReadiness($provider, new MailerDsnValidator(['smtp'], new DsnHostGuard(resolveDns: false)), $fallback);
     }
 }

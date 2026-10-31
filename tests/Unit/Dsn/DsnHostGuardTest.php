@@ -45,6 +45,9 @@ final class DsnHostGuardTest extends TestCase
         self::assertNull($private->check('relay.internal'));
         self::assertSame(DsnHostGuard::HOST_NOT_ALLOWED, $private->check('169.254.169.254'));
         self::assertNull((new DsnHostGuard(resolveDns: false))->check('smtp.example.com'));
+        // CA I2: single-label names are internal, refused unless allow-listed, even without DNS.
+        self::assertSame(DsnHostGuard::HOST_NOT_ALLOWED, (new DsnHostGuard(resolveDns: false))->check('redis'));
+        self::assertNull((new DsnHostGuard(allowPrivate: true))->check('redis'));
     }
 
     public function testResolvedAddressesAreChecked(): void
@@ -64,5 +67,7 @@ final class DsnHostGuardTest extends TestCase
         self::assertSame(DsnHostGuard::HOST_NOT_ALLOWED, $guard->check('private.example.com'));
         self::assertSame(DsnHostGuard::HOST_NOT_ALLOWED, $guard->check('meta.example.com'));
         self::assertSame(DsnHostGuard::HOST_UNRESOLVABLE, $guard->check('nowhere.example.com'));
+        // CA L1: per-call override without DNS.
+        self::assertNull($guard->check('nowhere.example.com', false));
     }
 }

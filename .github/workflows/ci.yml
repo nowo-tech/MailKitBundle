@@ -72,8 +72,8 @@ jobs:
       - name: Install dependencies with Symfony ${{ matrix.symfony }}
         run: |
           req=""; dev=""
-          for p in $(jq -r '.require | keys[] | select(startswith("symfony/")) | select(endswith("-contracts") | not)' composer.json); do req="$req $p:^${{ matrix.symfony }}"; done
-          for p in $(jq -r '."require-dev" | keys[] | select(startswith("symfony/")) | select(endswith("-contracts") | not)' composer.json); do dev="$dev $p:^${{ matrix.symfony }}"; done
+          for p in $(jq -r '.require | keys[] | select(startswith("symfony/")) | select(endswith("-contracts") | not) | select(startswith("symfony/polyfill-") | not)' composer.json); do req="$req $p:^${{ matrix.symfony }}"; done
+          for p in $(jq -r '."require-dev" | keys[] | select(startswith("symfony/")) | select(endswith("-contracts") | not) | select(startswith("symfony/polyfill-") | not)' composer.json); do dev="$dev $p:^${{ matrix.symfony }}"; done
           composer require $req --no-interaction --no-update
           composer require --dev $dev --no-interaction --no-update
           composer update "symfony/*" "doctrine/*" "twig/*" "nowo-tech/*" --with-all-dependencies --no-interaction --prefer-dist --no-progress

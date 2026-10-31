@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\MailKitBundle\Security;
 
-use Nowo\InstanceSettingsBundle\Security\InstanceSettingsAccessCheckerInterface;
+use Nowo\InstanceSettingsBundle\Security\AccessGuard as InstanceSettingsAccessGuard;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
@@ -21,11 +21,11 @@ use function is_object;
 final readonly class AccessGuard
 {
     /**
-     * @param InstanceSettingsAccessCheckerInterface|null $settingsChecker Instance Settings checker (null when its admin UI is off: the actions are then denied)
+     * @param InstanceSettingsAccessGuard|null $settingsGuard Instance Settings access guard (its checker, `allow_unauthenticated` and firewall rules); null denies the actions
      */
     public function __construct(
         private MailKitAccessCheckerInterface $accessChecker,
-        private ?InstanceSettingsAccessCheckerInterface $settingsChecker = null,
+        private ?InstanceSettingsAccessGuard $settingsGuard = null,
         private ?TokenStorageInterface $tokenStorage = null,
         private ?RequestStack $requestStack = null,
     ) {
@@ -45,8 +45,8 @@ final readonly class AccessGuard
     public function isSectionGranted(string $section): bool
     {
         return $this->isGranted()
-            && $this->settingsChecker instanceof InstanceSettingsAccessCheckerInterface
-            && $this->settingsChecker->canAccess($this->user(), $section);
+            && $this->settingsGuard instanceof InstanceSettingsAccessGuard
+            && $this->settingsGuard->isGranted($section);
     }
 
     /**

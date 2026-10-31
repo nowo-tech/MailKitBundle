@@ -158,7 +158,7 @@ Bundle pages add no CSS / JS of their own.
 | `access_checker` | `null` | Service id implementing `MailKitAccessCheckerInterface` (`canAccess(?object $user): bool`). |
 | `allow_unauthenticated` | `false` | **DEV / DEMO only.** Opens the UI without login; refused unless `kernel.debug` is true. |
 
-The settings actions additionally require `InstanceSettingsAccessCheckerInterface::canAccess($user, 'mailer' | 'resend')` (Instance Settings `security.access_roles` / `area_roles`); with the Instance Settings UI disabled they are denied. Protect the prefix with a firewall **and** `access_control`:
+The settings actions additionally require the Instance Settings access of their section (`Nowo\InstanceSettingsBundle\Security\AccessGuard::isGranted('mailer' | 'resend')`: its `security.access_roles` / `area_roles` / checker and `allow_unauthenticated`). Protect the prefix with a firewall **and** `access_control`:
 
 ```yaml
 # config/packages/security.yaml

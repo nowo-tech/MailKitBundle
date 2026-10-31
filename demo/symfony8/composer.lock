@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "ee376a28101e0b22848a8f230767fdb2",
+    "content-hash": "7cb05dee65d331cb015843f5539136e4",
     "packages": [
         {
             "name": "doctrine/collections",
@@ -998,16 +998,16 @@
         },
         {
             "name": "nowo-tech/doctrine-encrypt-bundle",
-            "version": "v2.9.0",
+            "version": "v2.10.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/DoctrineEncryptBundle.git",
-                "reference": "c3b4640acd899c6ec40ee2a745d3656c3974c030"
+                "reference": "aadc75dae1339ca1e698e3a0c5a83baa95d43e26"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/DoctrineEncryptBundle/zipball/c3b4640acd899c6ec40ee2a745d3656c3974c030",
-                "reference": "c3b4640acd899c6ec40ee2a745d3656c3974c030",
+                "url": "https://api.github.com/repos/nowo-tech/DoctrineEncryptBundle/zipball/aadc75dae1339ca1e698e3a0c5a83baa95d43e26",
+                "reference": "aadc75dae1339ca1e698e3a0c5a83baa95d43e26",
                 "shasum": ""
             },
             "require": {
@@ -1095,7 +1095,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-10-28T13:32:44+00:00"
+            "time": "2026-10-31T20:43:53+00:00"
         },
         {
             "name": "nowo-tech/form-kit-bundle",
@@ -1216,23 +1216,23 @@
         },
         {
             "name": "nowo-tech/instance-settings-bundle",
-            "version": "dev-main",
+            "version": "v1.0.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/InstanceSettingsBundle.git",
-                "reference": "1fec7a3c2f2044c3803022576aa7ccced7d00262"
+                "reference": "1d72375e8946e0d3d154b620fd543b908c427fae"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/InstanceSettingsBundle/zipball/1fec7a3c2f2044c3803022576aa7ccced7d00262",
-                "reference": "1fec7a3c2f2044c3803022576aa7ccced7d00262",
+                "url": "https://api.github.com/repos/nowo-tech/InstanceSettingsBundle/zipball/1d72375e8946e0d3d154b620fd543b908c427fae",
+                "reference": "1d72375e8946e0d3d154b620fd543b908c427fae",
                 "shasum": ""
             },
             "require": {
                 "doctrine/doctrine-bundle": "^2.13 || ^3.0",
                 "doctrine/orm": "^3.3",
                 "doctrine/persistence": "^3.1 || ^4.0",
-                "nowo-tech/doctrine-encrypt-bundle": "^2.9",
+                "nowo-tech/doctrine-encrypt-bundle": "^2.10",
                 "nowo-tech/form-kit-bundle": "^2.17",
                 "nowo-tech/ui-kit-bundle": "^2.17.3",
                 "php": ">=8.2 <8.6",
@@ -1284,7 +1284,6 @@
                 "symfony/flex": "For automatic recipe installation",
                 "symfony/security-bundle": "Required for the admin UI unless security.allow_unauthenticated is true (dev / demo only)"
             },
-            "default-branch": true,
             "type": "symfony-bundle",
             "extra": {
                 "symfony": {
@@ -1340,7 +1339,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-10-31T20:08:03+00:00"
+            "time": "2026-10-31T20:55:43+00:00"
         },
         {
             "name": "nowo-tech/mail-kit-bundle",
@@ -1348,7 +1347,7 @@
             "dist": {
                 "type": "path",
                 "url": "/var/mail-kit-bundle",
-                "reference": "404fedb3535a07f227601b8c463ec4d60f3b9727"
+                "reference": "8f0d33315aec616983c532fe664c1f2c3087c48a"
             },
             "require": {
                 "doctrine/dbal": "^3.8 || ^4.0",
@@ -1356,7 +1355,7 @@
                 "doctrine/orm": "^3.3",
                 "doctrine/persistence": "^3.1 || ^4.0",
                 "nowo-tech/form-kit-bundle": "^2.17",
-                "nowo-tech/instance-settings-bundle": "dev-main as 1.0.0",
+                "nowo-tech/instance-settings-bundle": "^1.0",
                 "nowo-tech/outbound-url-guard-bundle": "^1.3",
                 "nowo-tech/ui-kit-bundle": "^2.17.3",
                 "php": ">=8.2 <8.6",
@@ -9427,17 +9426,9 @@
             "time": "2025-11-17T20:03:58+00:00"
         }
     ],
-    "aliases": [
-        {
-            "package": "nowo-tech/instance-settings-bundle",
-            "version": "dev-main",
-            "alias": "1.0.0",
-            "alias_normalized": "1.0.0.0"
-        }
-    ],
+    "aliases": [],
     "minimum-stability": "stable",
     "stability-flags": {
-        "nowo-tech/instance-settings-bundle": 20,
         "nowo-tech/mail-kit-bundle": 20
     },
     "prefer-stable": false,

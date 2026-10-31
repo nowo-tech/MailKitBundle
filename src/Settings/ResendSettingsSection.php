@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Nowo\MailKitBundle\Settings;
 
 use Nowo\InstanceSettingsBundle\Section\AbstractSettingsSection;
+use Nowo\InstanceSettingsBundle\Section\SectionActionContext;
 use Nowo\InstanceSettingsBundle\Section\SettingField;
 use Nowo\InstanceSettingsBundle\Section\SettingsSectionActionsInterface;
-use Nowo\InstanceSettingsBundle\Section\SettingType;
 use Nowo\MailKitBundle\NowoMailKitBundle;
 use Nowo\MailKitBundle\Ui\SettingsActions;
 use Nowo\MailKitBundle\Validator\DeliverableSender;
@@ -66,13 +66,13 @@ final class ResendSettingsSection extends AbstractSettingsSection implements Set
     {
         yield SettingField::bool('enabled', false, 'settings.resend.enabled', 'settings.resend.enabled_help');
         yield SettingField::secret('api_key', 'settings.resend.api_key', 'settings.resend.api_key_help', constraints: [new Length(min: 8, max: 200)]);
-        yield new SettingField('from', SettingType::Email, null, 'settings.resend.from', 'settings.resend.from_help', constraints: $this->requirePublicDomain ? [new DeliverableSender()] : []);
+        yield SettingField::email('from', null, 'settings.resend.from', 'settings.resend.from_help', constraints: $this->requirePublicDomain ? [new DeliverableSender()] : []);
     }
 
     /**
      * Key check and Resend test (when the admin UI is on).
      */
-    public function getActions(): iterable
+    public function getActions(SectionActionContext $context): iterable
     {
         return $this->actions?->resend() ?? [];
     }

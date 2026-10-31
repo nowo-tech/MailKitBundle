@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\MailKitBundle\Controller;
 
 use Nowo\FormKitBundle\Form\CsrfOnlyFormFactory;
+use Nowo\InstanceSettingsBundle\Routing\InstanceSettingsRoutes;
 use Nowo\MailKitBundle\Entity\SentMail;
 use Nowo\MailKitBundle\EventListener\MailKitAccessListener;
 use Nowo\MailKitBundle\Form\SentMailFilterType;
@@ -227,7 +228,7 @@ final class MailKitController extends AbstractController
 
     private function backTo(string $section): Response
     {
-        return $this->noStore($this->redirectToRoute('nowo_instance_settings_section', ['section' => $section]));
+        return $this->noStore($this->redirectToRoute(InstanceSettingsRoutes::SECTION, ['section' => $section]));
     }
 
     private function repository(): SentMailRepository

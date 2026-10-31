@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Nowo\MailKitBundle\Settings;
 
 use Nowo\InstanceSettingsBundle\Section\AbstractSettingsSection;
+use Nowo\InstanceSettingsBundle\Section\SectionActionContext;
 use Nowo\InstanceSettingsBundle\Section\SettingField;
 use Nowo\InstanceSettingsBundle\Section\SettingsSectionActionsInterface;
-use Nowo\InstanceSettingsBundle\Section\SettingType;
 use Nowo\MailKitBundle\NowoMailKitBundle;
 use Nowo\MailKitBundle\Ui\SettingsActions;
 use Nowo\MailKitBundle\Validator\DeliverableSender;
@@ -72,16 +72,16 @@ final class MailerSettingsSection extends AbstractSettingsSection implements Set
         $sender = $this->requirePublicDomain ? [new DeliverableSender()] : [];
 
         yield SettingField::secret('dsn', 'settings.mailer.dsn', 'settings.mailer.dsn_help', constraints: [new MailerDsn()]);
-        yield new SettingField('from', SettingType::Email, $this->defaultFrom, 'settings.mailer.from', 'settings.mailer.from_help', constraints: $sender);
+        yield SettingField::email('from', $this->defaultFrom, 'settings.mailer.from', 'settings.mailer.from_help', constraints: $sender);
         yield SettingField::string('from_name', $this->defaultFromName, 'settings.mailer.from_name', constraints: [new Length(max: 120)]);
-        yield new SettingField('reply_to', SettingType::Email, null, 'settings.mailer.reply_to', 'settings.mailer.reply_to_help');
-        yield new SettingField('test_recipient', SettingType::Email, null, 'settings.mailer.test_recipient', 'settings.mailer.test_recipient_help');
+        yield SettingField::email('reply_to', null, 'settings.mailer.reply_to', 'settings.mailer.reply_to_help');
+        yield SettingField::email('test_recipient', null, 'settings.mailer.test_recipient', 'settings.mailer.test_recipient_help');
     }
 
     /**
      * "Send a test e-mail" (when the admin UI is on).
      */
-    public function getActions(): iterable
+    public function getActions(SectionActionContext $context): iterable
     {
         return $this->actions?->mailer() ?? [];
     }

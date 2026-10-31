@@ -61,6 +61,8 @@ MailKit contributes the section **`mailer`** to [Instance Settings](https://gith
 | `resend.api_key` | secret (encrypted) | — | Resend API key (`re_…`). |
 | `resend.from` | e-mail | — | Sender while Resend is active (else `mailer.from`). |
 
+The section actions receive Instance Settings' `SectionActionContext` (section, request, user).
+
 Read them like any setting (`InstanceSettingsInterface::getString('mailer.from')`), or through the typed `Nowo\MailKitBundle\Settings\MailSettings` service (`from()`, `replyTo()`, `dsn()`, `resendActive()`…). The section names and keys are a public contract: they are never renamed.
 
 ### DSN validation
@@ -159,7 +161,7 @@ Both headers (and the internal log id) are removed before the message leaves the
 
 ## Test e-mail
 
-- **Admin UI:** "Send a test e-mail" next to Save on the mailer section. POST with a FormKit CSRF-only form; the user must pass the MailKit access checker **and** the Instance Settings access of the section; `test_email.rate_limit` per `test_email.rate_interval` per user (client address for anonymous demo access). The flash shows the transport's own error (credentials scrubbed).
+- **Admin UI:** "Send a test e-mail" next to Save on the mailer section. POST with a FormKit CSRF-only form; the user must pass the MailKit access checker **and** the Instance Settings access of the section (Instance Settings `AccessGuard`); `test_email.rate_limit` per `test_email.rate_interval` per user (client address for anonymous demo access). The flash shows the transport's own error (credentials scrubbed).
 - **CLI:** `php bin/console nowo:mail-kit:send-test [to] [--resend]` (exit code 1 on failure).
 - **PHP:** `Nowo\MailKitBundle\TestMail\TestMailSender::sendMailer(?string $to, ?object $user)` → `TestMailResult` (`outcome`, `recipient`, `error`).
 

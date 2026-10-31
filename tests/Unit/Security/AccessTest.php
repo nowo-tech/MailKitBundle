@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\MailKitBundle\Tests\Unit\Security;
 
+use Nowo\InstanceSettingsBundle\Security\AccessGuard as InstanceSettingsAccessGuard;
 use Nowo\InstanceSettingsBundle\Security\InstanceSettingsAccessCheckerInterface;
 use Nowo\MailKitBundle\EventListener\MailKitAccessListener;
 use Nowo\MailKitBundle\Security\AccessGuard;
@@ -49,7 +50,7 @@ final class AccessTest extends TestCase
         $settings = $this->createMock(InstanceSettingsAccessCheckerInterface::class);
         $settings->method('canAccess')->willReturnCallback(static fn (?object $u, ?string $area): bool => $u === $user && $area === 'mailer');
 
-        $guard = new AccessGuard(new AllowAllMailKitAccessChecker(), $settings, $tokens, $stack);
+        $guard = new AccessGuard(new AllowAllMailKitAccessChecker(), new InstanceSettingsAccessGuard($settings, false, $tokens, $stack), $tokens, $stack);
         self::assertSame($user, $guard->user());
         self::assertTrue($guard->isGranted());
         self::assertTrue($guard->isSectionGranted('mailer'));
@@ -62,7 +63,7 @@ final class AccessTest extends TestCase
             self::assertSame('no', $e->getMessage());
         }
 
-        $noFirewall = new AccessGuard(new AllowAllMailKitAccessChecker(), $settings, $tokens, new RequestStack());
+        $noFirewall = new AccessGuard(new AllowAllMailKitAccessChecker(), null, $tokens, new RequestStack());
         self::assertNull($noFirewall->user());
         $this->expectException(AccessDeniedHttpException::class);
         $noFirewall->deny('no');

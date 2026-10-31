@@ -1283,6 +1283,8 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  * @psalm-type NowoDoctrineEncryptConfig = array{
  *     connections?: Param|string|list<scalar|Param|null>,
  *     default_profile?: scalar|Param|null, // Profile name to use when #[Encrypted] has no alias or uses "default". // Default: "default"
+ *     on_decrypt_failure?: "keep"|"null"|"throw"|Param, // What an #[Encrypted] property gets when its stored value cannot be decrypted (wrong or rotated key, corrupted ciphertext): "keep" = the raw ciphertext (2.x default, callers may take it for the secret), "null" = null (recommended; the stored ciphertext is written back unchanged on flush), "throw" = DecryptionFailedException (recommended). A warning is logged for "keep" and "null". // Default: "keep"
+ *     generate_missing_key?: bool|Param|null, // Whether the Halite / Defuse encryptors may create a missing key file on first use. null (default) = only when kernel.debug is true; outside debug a missing key file is an error (a wrong path or a lost volume would otherwise encrypt new data with a throwaway key). Create keys explicitly with doctrine:encrypt:generate-secret-key. // Default: null
  *     batch_size?: int|Param, // Default batch size for doctrine:decrypt:database and doctrine:encrypt:database (raw SQL). Overridable per run via the batchSize argument. // Default: 5
  *     secret_permissions?: array{ // Filesystem hardening for file-based keys: creates missing key directories with directory_mode and chmods key files to file_mode (console: every command; HTTP: at most once per http_check_interval seconds per worker).
  *         enabled?: bool|Param, // Default: true

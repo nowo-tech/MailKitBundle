@@ -9,7 +9,7 @@ use Nowo\AuthKitBundle\Mailer\OutboundMailReadyCheckerInterface;
 use Nowo\FormKitBundle\Form\CsrfOnlyFormFactory;
 use Nowo\InstanceSettingsBundle\Event\SettingsChangedEvent;
 use Nowo\InstanceSettingsBundle\NowoInstanceSettingsBundle;
-use Nowo\InstanceSettingsBundle\Security\InstanceSettingsAccessCheckerInterface;
+use Nowo\InstanceSettingsBundle\Security\AccessGuard as InstanceSettingsAccessGuard;
 use Nowo\InstanceSettingsBundle\Settings\InstanceSettingsInterface;
 use Nowo\MailKitBundle\Command\ForgetRecipientCommand;
 use Nowo\MailKitBundle\Command\PurgeSentMailLogCommand;
@@ -431,7 +431,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
 
         $container->setDefinition(AccessGuard::class, new Definition(AccessGuard::class, [
             new Reference(MailKitAccessCheckerInterface::class),
-            new Reference(InstanceSettingsAccessCheckerInterface::class, ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            new Reference(InstanceSettingsAccessGuard::class, ContainerInterface::NULL_ON_INVALID_REFERENCE),
             new Reference('security.token_storage', ContainerInterface::NULL_ON_INVALID_REFERENCE),
             new Reference('request_stack', ContainerInterface::NULL_ON_INVALID_REFERENCE),
         ]));

@@ -1,0 +1,51 @@
+{
+    "name": "nowo-tech/mail-kit-bundle",
+    "description": "Runtime-configurable mailer for Symfony: DSN and sender validation, test e-mail, sent-mail log and branded editable e-mail templates with AuthKit notifiers.",
+    "type": "symfony-bundle",
+    "keywords": [
+        "symfony",
+        "symfony-bundle",
+        "bundle",
+        "mailer",
+        "email",
+        "smtp",
+        "resend",
+        "templates",
+        "notifications",
+        "nowo",
+        "frankenphp"
+    ],
+    "homepage": "https://github.com/nowo-tech/MailKitBundle",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Héctor Franco Aceituno",
+            "email": "hectorfranco@nowo.tech",
+            "homepage": "https://github.com/HecFranco",
+            "role": "Maintainer"
+        },
+        {
+            "name": "Nowo.tech",
+            "homepage": "https://nowo.tech"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/nowo-tech/MailKitBundle/issues",
+        "source": "https://github.com/nowo-tech/MailKitBundle",
+        "docs": "https://github.com/nowo-tech/MailKitBundle/tree/main/docs",
+        "changelog": "https://github.com/nowo-tech/MailKitBundle/blob/main/docs/CHANGELOG.md"
+    },
+    "require": {
+        "php": ">=8.2 <8.6",
+        "symfony/config": "^7.4 || ^8.0",
+        "symfony/dependency-injection": "^7.4 || ^8.0",
+        "symfony/http-kernel": "^7.4 || ^8.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Nowo\\MailKitBundle\\": "src/"
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

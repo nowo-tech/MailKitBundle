@@ -5,6 +5,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-31
+
+First release: runtime-configured mailer on InstanceSettings (encrypted DSN), DSN/sender validation with SSRF-guarded provider endpoints, test e-mail, Resend check, privacy-first sent-mail log with retention and right-to-erasure, AuthKit readiness adapter. See [UPGRADING](UPGRADING.md#to-100).
+
 First release (1.0.0): the runtime mailer of Symfony Beacon (kit #2, phase 1) as a reusable bundle on top of
 `nowo-tech/instance-settings-bundle`.
 

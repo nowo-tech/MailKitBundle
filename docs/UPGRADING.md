@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.0.0](#to-100)
 - [To 1.0.0 (initial release)](#to-100-initial-release)
   - [Requirements](#requirements)
   - [Enable and configure](#enable-and-configure)
@@ -11,6 +12,14 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+## To 1.0.0
+
+From **0.0.0**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
 
 Nothing yet beyond the initial 1.0.0 content below.
 

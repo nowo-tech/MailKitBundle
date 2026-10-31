@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Nowo\MailKitBundle\Controller;
 
+use Nowo\ControllerKitBundle\Http\CsvStreamedResponse;
 use Nowo\FormKitBundle\Form\CsrfOnlyFormFactory;
 use Nowo\InstanceSettingsBundle\Routing\InstanceSettingsRoutes;
 use Nowo\MailKitBundle\Entity\SentMail;
 use Nowo\MailKitBundle\EventListener\MailKitAccessListener;
 use Nowo\MailKitBundle\Form\SentMailFilterType;
+use Nowo\MailKitBundle\Log\SentMailCsvExporter;
 use Nowo\MailKitBundle\Log\SentMailFilters;
 use Nowo\MailKitBundle\Log\SentMailRepository;
 use Nowo\MailKitBundle\NowoMailKitBundle;
@@ -49,7 +51,11 @@ use function sprintf;
  * request under `web_ui.path_prefix`; each action checks again). Routes come only from the `nowo_mail_kit` route
  * loader (REQ-SF-004 rule 7).
  *
- * - `GET  /log`, `/log/{id}`: sent-mail log list and detail (UiKit list / show scaffolds, `no-store`).
+ * - `GET  /log`, `/log/{id}`: sent-mail log list (filters, server-side sortable columns) and detail (UiKit list / show
+ *   scaffolds, `no-store`).
+ * - `GET  /log/export`: CSV of the filtered, sorted log (streamed, formula-injection safe, `no-store`, capped). A GET
+ *   link like the list filters: a read with no side effect (no CSRF form needed, REQ-TWIG-005), checked like the list
+ *   plus the optional `web_ui.export.access_roles`.
  * - `GET  /log/{id}/body`: stored HTML body in a sandboxed, script-less response (only with `log.store_bodies`).
  * - `POST /actions/test`, `/actions/resend/check`, `/actions/resend/test`: the settings actions — CSRF (FormKit
  *   CSRF-only form, fail closed), MailKit access **and** Instance Settings section access, per-user rate limit for
@@ -77,6 +83,7 @@ final class MailKitController extends AbstractController
         private readonly int $pageSize = 25,
         private readonly ?TranslatorInterface $translator = null,
         private readonly ClockInterface $clock = new NativeClock(),
+        private readonly ?SentMailCsvExporter $exporter = null,
     ) {
     }
 
@@ -88,18 +95,44 @@ final class MailKitController extends AbstractController
     {
         $repository = $this->repository();
         $filters    = SentMailFilters::fromRequest($request, $this->clock->now());
+        $sort       = AdminPages::sort($request);
         $allowed    = array_values(array_unique([$this->pageSize, 10, 25, 50, 100]));
         sort($allowed);
         $pagination = Pagination::fromRequest($request, $repository->countFiltered($filters), $this->pageSize, $allowed, AdminPages::ROUTE_INDEX);
-        $form       = $this->createForm(SentMailFilterType::class, $filters->formData(), [
+        $form       = $this->createForm(SentMailFilterType::class, $filters->formData() + $sort->query(), [
             'action' => $this->generateUrl(AdminPages::ROUTE_INDEX),
         ]);
-        $rows = $repository->findFiltered($filters, $pagination->perPage, ($pagination->page - 1) * $pagination->perPage);
+        $rows    = $repository->findFiltered($filters, $pagination->perPage, ($pagination->page - 1) * $pagination->perPage, $sort->field, $sort->direction);
+        $actions = $this->exporter instanceof SentMailCsvExporter && $this->guard->isExportGranted()
+            ? $this->adminPages->exportActions($request->query->all(), $sort, $pagination->total, $this->exporter->maxRows(), $this->exporter->bodiesAllowed())
+            : [];
 
         return $this->noStore($this->render($this->pages->template('log_index'), [
-            'page'    => $this->adminPages->listPage($rows, $pagination, $form->createView(), $this->readiness->status(), $filters->isFiltered()),
+            'page'    => $this->adminPages->listPage($rows, $pagination, $form->createView(), $this->readiness->status(), $filters->isFiltered(), $sort, $actions),
             'filters' => $filters,
+            'sort'    => $sort,
         ]));
+    }
+
+    /**
+     * CSV export of the sent-mail log: current filters and sort, at most `web_ui.export.max_rows` rows, the stored
+     * bodies only when the export allows them and `?bodies=1` asks for them.
+     */
+    #[Route(path: '/log/export', name: AdminPages::ROUTE_EXPORT, methods: ['GET'])]
+    public function export(Request $request): CsvStreamedResponse
+    {
+        $exporter = $this->exporter ?? throw new NotFoundHttpException('The sent-mail log export is disabled.');
+        if (!$this->guard->isExportGranted()) {
+            $this->guard->deny('Access denied to the sent-mail log export.');
+        }
+        $sort = AdminPages::sort($request);
+
+        return $exporter->export(
+            SentMailFilters::fromRequest($request, $this->clock->now()),
+            $sort->field,
+            $sort->direction,
+            $request->query->getBoolean(AdminPages::EXPORT_BODIES_PARAM),
+        );
     }
 
     /**

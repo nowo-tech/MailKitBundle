@@ -88,6 +88,24 @@ log:
         filter: Filtern
         back: Zurück zur Liste
         html_body: HTML-Inhalt öffnen
+        export: 'CSV exportieren'
+        export_limited: 'CSV exportieren (erste %max% Zeilen)'
+        export_bodies: 'CSV mit Inhalten exportieren'
+    export:
+        truncated: 'Export gekürzt: die ersten %max% von %total% Zeilen. Grenzen Sie die Filter ein, um den Rest zu exportieren.'
+        column:
+            date: 'Datum'
+            status: 'Status'
+            tag: 'Tag'
+            from: 'Von'
+            to: 'An'
+            cc: 'Cc'
+            bcc: 'Bcc'
+            subject: 'Betreff'
+            error: 'Fehler'
+            reference: 'Referenz'
+            text_body: 'Textinhalt'
+            html_body: 'HTML-Inhalt'
     show:
         title: Gesendete E-Mail
         envelope: Umschlag

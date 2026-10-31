@@ -27,6 +27,9 @@ final class InvalidConfigurationTest extends KernelTestCase
         yield 'bad template page' => [['web_ui' => ['templates' => ['nope' => 'x.html.twig']]], [], false, InvalidConfigurationException::class, 'Unknown nowo_mail_kit.web_ui.templates page(s) "nope"'];
         yield 'bad default from' => [['sender' => ['default_from' => 'not-an-address']], [], false, InvalidConfigurationException::class, 'default_from must be an e-mail address'];
         yield 'bad interval' => [['test_email' => ['rate_interval' => 'whenever']], [], false, InvalidConfigurationException::class, 'rate_interval must be a relative time'];
+        yield 'export bodies without stored bodies' => [['web_ui' => ['export' => ['include_bodies' => true]]], [], false, InvalidConfigurationException::class, 'include_bodies needs nowo_mail_kit.log.store_bodies'];
+        yield 'export row cap' => [['web_ui' => ['export' => ['max_rows' => 0]]], [], false, InvalidConfigurationException::class, 'max_rows'];
+        yield 'env placeholder export switch' => [['web_ui' => ['export' => ['enabled' => '%env(bool:MAIL_KIT_EXPORT)%']]], [], false, InvalidConfigurationException::class, 'web_ui.export.enabled must be a literal boolean'];
         yield 'env placeholder switch' => [['log' => ['store_bodies' => '%env(bool:MAIL_KIT_BODIES)%']], [], false, InvalidConfigurationException::class, 'must be a literal boolean'];
         yield 'unauthenticated outside debug' => [['security' => ['allow_unauthenticated' => true]], [], false, InvalidConfigurationException::class, 'only allowed when kernel.debug is true'];
         yield 'no instance settings' => [[], ['instance_settings'], false, LogicException::class, 'requires nowo-tech/instance-settings-bundle'];

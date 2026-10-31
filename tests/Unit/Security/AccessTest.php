@@ -69,6 +69,28 @@ final class AccessTest extends TestCase
         $noFirewall->deny('no');
     }
 
+    public function testTheExportNeedsTheUiAccessAndTheOptionalExportRoles(): void
+    {
+        $tokens = new TokenStorage();
+        $tokens->setToken(new UsernamePasswordToken(new InMemoryUser('admin', null, ['ROLE_ADMIN']), 'main', ['ROLE_ADMIN']));
+        $stack   = new RequestStack();
+        $request = new Request();
+        $request->attributes->set('_firewall_context', 'security.firewall.map.context.main');
+        $stack->push($request);
+        $authorization = $this->createMock(AuthorizationCheckerInterface::class);
+        $authorization->method('isGranted')->willReturnCallback(static fn (mixed $role): bool => $role === 'ROLE_EXPORT');
+        $denyAll = $this->createMock(MailKitAccessCheckerInterface::class);
+        $denyAll->method('canAccess')->willReturn(false);
+
+        self::assertTrue((new AccessGuard(new AllowAllMailKitAccessChecker(), null, $tokens, $stack))->isExportGranted());
+        self::assertFalse((new AccessGuard($denyAll, null, $tokens, $stack))->isExportGranted());
+        self::assertTrue((new AccessGuard(new AllowAllMailKitAccessChecker(), null, $tokens, $stack, ['ROLE_AUDIT', 'ROLE_EXPORT'], $authorization))->isExportGranted());
+        self::assertFalse((new AccessGuard(new AllowAllMailKitAccessChecker(), null, $tokens, $stack, ['ROLE_AUDIT'], $authorization))->isExportGranted());
+        // Fails closed: no authorization checker, or no firewall user.
+        self::assertFalse((new AccessGuard(new AllowAllMailKitAccessChecker(), null, $tokens, $stack, ['ROLE_EXPORT']))->isExportGranted());
+        self::assertFalse((new AccessGuard(new AllowAllMailKitAccessChecker(), null, $tokens, new RequestStack(), ['ROLE_EXPORT'], $authorization))->isExportGranted());
+    }
+
     public function testListener(): void
     {
         $deny = new AccessGuard(new class implements MailKitAccessCheckerInterface {

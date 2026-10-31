@@ -88,6 +88,24 @@ log:
         filter: Filtrar
         back: Volver a la lista
         html_body: Abrir el cuerpo HTML
+        export: 'Exportar CSV'
+        export_limited: 'Exportar CSV (primeras %max% filas)'
+        export_bodies: 'Exportar CSV con cuerpos'
+    export:
+        truncated: 'Exportación truncada: las primeras %max% de %total% filas. Acota los filtros para exportar el resto.'
+        column:
+            date: 'Fecha'
+            status: 'Estado'
+            tag: 'Etiqueta'
+            from: 'De'
+            to: 'Para'
+            cc: 'Cc'
+            bcc: 'Cco'
+            subject: 'Asunto'
+            error: 'Error'
+            reference: 'Referencia'
+            text_body: 'Cuerpo de texto'
+            html_body: 'Cuerpo HTML'
     show:
         title: Correo enviado
         envelope: Sobre

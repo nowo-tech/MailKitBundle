@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\MailKitBundle\DependencyInjection;
 
 use Nowo\MailKitBundle\Dsn\MailerDsnValidator;
+use Nowo\MailKitBundle\Log\SentMailCsvExporter;
 use Nowo\MailKitBundle\Ui\MailKitPages;
 use Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition;
 use Symfony\Component\Config\Definition\Builder\TreeBuilder;
@@ -244,6 +245,31 @@ final class Configuration implements ConfigurationInterface
                             ->min(5)
                             ->max(200)
                         ->end()
+                        ->arrayNode('export')
+                            ->info('CSV export of the sent-mail log (GET <path_prefix>/log/export, current filters and sort; streamed, formula-injection safe, no-store).')
+                            ->addDefaultsIfNotSet()
+                            ->children()
+                                ->booleanNode('enabled')
+                                    ->info('Expose the export route and the "Export CSV" action of the log list (same access as the list).')
+                                    ->defaultTrue()
+                                ->end()
+                                ->integerNode('max_rows')
+                                    ->info('Rows of one export at most; a longer result is truncated with a closing notice row (REQ-PERF-001).')
+                                    ->defaultValue(SentMailCsvExporter::DEFAULT_MAX_ROWS)
+                                    ->min(1)
+                                    ->max(1_000_000)
+                                ->end()
+                                ->arrayNode('access_roles')
+                                    ->info('Roles the export needs on top of the log access (any of them). Empty = whoever opens the log may export it.')
+                                    ->scalarPrototype()->cannotBeEmpty()->end()
+                                    ->defaultValue([])
+                                ->end()
+                                ->booleanNode('include_bodies')
+                                    ->info('Offer an export with the stored text / HTML bodies (personal data). Needs log.store_bodies; never on by default.')
+                                    ->defaultFalse()
+                                ->end()
+                            ->end()
+                        ->end()
                     ->end()
                 ->end()
                 ->arrayNode('security')
@@ -275,6 +301,10 @@ final class Configuration implements ConfigurationInterface
                         ->thenInvalid('nowo_mail_kit.security.access_roles must contain at least one non-empty role when no access_checker is set and allow_unauthenticated is false (an empty list would deny everybody).')
                     ->end()
                 ->end()
+            ->end()
+            ->validate()
+                ->ifTrue(static fn (array $v): bool => ($v['web_ui']['export']['include_bodies'] ?? false) === true && ($v['log']['store_bodies'] ?? false) !== true)
+                ->thenInvalid('nowo_mail_kit.web_ui.export.include_bodies needs nowo_mail_kit.log.store_bodies: true (no bodies are stored otherwise).')
             ->end();
 
         return $treeBuilder;

@@ -7,7 +7,9 @@ namespace Nowo\MailKitBundle\Ui;
 use DateTimeInterface;
 use Nowo\MailKitBundle\Entity\SentMail;
 use Nowo\MailKitBundle\Entity\SentMailBody;
+use Nowo\MailKitBundle\Log\SentMailRepository;
 use Nowo\MailKitBundle\Readiness\MailStatus;
+use Nowo\UiKitBundle\Listing\SortRequest;
 use Nowo\UiKitBundle\View\Action;
 use Nowo\UiKitBundle\View\Column;
 use Nowo\UiKitBundle\View\Crumb;
@@ -20,6 +22,7 @@ use Nowo\UiKitBundle\View\PageHeader;
 use Nowo\UiKitBundle\View\Pagination;
 use Nowo\UiKitBundle\View\ShowPage;
 use Symfony\Component\Form\FormView;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 
 use function implode;
@@ -40,6 +43,12 @@ final readonly class AdminPages
     /** Route of the sandboxed HTML body. */
     public const ROUTE_BODY = 'nowo_mail_kit_log_body';
 
+    /** Route of the CSV export. */
+    public const ROUTE_EXPORT = 'nowo_mail_kit_log_export';
+
+    /** Query parameter asking the export for the stored bodies. */
+    public const EXPORT_BODIES_PARAM = 'bodies';
+
     /**
      * @param MailKitPages $pages layout / template configuration
      */
@@ -50,11 +59,64 @@ final readonly class AdminPages
     }
 
     /**
-     * List page: header with the redacted current transport, filters, table, pagination, empty state.
+     * Columns of the list. Sortable ones carry the keys of {@see SentMailRepository::SORT_FIELDS} (the date sorts
+     * newest first on the first click); the recipients are a list and do not sort.
+     *
+     * @return list<Column>
+     */
+    public static function columns(): array
+    {
+        return [
+            new Column('queuedAt', MailKitPages::label('log.column.queued_at'), sortable: true, required: true, sortFirst: SortRequest::DESC),
+            new Column('status', MailKitPages::label('log.column.status'), sortable: true, required: true),
+            new Column('subject', MailKitPages::label('log.column.subject'), sortable: true, required: true),
+            new Column('to', MailKitPages::label('log.column.to'), priority: 2),
+            new Column('tag', MailKitPages::label('log.column.tag'), sortable: true, priority: 3),
+            new Column('transport', MailKitPages::label('log.column.transport'), sortable: true, priority: 3),
+        ];
+    }
+
+    /**
+     * Sort of the request, validated against the sortable columns (unknown key: newest first).
+     */
+    public static function sort(Request $request): SortRequest
+    {
+        return SortRequest::fromRequest($request, SortRequest::fieldsOf(self::columns()), SentMailRepository::DEFAULT_SORT);
+    }
+
+    /**
+     * "Export CSV" header actions: the current filters and sort, without the page; the label names the row cap when
+     * the result is longer; a second action with the bodies when the export allows them.
+     *
+     * @param array<string, mixed> $query current request query
+     * @param int $total rows matching the filters
+     * @param int $maxRows `web_ui.export.max_rows`
+     *
+     * @return list<Action>
+     */
+    public function exportActions(array $query, SortRequest $sort, int $total, int $maxRows, bool $bodies): array
+    {
+        unset($query['page'], $query['per_page'], $query[self::EXPORT_BODIES_PARAM]);
+        $query = $sort->query() + $query;
+        $label = $total > $maxRows
+            ? MailKitPages::label('log.action.export_limited', ['%max%' => (string) $maxRows])
+            : MailKitPages::label('log.action.export');
+        $actions = [new Action('export', $label, href: $this->urls->generate(self::ROUTE_EXPORT, $query), attributes: ['data-testid' => 'mail-kit-export'])];
+        if ($bodies) {
+            $actions[] = new Action('export', MailKitPages::label('log.action.export_bodies'), href: $this->urls->generate(self::ROUTE_EXPORT, $query + [self::EXPORT_BODIES_PARAM => '1']), attributes: ['data-testid' => 'mail-kit-export-bodies']);
+        }
+
+        return $actions;
+    }
+
+    /**
+     * List page: header with the redacted current transport (and the export actions), filters, sortable table,
+     * pagination, empty state.
      *
      * @param list<SentMail> $rows entries of the current page
+     * @param list<Action> $actions header actions ({@see self::exportActions()})
      */
-    public function listPage(array $rows, Pagination $pagination, FormView $filters, MailStatus $status, bool $filtered): ListPage
+    public function listPage(array $rows, Pagination $pagination, FormView $filters, MailStatus $status, bool $filtered, ?SortRequest $sorting = null, array $actions = []): ListPage
     {
         return new ListPage(
             new PageHeader(
@@ -64,15 +126,9 @@ final readonly class AdminPages
                     '%source%'    => $status->source->value,
                     '%count%'     => $pagination->total,
                 ]),
+                $actions,
             ),
-            [
-                new Column('queuedAt', MailKitPages::label('log.column.queued_at'), required: true),
-                new Column('status', MailKitPages::label('log.column.status'), required: true),
-                new Column('subject', MailKitPages::label('log.column.subject'), required: true),
-                new Column('to', MailKitPages::label('log.column.to'), priority: 2),
-                new Column('tag', MailKitPages::label('log.column.tag'), priority: 3),
-                new Column('transport', MailKitPages::label('log.column.transport'), priority: 3),
-            ],
+            self::columns(),
             $rows,
             $filters,
             fn (SentMail $row): array => [
@@ -90,6 +146,7 @@ final readonly class AdminPages
                 'period' => new FilterField('period', width: 'sm'),
             ],
             filtersSubmit: new Action('filter', MailKitPages::label('log.action.filter')),
+            sorting: $sorting,
         );
     }
 

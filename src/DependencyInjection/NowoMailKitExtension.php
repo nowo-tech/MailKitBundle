@@ -25,6 +25,7 @@ use Nowo\MailKitBundle\EventListener\MailKitAccessListener;
 use Nowo\MailKitBundle\EventListener\SettingsChangedListener;
 use Nowo\MailKitBundle\Form\SentMailFilterType;
 use Nowo\MailKitBundle\Integration\AuthKit\MailKitOutboundMailReadyChecker;
+use Nowo\MailKitBundle\Log\SentMailCsvExporter;
 use Nowo\MailKitBundle\Log\SentMailRecorder;
 use Nowo\MailKitBundle\Log\SentMailRepository;
 use Nowo\MailKitBundle\Mailer\MailKitMailer;
@@ -125,7 +126,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $config = $this->processConfiguration(new Configuration(), $configs);
         $this->assertLiteralBooleans($config);
 
-        /** @var array{mailer: array{decorate: bool, dsn_provider: string|null, fallback_counts_as_ready: bool}, dsn: array{allowed_schemes: list<string>, allowed_hosts: list<string>, allow_private_hosts: bool, allow_insecure_tls: bool, resolve_dns: bool, dns_timeout: float}, sender: array{default_from: string|null, default_from_name: string|null, require_public_domain: bool}, resend: array{enabled: bool, api_timeout: float}, test_email: array{rate_limit: int, rate_interval: string}, log: array{enabled: bool, store_bodies: bool, retention_days: int, purge_batch_size: int}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>, page_size: int}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}} $config */
+        /** @var array{mailer: array{decorate: bool, dsn_provider: string|null, fallback_counts_as_ready: bool}, dsn: array{allowed_schemes: list<string>, allowed_hosts: list<string>, allow_private_hosts: bool, allow_insecure_tls: bool, resolve_dns: bool, dns_timeout: float}, sender: array{default_from: string|null, default_from_name: string|null, require_public_domain: bool}, resend: array{enabled: bool, api_timeout: float}, test_email: array{rate_limit: int, rate_interval: string}, log: array{enabled: bool, store_bodies: bool, retention_days: int, purge_batch_size: int}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>, page_size: int, export: array{enabled: bool, max_rows: int, access_roles: list<string>, include_bodies: bool}}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}} $config */
         $webUi = $config['web_ui'];
 
         if (!$this->hasBundle($container, 'NowoInstanceSettingsBundle') && !$container->hasExtension('nowo_instance_settings')) {
@@ -357,8 +358,9 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
      */
     private function registerWebUi(ContainerBuilder $container, array $config): void
     {
-        /** @var array{web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>, page_size: int}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}, log: array{enabled: bool, store_bodies: bool}, resend: array{enabled: bool}} $config */
-        $webUi = $config['web_ui'];
+        /** @var array{web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>, page_size: int, export: array{enabled: bool, max_rows: int, access_roles: list<string>, include_bodies: bool}}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}, log: array{enabled: bool, store_bodies: bool}, resend: array{enabled: bool}} $config */
+        $webUi  = $config['web_ui'];
+        $export = $webUi['export']['enabled'] && $config['log']['enabled'];
 
         $container->setDefinition(MailKitRouteLoader::class, (new Definition(MailKitRouteLoader::class, [
             $webUi['enabled'],
@@ -366,13 +368,25 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             $config['log']['enabled'],
             $config['log']['store_bodies'],
             $config['resend']['enabled'],
+            null,
+            $webUi['export']['enabled'],
         ]))->addTag('routing.loader'));
 
         if (!$webUi['enabled']) {
             return;
         }
 
-        $this->registerAccess($container, $config['security']);
+        $this->registerAccess($container, $config['security'], Configuration::roles($webUi['export']['access_roles']));
+
+        if ($export) {
+            $container->setDefinition(SentMailCsvExporter::class, (new Definition(SentMailCsvExporter::class, [
+                new Reference(SentMailRepository::class),
+                $webUi['export']['max_rows'],
+                $webUi['export']['include_bodies'] && $config['log']['store_bodies'],
+                new Reference('translator', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+                new Reference('clock'),
+            ]))->setPublic(true));
+        }
 
         $container->setDefinition(SettingsActions::class, new Definition(SettingsActions::class, [
             new Reference('router'),
@@ -400,6 +414,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             '$settings'      => new Reference(MailSettings::class),
             '$repository'    => $config['log']['enabled'] ? new Reference(SentMailRepository::class) : null,
             '$resendChecker' => $config['resend']['enabled'] ? new Reference(ResendApiChecker::class) : null,
+            '$exporter'      => $export ? new Reference(SentMailCsvExporter::class) : null,
             '$pageSize'      => $webUi['page_size'],
             '$translator'    => new Reference('translator', ContainerInterface::NULL_ON_INVALID_REFERENCE),
             '$clock'         => new Reference('clock'),
@@ -413,8 +428,9 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
 
     /**
      * @param array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool} $security
+     * @param list<string> $exportRoles `web_ui.export.access_roles`
      */
-    private function registerAccess(ContainerBuilder $container, array $security): void
+    private function registerAccess(ContainerBuilder $container, array $security, array $exportRoles): void
     {
         $customId = $security['access_checker'];
         if (is_string($customId) && $customId !== '') {
@@ -435,6 +451,8 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             new Reference(InstanceSettingsAccessGuard::class, ContainerInterface::NULL_ON_INVALID_REFERENCE),
             new Reference('security.token_storage', ContainerInterface::NULL_ON_INVALID_REFERENCE),
             new Reference('request_stack', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            $exportRoles,
+            new Reference('security.authorization_checker', ContainerInterface::NULL_ON_INVALID_REFERENCE),
         ]));
     }
 
@@ -475,6 +493,8 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             'log.enabled'                    => $config['log']['enabled'] ?? null,
             'log.store_bodies'               => $config['log']['store_bodies'] ?? null,
             'web_ui.enabled'                 => $config['web_ui']['enabled'] ?? null,
+            'web_ui.export.enabled'          => $config['web_ui']['export']['enabled'] ?? null,
+            'web_ui.export.include_bodies'   => $config['web_ui']['export']['include_bodies'] ?? null,
             'security.allow_unauthenticated' => $config['security']['allow_unauthenticated'] ?? null,
         ];
         foreach ($switches as $path => $value) {

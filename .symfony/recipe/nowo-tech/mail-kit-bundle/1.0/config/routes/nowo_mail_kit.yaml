@@ -1,0 +1,3 @@
+nowo_mail_kit:
+    resource: .
+    type: nowo_mail_kit

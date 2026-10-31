@@ -1,0 +1,102 @@
+settings:
+    mailer:
+        label: Mailer
+        intro: 'Outgoing e-mail of this instance. A DSN stored here replaces MAILER_DSN on the next message, without a deploy; leave it empty to use MAILER_DSN.'
+        dsn: Mailer DSN
+        dsn_help: 'For example smtp://user:password@smtp.example.com:587 or resend+api://KEY@default. Stored encrypted; sendmail, native and null are refused, private hosts too unless allowed.'
+        from: Sender address
+        from_help: 'Used when a message has no From. Must be on a public domain.'
+        from_name: Sender name
+        reply_to: Reply-To address
+        reply_to_help: 'Added when a message has no Reply-To.'
+        test_recipient: Test recipient
+        test_recipient_help: 'Receives the test e-mails (default: your own address).'
+        action:
+            send_test: Send a test e-mail
+    resend:
+        label: Resend
+        intro: 'Send through the Resend API instead of the mailer DSN while this section is switched on and holds a key (needs symfony/resend-mailer).'
+        enabled: Send with Resend
+        enabled_help: 'Takes effect only with a stored API key.'
+        api_key: API key
+        api_key_help: 'Stored encrypted. A sending-only key is enough.'
+        from: Resend sender address
+        from_help: 'A verified domain in Resend (default: the mailer sender address).'
+        action:
+            check: Check the API key
+            send_test: Send a test e-mail with Resend
+dsn:
+    invalid: 'This mailer DSN cannot be parsed.'
+    null_transport: 'null:// would drop every message; leave the field empty to use MAILER_DSN.'
+    scheme_not_allowed: 'This DSN scheme is not allowed.'
+    unsupported: 'No installed mailer bridge supports this DSN scheme (for example: composer require symfony/resend-mailer).'
+    host_not_allowed: 'This mail server host is private, local or reserved and is not allowed.'
+    host_unresolvable: 'This mail server host name does not resolve.'
+sender:
+    not_deliverable: 'Use an address on a public domain: {{ value }} would be rejected by mail providers.'
+test_email:
+    subject: Test e-mail
+    body: "This test e-mail was sent through %transport% from %from%.\nIf you can read it, outgoing e-mail works."
+    result:
+        sent: 'Test e-mail sent to %to%.'
+        no_recipient: 'No valid recipient: set a test recipient in the mailer settings.'
+        no_sender: 'No sender address: set one in the mailer settings.'
+        invalid_sender: 'The sender address is not on a public domain.'
+        not_configured: 'Store a Resend API key first.'
+        rate_limited: 'Too many test e-mails; try again in a few minutes.'
+        failed: 'The test e-mail to %to% failed: %error%'
+resend:
+    check:
+        no_key: 'Store a Resend API key first.'
+        failed: 'The Resend API key was rejected: %error%'
+        ok_sending_only: 'The Resend API key is valid (sending-only key: domains cannot be listed).'
+        ok: 'The Resend API key is valid. Domains: %domains%'
+log:
+    index:
+        title: Sent e-mail
+        intro_ready: '%count% message(s). Current transport: %transport% (%source%).'
+        intro_not_ready: '%count% message(s). No deliverable mailer is configured yet (current transport: %transport%).'
+        empty: 'No e-mail has been sent yet.'
+        empty_filtered: 'No e-mail matches these filters.'
+    column:
+        queued_at: Date
+        status: Status
+        subject: Subject
+        to: To
+        tag: Tag
+        transport: Transport
+    status:
+        queued: Queued
+        sent: Sent
+        failed: Failed
+    filter:
+        q: Search
+        q_placeholder: 'Subject or recipient'
+        status: Status
+        status_any: 'Any status'
+        period:
+            label: Period
+            24h: 'Last 24 hours'
+            7d: 'Last 7 days'
+            30d: 'Last 30 days'
+            all: 'All time'
+    action:
+        view: View
+        filter: Filter
+        back: Back to the list
+        html_body: Open the HTML body
+    show:
+        title: Sent e-mail
+        envelope: Envelope
+        delivery: Delivery
+        text_body: Text body
+    field:
+        sender: From
+        cc: Cc
+        bcc: Bcc
+        provider_message_id: Provider message id
+        size: Size (bytes)
+        attempts: Attempts
+        sent_at: Sent at
+        failed_at: Failed at
+        error: Error

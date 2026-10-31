@@ -1,0 +1,42 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Home - Mail Kit Demo{% endblock %}
+
+{% block body %}
+{% set status = nowo_mail_kit_status() %}
+<div class="card shadow-sm mb-4">
+    <div class="card-header"><h2 class="mb-0">Runtime mailer</h2></div>
+    <div class="card-body">
+        <p>
+            The mailer DSN, sender and test recipient are edited in <strong>Settings → Mailer</strong> (Instance Settings):
+            the DSN is encrypted at rest and every <code>MailerInterface::send()</code> resolves it at runtime;
+            <code>MAILER_DSN</code> is only the fallback.
+        </p>
+        <dl class="row mb-0" data-testid="demo-status">
+            <dt class="col-sm-4">Transport</dt><dd class="col-sm-8"><code>{{ status.label }}</code> ({{ status.source.value }})</dd>
+            <dt class="col-sm-4">Outbound mail ready</dt><dd class="col-sm-8" data-testid="demo-ready">{{ nowo_mail_kit_outbound_mail_ready() ? 'yes' : 'no' }}</dd>
+            <dt class="col-sm-4">FrankenPHP mode</dt><dd class="col-sm-8">worker by default (<code>FRANKENPHP_MODE</code>)</dd>
+        </dl>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-header"><h3 class="mb-0">Send a message</h3></div>
+    <div class="card-body">
+        {{ form_start(form) }}
+            {% for child in form %}
+                {% if not child.rendered %}{{ form_row(child) }}{% endif %}
+            {% endfor %}
+        {{ form_end(form) }}
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-header"><h3 class="mb-0">Manage</h3></div>
+    <div class="card-body">
+        <a class="btn btn-primary" href="{{ path('nowo_instance_settings_section', {section: 'mailer'}) }}">Mailer settings</a>
+        <a class="btn btn-outline-secondary" href="{{ path('nowo_mail_kit_log') }}">Sent-mail log</a>
+        <a class="btn btn-outline-secondary" href="http://localhost:8087" target="_blank" rel="noopener">Mailpit</a>
+    </div>
+</div>
+{% endblock %}

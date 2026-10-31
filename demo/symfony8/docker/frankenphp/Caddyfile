@@ -1,0 +1,35 @@
+{
+	order mercure after encode
+	skip_install_trust
+	# REQ-RUNTIME-001 timeout hierarchy: DNS lookup of a DSN host (2 s, nowo_mail_kit.dsn.dns_timeout) and Resend key
+	# check (10 s, resend.api_timeout) < PHP max_execution_time (30 s) < Caddy write timeout (40 s). max_wait_time caps
+	# the wait for a free PHP thread (503 instead of an endless queue).
+	servers {
+		timeouts {
+			write 40s
+		}
+	}
+	frankenphp {
+		php_ini max_execution_time 30
+		php_ini max_input_time 30
+		max_wait_time 10s
+	}
+}
+
+# Worker mode: app boots once, handles requests in memory.
+# MailKit's RuntimeTransport implements ResetInterface (kernel.reset) — safe for worker.
+:80 {
+	root * /app/public
+	encode zstd br gzip
+	mercure {
+		anonymous
+	}
+
+	php_server {
+		hot_reload
+		worker {
+			file /app/public/index.php
+			watch
+		}
+	}
+}

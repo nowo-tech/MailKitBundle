@@ -30,7 +30,7 @@ final class ErasureTest extends KernelTestCase
         $recorder->sent(null, (new Email())->from('app@example.com')->to('ops@example.com')->subject('About josé@ejemplo.es')->text('Contact: josé@ejemplo.es / ' . rawurlencode('josé@ejemplo.es'))->html('<p>josé@ejemplo.es</p>'), 'smtp', null, null);
 
         $db = $this->connection($kernel);
-        self::assertSame('|ana/lopez@example.com|', $db->fetchOne("SELECT recipient_index FROM mail_kit_sent_mail WHERE subject = 'Hi' AND recipient_index LIKE '%ana%'"));
+        self::assertSame(SentMailRecorder::SEPARATOR . 'ana/lopez@example.com' . SentMailRecorder::SEPARATOR, $db->fetchOne("SELECT recipient_index FROM mail_kit_sent_mail WHERE subject = 'Hi' AND recipient_index LIKE '%ana%'"));
 
         self::assertSame(['deleted' => 1, 'redacted' => 0], $recorder->forgetAddress('ana/lopez@example.com'));
         self::assertSame(['deleted' => 2, 'redacted' => 2], $recorder->forgetAddress(' José@Ejemplo.es '));
@@ -42,6 +42,24 @@ final class ErasureTest extends KernelTestCase
         self::assertIsArray($body);
         self::assertSame('<p>[redacted]</p>', $body['html_body']);
         self::assertSame('Contact: [redacted] / [redacted]', $body['text_body']);
+    }
+
+    /**
+     * CA R1 / R2: the index separator cannot appear in an address; Unicode (NFC) and punycode forms are equivalent.
+     */
+    public function testSeparatorAndIdnEquivalence(): void
+    {
+        $kernel   = $this->bootKernel();
+        $recorder = $this->service($kernel, SentMailRecorder::class);
+        foreach (['a|bob@example.com', 'user@bücher.de', "jose\u{0301}@example.com"] as $to) {
+            $recorder->sent(null, (new Email())->from('app@example.com')->to($to)->subject('Hi')->text('t'), 'smtp', null, null);
+        }
+
+        self::assertSame(['deleted' => 0, 'redacted' => 0], $recorder->forgetAddress('bob@example.com'));
+        self::assertSame(1, $recorder->forgetAddress('A|BOB@example.com')['deleted']);
+        self::assertSame(1, $recorder->forgetAddress('user@xn--bcher-kva.de')['deleted']);
+        self::assertSame(1, $recorder->forgetAddress('josé@example.com')['deleted']);
+        self::assertSame(0, (int) $this->connection($kernel)->fetchOne('SELECT COUNT(*) FROM mail_kit_sent_mail'));
     }
 
     public function testRedactedValuesAreMaskedInEncodedFormsToo(): void

@@ -1,0 +1,26 @@
+# Nowo Mail Kit Bundle — see https://github.com/nowo-tech/MailKitBundle/blob/main/docs/CONFIGURATION.md
+# The mailer DSN, sender and test recipient are edited in Settings → Mailer (Instance Settings, /admin/settings).
+# MAILER_DSN (framework.mailer.dsn) stays the fallback until a DSN is stored there.
+nowo_mail_kit:
+    sender:
+        default_from: null              # e.g. 'noreply@example.com'
+    dsn:
+        allow_private_hosts: false
+        # allowed_hosts: [relay.internal.example]   # an internal relay you operate
+    resend:
+        enabled: false                  # composer require symfony/resend-mailer
+    log:
+        enabled: true
+        store_bodies: false             # personal data: keep it off unless you need the bodies
+        retention_days: 30              # schedule: php bin/console nowo:mail-kit:log:purge
+    web_ui:
+        enabled: true
+        path_prefix: /admin/mail
+    security:
+        access_roles: [ROLE_ADMIN]
+        # DEV/DEMO only — never enable in production (refused without kernel.debug):
+        allow_unauthenticated: false
+
+# Protect the prefix in config/packages/security.yaml:
+#   access_control:
+#       - { path: ^/admin/mail, roles: ROLE_ADMIN }

@@ -1,0 +1,102 @@
+settings:
+    mailer:
+        label: Ausgehende E-Mail
+        intro: 'Ausgehende E-Mail dieser Instanz. Ein hier gespeicherter DSN ersetzt MAILER_DSN ab der nächsten Nachricht, ohne Deployment; leer lassen, um MAILER_DSN zu verwenden.'
+        dsn: Mailer-DSN
+        dsn_help: 'Zum Beispiel smtp://benutzer:passwort@smtp.example.com:587 oder resend+api://SCHLÜSSEL@default. Verschlüsselt gespeichert; sendmail, native und null werden abgelehnt, private Hosts ebenfalls, sofern nicht erlaubt.'
+        from: Absenderadresse
+        from_help: 'Wird verwendet, wenn eine Nachricht kein From hat. Muss auf einer öffentlichen Domain liegen.'
+        from_name: Absendername
+        reply_to: Reply-To-Adresse
+        reply_to_help: 'Wird ergänzt, wenn eine Nachricht kein Reply-To hat.'
+        test_recipient: Testempfänger
+        test_recipient_help: 'Erhält die Test-E-Mails (Standard: Ihre eigene Adresse).'
+        action:
+            send_test: Test-E-Mail senden
+    resend:
+        label: Resend
+        intro: 'Sendet über die Resend-API statt über den DSN, solange dieser Abschnitt aktiviert ist und einen Schlüssel enthält (benötigt symfony/resend-mailer).'
+        enabled: Mit Resend senden
+        enabled_help: 'Wirkt nur mit einem gespeicherten API-Schlüssel.'
+        api_key: API-Schlüssel
+        api_key_help: 'Verschlüsselt gespeichert. Ein reiner Sende-Schlüssel genügt.'
+        from: Resend-Absender
+        from_help: 'Eine in Resend verifizierte Domain (Standard: die Mailer-Absenderadresse).'
+        action:
+            check: API-Schlüssel prüfen
+            send_test: Test-E-Mail mit Resend senden
+dsn:
+    invalid: 'Dieser Mailer-DSN kann nicht gelesen werden.'
+    null_transport: 'null:// würde jede Nachricht verwerfen; lassen Sie das Feld leer, um MAILER_DSN zu verwenden.'
+    scheme_not_allowed: 'Dieses DSN-Schema ist nicht erlaubt.'
+    unsupported: 'Keine installierte Mailer-Bridge unterstützt dieses Schema (zum Beispiel: composer require symfony/resend-mailer).'
+    host_not_allowed: 'Der Host dieses Mailservers ist privat, lokal oder reserviert und nicht erlaubt.'
+    host_unresolvable: 'Der Hostname dieses Mailservers lässt sich nicht auflösen.'
+sender:
+    not_deliverable: 'Verwenden Sie eine Adresse auf einer öffentlichen Domain: {{ value }} würde von Mail-Anbietern abgelehnt.'
+test_email:
+    subject: Test-E-Mail
+    body: "Diese Test-E-Mail wurde über %transport% von %from% gesendet.\nWenn Sie sie lesen können, funktioniert der E-Mail-Versand."
+    result:
+        sent: 'Test-E-Mail an %to% gesendet.'
+        no_recipient: 'Kein gültiger Empfänger: Legen Sie in den Mailer-Einstellungen einen Testempfänger fest.'
+        no_sender: 'Keine Absenderadresse: Legen Sie eine in den Mailer-Einstellungen fest.'
+        invalid_sender: 'Die Absenderadresse liegt nicht auf einer öffentlichen Domain.'
+        not_configured: 'Speichern Sie zuerst einen Resend-API-Schlüssel.'
+        rate_limited: 'Zu viele Test-E-Mails; versuchen Sie es in ein paar Minuten erneut.'
+        failed: 'Die Test-E-Mail an %to% ist fehlgeschlagen: %error%'
+resend:
+    check:
+        no_key: 'Speichern Sie zuerst einen Resend-API-Schlüssel.'
+        failed: 'Der Resend-API-Schlüssel wurde abgelehnt: %error%'
+        ok_sending_only: 'Der Resend-API-Schlüssel ist gültig (reiner Sende-Schlüssel: Domains können nicht aufgelistet werden).'
+        ok: 'Der Resend-API-Schlüssel ist gültig. Domains: %domains%'
+log:
+    index:
+        title: Gesendete E-Mails
+        intro_ready: '%count% Nachricht(en). Aktueller Transport: %transport% (%source%).'
+        intro_not_ready: '%count% Nachricht(en). Noch kein zustellbarer Mailer konfiguriert (aktueller Transport: %transport%).'
+        empty: 'Es wurde noch keine E-Mail gesendet.'
+        empty_filtered: 'Keine E-Mail entspricht diesen Filtern.'
+    column:
+        queued_at: Datum
+        status: Status
+        subject: Betreff
+        to: An
+        tag: Kennung
+        transport: Transport
+    status:
+        queued: In Warteschlange
+        sent: Gesendet
+        failed: Fehlgeschlagen
+    filter:
+        q: Suche
+        q_placeholder: 'Betreff oder Empfänger'
+        status: Status
+        status_any: 'Jeder Status'
+        period:
+            label: Zeitraum
+            24h: 'Letzte 24 Stunden'
+            7d: 'Letzte 7 Tage'
+            30d: 'Letzte 30 Tage'
+            all: 'Gesamter Zeitraum'
+    action:
+        view: Anzeigen
+        filter: Filtern
+        back: Zurück zur Liste
+        html_body: HTML-Inhalt öffnen
+    show:
+        title: Gesendete E-Mail
+        envelope: Umschlag
+        delivery: Zustellung
+        text_body: Textinhalt
+    field:
+        sender: Von
+        cc: Cc
+        bcc: Bcc
+        provider_message_id: Nachrichten-ID beim Anbieter
+        size: Größe (Bytes)
+        attempts: Versuche
+        sent_at: Gesendet am
+        failed_at: Fehlgeschlagen am
+        error: Fehler

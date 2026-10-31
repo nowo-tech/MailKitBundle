@@ -1,0 +1,9 @@
+Nowo Mail Kit Bundle installed.
+
+1. Make sure nowo-tech/instance-settings-bundle is configured (DoctrineEncrypt key for the encrypted DSN / API key).
+2. Create the log tables: php bin/console doctrine:migrations:diff && php bin/console doctrine:migrations:migrate
+3. Protect /admin/mail (and /admin/settings) with security.access_control.
+4. Open Settings → Mailer, store a DSN and click "Send a test e-mail".
+5. Schedule php bin/console nowo:mail-kit:log:purge (retention).
+
+Docs: https://github.com/nowo-tech/MailKitBundle/tree/main/docs

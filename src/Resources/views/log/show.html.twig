@@ -1,0 +1,27 @@
+{#
+  Sent-mail log entry (REQ-UI-003): UiKit show scaffold. Variables: page (Nowo\UiKitBundle\View\ShowPage from
+  Ui\AdminPages::showPage(): header with "Back" and — when an HTML body is stored — "Open the HTML body" (sandboxed
+  response), breadcrumbs, the envelope and delivery sections), entry (Entity\SentMail), body (Entity\SentMailBody or
+  null: bodies are stored only with log.store_bodies).
+
+  The scaffold renders the detail sections; nowo_ui_show_after adds the stored text body (escaped, in the code_block
+  slot) as its own block (nowo_mail_kit_text_body) so an override that extends '@!NowoMailKitBundle/log/show.html.twig'
+  (web_ui.templates.log_show) can replace or hide it.
+#}
+{% extends '@NowoUiKit/page/show.html.twig' %}
+
+{% block nowo_ui_show_after %}
+    {% set _b = page.bundle %}
+    {% block nowo_mail_kit_text_body %}
+        {% if body is not null and body.textBody is not null %}
+            <section class="{{ nowo_ui_class('section', _b) }} {{ nowo_ui_class('card', _b) }}" id="mail-kit-text-body" data-nowo-ui-region="section"{{ nowo_ui_attrs('section', _b) }}>
+                <header class="{{ nowo_ui_class('card_header', _b) }}">
+                    <h2 class="{{ nowo_ui_class('card_title', _b) }}">{{ 'log.show.text_body'|trans({}, 'NowoMailKitBundle') }}</h2>
+                </header>
+                <div class="{{ nowo_ui_class('card_body', _b) }}">
+                    <pre class="{{ nowo_ui_class('code_block', _b) }} nowo-ui-code-block--wrap"{{ nowo_ui_attrs('code_block', _b) }}><code>{{ body.textBody }}</code></pre>
+                </div>
+            </section>
+        {% endif %}
+    {% endblock %}
+{% endblock %}

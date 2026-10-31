@@ -1,0 +1,4 @@
+# Fallback transport (MailKit replaces it at runtime with the DSN stored in Settings → Mailer).
+framework:
+    mailer:
+        dsn: '%env(MAILER_DSN)%'

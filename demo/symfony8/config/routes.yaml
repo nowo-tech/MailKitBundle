@@ -1,0 +1,13 @@
+controllers:
+    resource: ../src/Controller/
+    type: attribute
+
+# Settings pages (the mailer section lives there)
+nowo_instance_settings:
+    resource: .
+    type: nowo_instance_settings
+
+# Sent-mail log and the settings actions (REQ-SF-004 rule 7: opt-in import)
+nowo_mail_kit:
+    resource: .
+    type: nowo_mail_kit

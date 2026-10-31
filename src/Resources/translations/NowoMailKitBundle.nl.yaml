@@ -1,0 +1,102 @@
+settings:
+    mailer:
+        label: Uitgaande e-mail
+        intro: 'Uitgaande e-mail van deze instantie. Een hier opgeslagen DSN vervangt MAILER_DSN vanaf het volgende bericht, zonder deploy; laat het leeg om MAILER_DSN te gebruiken.'
+        dsn: Mailer-DSN
+        dsn_help: 'Bijvoorbeeld smtp://gebruiker:wachtwoord@smtp.example.com:587 of resend+api://SLEUTEL@default. Versleuteld opgeslagen; sendmail, native en null worden geweigerd, privé-hosts ook tenzij toegestaan.'
+        from: Afzenderadres
+        from_help: 'Gebruikt wanneer een bericht geen From heeft. Moet op een publiek domein staan.'
+        from_name: Afzendernaam
+        reply_to: Reply-To-adres
+        reply_to_help: 'Toegevoegd wanneer een bericht geen Reply-To heeft.'
+        test_recipient: Testontvanger
+        test_recipient_help: 'Ontvangt de test-e-mails (standaard: uw eigen adres).'
+        action:
+            send_test: Een test-e-mail versturen
+    resend:
+        label: Resend
+        intro: 'Verstuurt via de Resend-API in plaats van de DSN zolang deze sectie aan staat en een sleutel bevat (vereist symfony/resend-mailer).'
+        enabled: Versturen met Resend
+        enabled_help: 'Werkt alleen met een opgeslagen API-sleutel.'
+        api_key: API-sleutel
+        api_key_help: 'Versleuteld opgeslagen. Een sleutel die alleen mag versturen volstaat.'
+        from: Resend-afzender
+        from_help: 'Een in Resend geverifieerd domein (standaard: het afzenderadres van de mailer).'
+        action:
+            check: API-sleutel controleren
+            send_test: Een test-e-mail versturen met Resend
+dsn:
+    invalid: 'Deze mailer-DSN kan niet worden gelezen.'
+    null_transport: 'null:// zou elk bericht weggooien; laat het veld leeg om MAILER_DSN te gebruiken.'
+    scheme_not_allowed: 'Dit DSN-schema is niet toegestaan.'
+    unsupported: 'Geen geïnstalleerde mailer-bridge ondersteunt dit schema (bijvoorbeeld: composer require symfony/resend-mailer).'
+    host_not_allowed: 'De host van deze mailserver is privé, lokaal of gereserveerd en niet toegestaan.'
+    host_unresolvable: 'De hostnaam van deze mailserver kan niet worden opgezocht.'
+sender:
+    not_deliverable: 'Gebruik een adres op een publiek domein: {{ value }} zou door mailproviders worden geweigerd.'
+test_email:
+    subject: Test-e-mail
+    body: "Deze test-e-mail is verstuurd via %transport% vanaf %from%.\nAls u dit kunt lezen, werkt uitgaande e-mail."
+    result:
+        sent: 'Test-e-mail verstuurd naar %to%.'
+        no_recipient: 'Geen geldige ontvanger: stel een testontvanger in bij de mailerinstellingen.'
+        no_sender: 'Geen afzenderadres: stel er een in bij de mailerinstellingen.'
+        invalid_sender: 'Het afzenderadres staat niet op een publiek domein.'
+        not_configured: 'Sla eerst een Resend-API-sleutel op.'
+        rate_limited: 'Te veel test-e-mails; probeer het over een paar minuten opnieuw.'
+        failed: 'De test-e-mail naar %to% is mislukt: %error%'
+resend:
+    check:
+        no_key: 'Sla eerst een Resend-API-sleutel op.'
+        failed: 'De Resend-API-sleutel is geweigerd: %error%'
+        ok_sending_only: 'De Resend-API-sleutel is geldig (sleutel voor alleen versturen: domeinen kunnen niet worden opgesomd).'
+        ok: 'De Resend-API-sleutel is geldig. Domeinen: %domains%'
+log:
+    index:
+        title: Verstuurde e-mail
+        intro_ready: '%count% bericht(en). Huidig transport: %transport% (%source%).'
+        intro_not_ready: '%count% bericht(en). Er is nog geen bezorgbare mailer ingesteld (huidig transport: %transport%).'
+        empty: 'Er is nog geen e-mail verstuurd.'
+        empty_filtered: 'Geen e-mail voldoet aan deze filters.'
+    column:
+        queued_at: Datum
+        status: Status
+        subject: Onderwerp
+        to: Aan
+        tag: Label
+        transport: Transport
+    status:
+        queued: In wachtrij
+        sent: Verstuurd
+        failed: Mislukt
+    filter:
+        q: Zoeken
+        q_placeholder: 'Onderwerp of ontvanger'
+        status: Status
+        status_any: 'Elke status'
+        period:
+            label: Periode
+            24h: 'Laatste 24 uur'
+            7d: 'Laatste 7 dagen'
+            30d: 'Laatste 30 dagen'
+            all: 'Altijd'
+    action:
+        view: Bekijken
+        filter: Filteren
+        back: Terug naar de lijst
+        html_body: HTML-inhoud openen
+    show:
+        title: Verstuurde e-mail
+        envelope: Envelop
+        delivery: Bezorging
+        text_body: Tekstinhoud
+    field:
+        sender: Van
+        cc: Cc
+        bcc: Bcc
+        provider_message_id: Bericht-id bij de provider
+        size: Grootte (bytes)
+        attempts: Pogingen
+        sent_at: Verstuurd op
+        failed_at: Mislukt op
+        error: Fout

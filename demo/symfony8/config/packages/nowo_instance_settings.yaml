@@ -1,0 +1,9 @@
+# Demo only: the settings UI is open without login (allow_unauthenticated is refused unless kernel.debug is true).
+nowo_instance_settings:
+    doctrine:
+        table_prefix: 'demo_'
+    web_ui:
+        path_prefix: /admin/settings
+    security:
+        access_roles: [ROLE_ADMIN]
+        allow_unauthenticated: true

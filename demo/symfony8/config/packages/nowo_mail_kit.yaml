@@ -1,0 +1,22 @@
+# Demo only: the mail admin UI is open without login (allow_unauthenticated is refused unless kernel.debug is true).
+# Production: keep allow_unauthenticated false, protect web_ui.path_prefix with security.access_control and set
+# security.access_roles (see docs/CONFIGURATION.md).
+nowo_mail_kit:
+    sender:
+        default_from: 'noreply@example.com'
+        default_from_name: 'Acme Ops'
+    dsn:
+        # Mailpit is a private Docker host: allow it explicitly (the SSRF guard refuses private hosts otherwise).
+        allowed_hosts: [mailpit]
+    test_email:
+        rate_limit: 20
+    log:
+        store_bodies: true          # demo: show the stored bodies (keep it off in production unless needed)
+        retention_days: 30
+    doctrine:
+        table_prefix: 'demo_'
+    web_ui:
+        path_prefix: /admin/mail
+    security:
+        access_roles: [ROLE_ADMIN]
+        allow_unauthenticated: true

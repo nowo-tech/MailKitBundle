@@ -1,0 +1,102 @@
+settings:
+    mailer:
+        label: E-mail sortant
+        intro: "E-mail sortant de cette instance. Un DSN enregistré ici remplace MAILER_DSN dès le message suivant, sans déploiement ; laissez-le vide pour utiliser MAILER_DSN."
+        dsn: DSN du mailer
+        dsn_help: "Par exemple smtp://utilisateur:motdepasse@smtp.example.com:587 ou resend+api://CLÉ@default. Stocké chiffré ; sendmail, native et null sont refusés, ainsi que les hôtes privés sauf autorisation."
+        from: Adresse de l'expéditeur
+        from_help: "Utilisée quand un message n'a pas de From. Doit être sur un domaine public."
+        from_name: Nom de l'expéditeur
+        reply_to: Adresse Reply-To
+        reply_to_help: "Ajoutée quand un message n'a pas de Reply-To."
+        test_recipient: Destinataire de test
+        test_recipient_help: 'Reçoit les e-mails de test (par défaut : votre propre adresse).'
+        action:
+            send_test: Envoyer un e-mail de test
+    resend:
+        label: Resend
+        intro: "Envoie via l'API Resend au lieu du DSN tant que cette section est activée et contient une clé (nécessite symfony/resend-mailer)."
+        enabled: Envoyer avec Resend
+        enabled_help: "N'a d'effet qu'avec une clé d'API enregistrée."
+        api_key: Clé d'API
+        api_key_help: "Stockée chiffrée. Une clé d'envoi seul suffit."
+        from: Expéditeur Resend
+        from_help: "Un domaine vérifié dans Resend (par défaut : l'expéditeur du mailer)."
+        action:
+            check: Vérifier la clé d'API
+            send_test: Envoyer un e-mail de test avec Resend
+dsn:
+    invalid: 'Ce DSN de mailer est illisible.'
+    null_transport: "null:// supprimerait tous les messages ; laissez le champ vide pour utiliser MAILER_DSN."
+    scheme_not_allowed: "Ce schéma de DSN n'est pas autorisé."
+    unsupported: 'Aucun bridge de mailer installé ne prend en charge ce schéma (par exemple : composer require symfony/resend-mailer).'
+    host_not_allowed: "L'hôte de ce serveur de messagerie est privé, local ou réservé et n'est pas autorisé."
+    host_unresolvable: "Le nom d'hôte de ce serveur de messagerie ne se résout pas."
+sender:
+    not_deliverable: 'Utilisez une adresse sur un domaine public : {{ value }} serait refusée par les fournisseurs.'
+test_email:
+    subject: E-mail de test
+    body: "Cet e-mail de test a été envoyé via %transport% depuis %from%.\nSi vous le lisez, l'e-mail sortant fonctionne."
+    result:
+        sent: 'E-mail de test envoyé à %to%.'
+        no_recipient: 'Aucun destinataire valide : indiquez un destinataire de test dans les réglages du mailer.'
+        no_sender: "Aucune adresse d'expéditeur : indiquez-en une dans les réglages du mailer."
+        invalid_sender: "L'adresse de l'expéditeur n'est pas sur un domaine public."
+        not_configured: "Enregistrez d'abord une clé d'API Resend."
+        rate_limited: "Trop d'e-mails de test ; réessayez dans quelques minutes."
+        failed: "L'e-mail de test à %to% a échoué : %error%"
+resend:
+    check:
+        no_key: "Enregistrez d'abord une clé d'API Resend."
+        failed: "La clé d'API Resend a été refusée : %error%"
+        ok_sending_only: "La clé d'API Resend est valide (clé d'envoi seul : les domaines ne peuvent pas être listés)."
+        ok: "La clé d'API Resend est valide. Domaines : %domains%"
+log:
+    index:
+        title: E-mails envoyés
+        intro_ready: '%count% message(s). Transport actuel : %transport% (%source%).'
+        intro_not_ready: "%count% message(s). Aucun mailer utilisable n'est encore configuré (transport actuel : %transport%)."
+        empty: "Aucun e-mail n'a encore été envoyé."
+        empty_filtered: 'Aucun e-mail ne correspond à ces filtres.'
+    column:
+        queued_at: Date
+        status: Statut
+        subject: Objet
+        to: À
+        tag: Étiquette
+        transport: Transport
+    status:
+        queued: En file
+        sent: Envoyé
+        failed: Échec
+    filter:
+        q: Rechercher
+        q_placeholder: 'Objet ou destinataire'
+        status: Statut
+        status_any: 'Tous les statuts'
+        period:
+            label: Période
+            24h: 'Dernières 24 heures'
+            7d: '7 derniers jours'
+            30d: '30 derniers jours'
+            all: 'Tout'
+    action:
+        view: Voir
+        filter: Filtrer
+        back: Retour à la liste
+        html_body: Ouvrir le corps HTML
+    show:
+        title: E-mail envoyé
+        envelope: Enveloppe
+        delivery: Distribution
+        text_body: Corps texte
+    field:
+        sender: De
+        cc: Cc
+        bcc: Cci
+        provider_message_id: Id du message chez le fournisseur
+        size: Taille (octets)
+        attempts: Tentatives
+        sent_at: Envoyé le
+        failed_at: Échoué le
+        error: Erreur

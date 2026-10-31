@@ -471,7 +471,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *     },
  *     disallow_search_engine_index?: bool|Param, // Enabled by default when debug is enabled. // Default: true
  *     http_client?: bool|array{ // HTTP Client configuration
- *         enabled?: bool|Param, // Default: false
+ *         enabled?: bool|Param, // Default: true
  *         max_host_connections?: int|Param, // The maximum number of connections to a single host.
  *         default_options?: array{
  *             headers?: array<string, mixed>,
@@ -576,7 +576,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         }>,
  *     },
  *     mailer?: bool|array{ // Mailer configuration
- *         enabled?: bool|Param, // Default: false
+ *         enabled?: bool|Param, // Default: true
  *         message_bus?: scalar|Param|null, // The message bus to use. Defaults to the default bus if the Messenger component is installed. // Default: null
  *         dsn?: scalar|Param|null, // Default: null
  *         transports?: array<string, scalar|Param|null>,
@@ -629,7 +629,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         }>,
  *     },
  *     rate_limiter?: bool|array{ // Rate limiter configuration
- *         enabled?: bool|Param, // Default: false
+ *         enabled?: bool|Param, // Default: true
  *         limiters?: array<string, array{ // Default: []
  *             lock_factory?: scalar|Param|null, // The service ID of the lock factory used by this limiter (or null to disable locking). // Default: "auto"
  *             cache_pool?: scalar|Param|null, // The cache pool to use for storing the current limiter state. // Default: "cache.rate_limiter"
@@ -646,7 +646,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         }>,
  *     },
  *     uid?: bool|array{ // Uid configuration
- *         enabled?: bool|Param, // Default: false
+ *         enabled?: bool|Param, // Default: true
  *         default_uuid_version?: 7|6|4|1|Param, // Default: 7
  *         name_based_uuid_version?: 5|3|Param, // Default: 5
  *         name_based_uuid_namespace?: scalar|Param|null,
@@ -1569,7 +1569,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *     }>,
  *     ...<string, mixed>
  * }
- * @psalm-type NowoMailKitConfig = array{ // Nowo Mail Kit — runtime settings store split into sections, encrypted secrets, admin UI, import / export.
+ * @psalm-type NowoInstanceSettingsConfig = array{ // Nowo Instance Settings — runtime settings store split into sections, encrypted secrets, admin UI, import / export.
  *     doctrine?: array{
  *         table_prefix?: scalar|Param|null, // Prefix of the bundle table and index names (REQ-ORM-002): "app_" gives app_instance_setting_value. // Default: ""
  *         entity_manager?: scalar|Param|null, // Doctrine ORM entity manager name (null = default). // Default: null
@@ -1583,7 +1583,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *     security?: array{ // REQ-UI-002 private access of the admin UI.
  *         access_roles?: list<scalar|Param|null>,
  *         area_roles?: array<string, list<scalar|Param|null>>,
- *         access_checker?: scalar|Param|null, // Service id implementing MailKitAccessCheckerInterface; null = role-based default. // Default: null
+ *         access_checker?: scalar|Param|null, // Service id implementing InstanceSettingsAccessCheckerInterface; null = role-based default. // Default: null
  *         allow_unauthenticated?: bool|Param, // DEV / DEMO only (refused without kernel.debug): open the UI without login. // Default: false
  *     },
  *     portability?: array{ // Versioned JSON export / import of the settings and of the tagged portability providers.
@@ -1591,6 +1591,55 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         schema?: scalar|Param|null, // Envelope "schema" value; imports with another schema are refused. // Default: "nowo-instance-settings"
  *         max_upload_bytes?: int|Param, // Size cap of imported files (upload and CLI), in bytes. // Default: 1048576
  *         sealed_secrets?: bool|Param, // Allow exporting / importing secrets sealed with the instance DoctrineEncrypt key. false = secrets never leave the instance. // Default: true
+ *     },
+ * }
+ * @psalm-type NowoMailKitConfig = array{ // Nowo Mail Kit — runtime mailer DSN from Instance Settings, validation, test e-mail, sent-mail log.
+ *     mailer?: array{
+ *         decorate?: bool|Param, // Decorate the framework mailer (mailer.mailer) and transports (mailer.transports) so every send resolves the DSN at runtime. false = only the MailKit services are available. // Default: true
+ *         dsn_provider?: scalar|Param|null, // Service id implementing MailerDsnProviderInterface; null = the Instance Settings provider (mailer / resend sections). // Default: null
+ *         fallback_counts_as_ready?: bool|Param, // Treat the framework transport (MAILER_DSN) as deliverable for isOutboundMailReady() when no runtime DSN is stored. // Default: false
+ *     },
+ *     dsn?: array{ // Validation of the DSNs stored from the admin UI (the framework MAILER_DSN fallback is trusted ops configuration).
+ *         allowed_schemes?: list<scalar|Param|null>,
+ *         allowed_hosts?: list<scalar|Param|null>,
+ *         allow_private_hosts?: bool|Param, // Accept DSN hosts in private / loopback / link-local ranges (SSRF guard off). Cloud metadata hosts stay refused. // Default: false
+ *         resolve_dns?: bool|Param, // Resolve DSN host names and refuse those pointing at private addresses (bounded lookup, see dns_timeout). // Default: true
+ *         dns_timeout?: float|Param, // Deadline of one DNS lookup, in seconds (REQ-RUNTIME-001). // Default: 2.0
+ *     },
+ *     sender?: array{
+ *         default_from?: scalar|Param|null, // Default of the mailer.from setting (null = no default: messages must set From themselves). // Default: null
+ *         default_from_name?: scalar|Param|null, // Default of the mailer.from_name setting. // Default: null
+ *         require_public_domain?: bool|Param, // Refuse sender addresses on non-public domains (no dot, .local, .localhost) in the settings. // Default: true
+ *     },
+ *     resend?: array{ // Optional "resend" settings section (Resend API key, sender) with a key check; needs symfony/resend-mailer to send.
+ *         enabled?: bool|Param, // Default: false
+ *         api_timeout?: float|Param, // Deadline of the Resend key check (GET /domains), in seconds (REQ-RUNTIME-001). // Default: 10.0
+ *     },
+ *     test_email?: array{ // "Send a test e-mail" actions of the settings sections and the CLI.
+ *         rate_limit?: int|Param, // Test e-mails one user may send per rate_interval (sliding window over cache.app). // Default: 5
+ *         rate_interval?: scalar|Param|null, // Window of the rate limit, a relative time such as "10 minutes". // Default: "10 minutes"
+ *     },
+ *     log?: array{ // Sent-mail log (one row per message: status, subject, sender, recipients, transport).
+ *         enabled?: bool|Param, // Default: true
+ *         store_bodies?: bool|Param, // Also store the HTML / text bodies (personal data; secrets passed through the redact header are masked). Off by default (privacy / GDPR). // Default: false
+ *         retention_days?: int|Param, // Rows older than this are deleted by nowo:mail-kit:log:purge (schedule it). // Default: 30
+ *         purge_batch_size?: int|Param, // Rows deleted per statement by the purge (keyset batches). // Default: 1000
+ *     },
+ *     doctrine?: array{
+ *         table_prefix?: scalar|Param|null, // Prefix of the bundle table and index names (REQ-ORM-002): "app_" gives app_mail_kit_sent_mail. // Default: ""
+ *         entity_manager?: scalar|Param|null, // Doctrine ORM entity manager name (null = default). // Default: null
+ *     },
+ *     web_ui?: array{ // Admin UI (REQ-UI-001 / REQ-UI-003): sent-mail log pages and the POST endpoints of the settings actions.
+ *         enabled?: bool|Param, // false = no admin UI (no routes, no controller, no settings actions); the mailer, CLI and Twig stay available. // Default: true
+ *         path_prefix?: scalar|Param|null, // URL prefix of the admin routes; protect it with security.access_control in the host. // Default: "/admin/mail"
+ *         layout_template?: scalar|Param|null, // Layout the pages extend. Null (default) = nowo_ui_kit.layouts.admin. // Default: null
+ *         templates?: array<string, scalar|Param|null>,
+ *         page_size?: int|Param, // Rows per page of the sent-mail log (REQ-PERF-001). // Default: 25
+ *     },
+ *     security?: array{ // REQ-UI-002 private access of the admin UI.
+ *         access_roles?: list<scalar|Param|null>,
+ *         access_checker?: scalar|Param|null, // Service id implementing MailKitAccessCheckerInterface; null = role-based default. // Default: null
+ *         allow_unauthenticated?: bool|Param, // DEV / DEMO only (refused without kernel.debug): open the UI without login. // Default: false
  *     },
  * }
  * @psalm-type DebugConfig = array{
@@ -1641,6 +1690,13 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *     reduced_motion?: bool|Param, // Respect reduced motion (accessibility). When true or system prefers-reduced-motion, animations are minimized. // Default: false
  *     keyboard_shortcut?: scalar|Param|null, // Keyboard shortcut to toggle inspector (e.g. "Ctrl+Shift+T"). Empty to disable. // Default: "Ctrl+Shift+T"
  * }
+ * @psalm-type NowoOutboundUrlGuardConfig = array{
+ *     allow_private?: bool|Param, // When true, loopback, RFC1918, and blocked hostnames are allowed. Cloud metadata stays blocked. // Default: false
+ *     allow_private_resolver?: scalar|Param|null, // Service id of an AllowPrivateResolverInterface read on every OutboundUrlGuardFactory / RuntimeOutboundUrlGuard call. Null uses the static allow_private value. Cloud metadata stays blocked whatever it returns. // Default: null
+ *     resolve_dns?: bool|Param, // When true, hostnames are resolved and the first public address is returned as an HttpClient resolve pin. Set false for Docker service names. // Default: true
+ *     dns_timeout?: float|Param, // Socket timeout in seconds for DNS lookups. Must stay below the host PHP max_execution_time. // Default: 2.0
+ *     php_binary?: scalar|Param|null, // PHP CLI used for the bounded DNS child process. Null auto-detects it (PHP_BINARY is not the CLI under php-fpm or FrankenPHP). An empty string, or no CLI found, resolves in-process without the dns_timeout bound. // Default: null
+ * }
  * @psalm-type ConfigType = array{
  *     imports?: ImportsConfig,
  *     parameters?: ParametersConfig,
@@ -1653,7 +1709,9 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *     nowo_doctrine_encrypt?: NowoDoctrineEncryptConfig,
  *     nowo_ui_kit?: NowoUiKitConfig,
  *     nowo_form_kit?: NowoFormKitConfig,
+ *     nowo_instance_settings?: NowoInstanceSettingsConfig,
  *     nowo_mail_kit?: NowoMailKitConfig,
+ *     nowo_outbound_url_guard?: NowoOutboundUrlGuardConfig,
  *     "when@dev"?: array{
  *         imports?: ImportsConfig,
  *         parameters?: ParametersConfig,
@@ -1666,11 +1724,13 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         nowo_doctrine_encrypt?: NowoDoctrineEncryptConfig,
  *         nowo_ui_kit?: NowoUiKitConfig,
  *         nowo_form_kit?: NowoFormKitConfig,
+ *         nowo_instance_settings?: NowoInstanceSettingsConfig,
  *         nowo_mail_kit?: NowoMailKitConfig,
  *         debug?: DebugConfig,
  *         web_profiler?: WebProfilerConfig,
  *         nowo_hot_reload?: NowoHotReloadConfig,
  *         nowo_twig_inspector?: NowoTwigInspectorConfig,
+ *         nowo_outbound_url_guard?: NowoOutboundUrlGuardConfig,
  *     },
  *     "when@prod"?: array{
  *         imports?: ImportsConfig,
@@ -1684,7 +1744,9 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         nowo_doctrine_encrypt?: NowoDoctrineEncryptConfig,
  *         nowo_ui_kit?: NowoUiKitConfig,
  *         nowo_form_kit?: NowoFormKitConfig,
+ *         nowo_instance_settings?: NowoInstanceSettingsConfig,
  *         nowo_mail_kit?: NowoMailKitConfig,
+ *         nowo_outbound_url_guard?: NowoOutboundUrlGuardConfig,
  *     },
  *     "when@test"?: array{
  *         imports?: ImportsConfig,
@@ -1698,10 +1760,12 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         nowo_doctrine_encrypt?: NowoDoctrineEncryptConfig,
  *         nowo_ui_kit?: NowoUiKitConfig,
  *         nowo_form_kit?: NowoFormKitConfig,
+ *         nowo_instance_settings?: NowoInstanceSettingsConfig,
  *         nowo_mail_kit?: NowoMailKitConfig,
  *         web_profiler?: WebProfilerConfig,
  *         nowo_hot_reload?: NowoHotReloadConfig,
  *         nowo_twig_inspector?: NowoTwigInspectorConfig,
+ *         nowo_outbound_url_guard?: NowoOutboundUrlGuardConfig,
  *     },
  *     ...<string, ExtensionType|array{ // extra keys must follow the when@%env% pattern or match an extension alias
  *         imports?: ImportsConfig,

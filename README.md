@@ -159,7 +159,7 @@ make release-check
 ## Tests and coverage
 
 - Tests: PHPUnit (PHP) — unit tests plus kernel integration tests (decorated mailer end to end with Messenger, settings-stored DSN, fallback, refused DSNs, sent-mail log on SQLite, admin UI with SecurityBundle and CSRF, Resend check with a mocked API, rate limit, CLI, opt-in routes, invalid configuration) and the UiKit page contract test; Playwright e2e on the demo
-- PHP: 100% (gate enforced in CI by `composer test-coverage-100`, no exclusions)
+- PHP: 100% (1366/1366 statements, 1584/1584 elements; gate enforced in CI by `composer test-coverage-100`, no exclusions)
 - TS/JS: N/A
 - Python: N/A
 

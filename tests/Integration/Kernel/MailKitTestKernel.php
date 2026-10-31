@@ -22,7 +22,9 @@ use Symfony\Component\Routing\Loader\Configurator\RoutingConfigurator;
 use Twig\Extra\TwigExtraBundle\TwigExtraBundle;
 
 use function dirname;
+use function getenv;
 use function in_array;
+use function is_string;
 use function sys_get_temp_dir;
 
 /**
@@ -82,6 +84,13 @@ final class MailKitTestKernel extends Kernel
         return self::baseDir() . '/' . $this->id . '/log';
     }
 
+    public static function databaseUrl(): string
+    {
+        $url = getenv('MAIL_KIT_TEST_DATABASE_URL');
+
+        return is_string($url) && $url !== '' ? $url : 'sqlite:///:memory:';
+    }
+
     public static function baseDir(): string
     {
         return sys_get_temp_dir() . '/nowo-mail-kit-tests';
@@ -119,7 +128,8 @@ final class MailKitTestKernel extends Kernel
         $container->extension('framework', $framework);
         $container->extension('twig', ['strict_variables' => true]);
         $container->extension('doctrine', [
-            'dbal' => ['url' => 'sqlite:///:memory:'],
+            // CI runs the log tests on MySQL, MariaDB and PostgreSQL too (CA L2): MAIL_KIT_TEST_DATABASE_URL.
+            'dbal' => ['url' => self::databaseUrl()],
             'orm'  => [],
         ]);
         $container->extension('nowo_doctrine_encrypt', [

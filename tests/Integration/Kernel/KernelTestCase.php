@@ -52,7 +52,7 @@ abstract class KernelTestCase extends TestCase
      */
     protected function bootKernel(array $config = [], array $settingsConfig = [], array $without = [], ?Closure $routes = null, bool $debug = false, ?Closure $extra = null): MailKitTestKernel
     {
-        $config += ['dsn' => ['allowed_schemes' => ['memory', 'smtp', 'smtps'], 'resolve_dns' => false]];
+        $config += ['dsn' => ['allowed_schemes' => ['memory', 'smtp', 'smtps'], 'allowed_hosts' => ['fail', 'leak'], 'resolve_dns' => false]];
         $id     = (string) preg_replace('/\W+/', '_', static::class . '_' . $this->name() . '_' . count($this->kernels));
         $kernel = new MailKitTestKernel(
             $id,
@@ -83,7 +83,10 @@ abstract class KernelTestCase extends TestCase
         self::assertInstanceOf(ManagerRegistry::class, $doctrine);
         $entityManager = $doctrine->getManager();
         if ($entityManager instanceof EntityManagerInterface) {
-            (new SchemaTool($entityManager))->createSchema($entityManager->getMetadataFactory()->getAllMetadata());
+            $metadata = $entityManager->getMetadataFactory()->getAllMetadata();
+            $tool     = new SchemaTool($entityManager);
+            $tool->dropSchema($metadata);
+            $tool->createSchema($metadata);
         }
 
         return $kernel;

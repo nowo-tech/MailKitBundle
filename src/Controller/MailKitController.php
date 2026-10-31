@@ -162,6 +162,12 @@ final class MailKitController extends AbstractController
     public function resendCheck(Request $request): Response
     {
         $this->guardAction($request, SettingsActions::RESEND_CHECK, ResendSettingsSection::NAME);
+        if ($this->rateLimited($request)) {
+            // Each check is an outbound HTTPS call of up to resend.api_timeout (CA I1): same per-user limit as the tests.
+            $this->addFlash('error', $this->trans('resend.check.rate_limited'));
+
+            return $this->backTo(ResendSettingsSection::NAME);
+        }
         $key = $this->settings->resendApiKey();
         if ($key === null || !$this->resendChecker instanceof ResendApiChecker) {
             $this->addFlash('error', $this->trans('resend.check.no_key'));

@@ -8,7 +8,7 @@
         "doctrine/orm": "^3.0",
         "nowo-tech/doctrine-encrypt-bundle": "^2.9",
         "nowo-tech/form-kit-bundle": "^2.17",
-        "nowo-tech/instance-settings-bundle": "^1.0",
+        "nowo-tech/instance-settings-bundle": "^1.1",
         "nowo-tech/mail-kit-bundle": "@dev",
         "nowo-tech/ui-kit-bundle": "^2.17.3",
         "php": ">=8.4,<8.6",

@@ -110,6 +110,7 @@ to compile with a message naming the fix; routes exist only through the `nowo_ma
   validation before build, cache per DSN, reset, internal headers stripped, outcome recorded.
 - **FR-MAIL-002** — `MailKitMailer` decorates `mailer.mailer`: sender, queued row with the bus.
 - **FR-MAIL-003** — `MailHeaders`: tag, redact, value, strip.
+- **FR-MAIL-004** — `DeliveryFailedException`: failures rethrown with a scrubbed message and a reference, never the provider body or credentials.
 
 ### Test e-mail and Resend
 

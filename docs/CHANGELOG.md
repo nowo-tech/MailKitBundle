@@ -41,4 +41,21 @@ First release (1.0.0): the runtime mailer of Symfony Beacon (kit #2, phase 1) as
 - **Fail-closed wiring**: compile errors without Instance Settings, the framework mailer, form CSRF, roles, or with
   `allow_unauthenticated` outside `kernel.debug`.
 - Demo `demo/symfony8` (Symfony 8.1, FrankenPHP worker, MySQL, Mailpit) with Playwright e2e and README screenshots;
-  Flex recipe; CI on PHP 8.2–8.5 × Symfony 7.4 / 8.1 with a 100% coverage gate.
+  Flex recipe; CI on PHP 8.2–8.5 × Symfony 7.4 / 8.1 with a 100% coverage gate, plus the log tests on MySQL, MariaDB
+  and PostgreSQL.
+
+### Security (independent audit, Appendix CA)
+
+- **M1** DSN query options are part of the SSRF guard: `region` only from a per-bridge allow-list, no host-shaping
+  characters in any option, and the built transport's real endpoint host must be a provider host or pass the guard.
+- **M1 / L3 / I3** Transport failures become `DeliveryFailedException` (short scrubbed message + reference, no provider
+  response body, no `previous`): safe in flashes, the log, the CLI and the Messenger failure transport. The scrubber
+  masks the DSN credentials in use and provider key formats (`SG.`, `xkeysib-`, `key-`, `username "…"`, UUID tokens).
+- **L1** `isOutboundMailReady()` / `status()` validate without DNS (no child process per anonymous login page).
+- **L2** Normalised `recipient_index` column for search and erasure (no JSON matching: works on SQLite, MySQL / MariaDB
+  and PostgreSQL, also for `/` and IDN addresses); `forgetAddress()` also deletes rows sent by the address and masks
+  it in subjects and bodies; the CLI accepts internationalised addresses.
+- **I1** The Resend key check shares the per-user rate limit. **I2** Single-label DSN hosts are refused unless
+  allow-listed. **I4** Redacted values are also masked URL-encoded and base64. **I7** `#[SensitiveParameter]` on the
+  validators.
+- Requires `nowo-tech/instance-settings-bundle` ^1.1 (secret-field errors rendered on the section page).

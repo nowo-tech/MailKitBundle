@@ -6,6 +6,7 @@ namespace Nowo\MailKitBundle\TestMail;
 
 use Nowo\MailKitBundle\Dsn\RuntimeDsn;
 use Nowo\MailKitBundle\Log\ErrorScrubber;
+use Nowo\MailKitBundle\Mailer\DeliveryFailedException;
 use Nowo\MailKitBundle\Mailer\MailHeaders;
 use Nowo\MailKitBundle\Mailer\RuntimeTransport;
 use Nowo\MailKitBundle\NowoMailKitBundle;
@@ -117,7 +118,7 @@ final readonly class TestMailSender
         } catch (Throwable $exception) {
             $this->logger?->warning('Test e-mail failed.', ['bundle' => 'NowoMailKitBundle', 'channel' => $channel, 'transport' => $label, 'error' => $exception::class]);
 
-            return new TestMailResult(TestMailOutcome::Failed, $recipient, ErrorScrubber::scrub($exception->getMessage()));
+            return new TestMailResult(TestMailOutcome::Failed, $recipient, $exception instanceof DeliveryFailedException ? $exception->getMessage() : ErrorScrubber::scrub($exception->getMessage()));
         }
 
         $this->logger?->info('Test e-mail sent.', ['bundle' => 'NowoMailKitBundle', 'channel' => $channel, 'transport' => $label]);

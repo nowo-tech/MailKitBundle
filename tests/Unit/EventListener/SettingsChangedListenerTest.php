@@ -38,7 +38,7 @@ final class SettingsChangedListenerTest extends TestCase
         };
         $provider  = new StaticDsnProvider('smtp://user:REDACTED-TEST@smtp.example.com:587');
         $transport = new RuntimeTransport(new MemoryTransport('f', new MemoryMailStore()), $provider, new MailerDsnValidator(hostGuard: new DsnHostGuard(resolveDns: false)), new Transport([]), new SenderPolicy(new MailSettings(new FakeSettings())));
-        $listener  = new SettingsChangedListener($transport, new OutboundMailReadiness($provider, $transport), $logger);
+        $listener  = new SettingsChangedListener($transport, new OutboundMailReadiness($provider, new MailerDsnValidator(hostGuard: new DsnHostGuard(resolveDns: false))), $logger);
 
         $listener(new SettingsChangedEvent('site', ['name']));
         self::assertSame([], $logger->records);

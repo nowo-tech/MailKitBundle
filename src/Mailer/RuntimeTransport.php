@@ -16,6 +16,7 @@ use Symfony\Component\Mailer\Envelope;
 use Symfony\Component\Mailer\Exception\TransportException;
 use Symfony\Component\Mailer\SentMessage;
 use Symfony\Component\Mailer\Transport;
+use Symfony\Component\Mailer\Transport\Dsn;
 use Symfony\Component\Mailer\Transport\TransportInterface;
 use Symfony\Component\Mime\Message;
 use Symfony\Component\Mime\RawMessage;
@@ -37,7 +38,8 @@ use function strlen;
  * `SettingsChangedEvent` for the mail sections).
  *
  * The internal {@see MailHeaders} are removed before delivery; the outcome is written to the sent-mail log when it
- * is enabled.
+ * is enabled. A failure is rethrown as {@see DeliveryFailedException}: scrubbed message and reference, never the
+ * provider response body (so it is safe in flashes, the log and the Messenger failure transport).
  */
 final class RuntimeTransport implements TransportInterface, ResetInterface
 {
@@ -147,15 +149,48 @@ final class RuntimeTransport implements TransportInterface, ResetInterface
         try {
             $sent = ($dsn instanceof RuntimeDsn ? $this->transportFor($dsn) : $this->fallback)->send($message, $envelope);
         } catch (Throwable $exception) {
-            $this->recorder?->failed($id, $snapshot, $label, $exception);
-            $this->logger?->warning('Mail delivery failed.', ['bundle' => 'NowoMailKitBundle', 'transport' => $dsn instanceof RuntimeDsn ? $dsn->label() : self::FALLBACK_LABEL, 'error' => $exception::class]);
+            // Scrubbed message + reference only: no provider body, no credential, no `previous` (CA M1 / L3 / I3).
+            $failure = DeliveryFailedException::from($exception, ...$this->credentials($dsn));
+            $this->recorder?->failed($id, $snapshot, $label, $failure->getMessage());
+            $this->logger?->warning('Mail delivery failed.', [
+                'bundle'    => 'NowoMailKitBundle',
+                'transport' => $dsn instanceof RuntimeDsn ? $dsn->label() : self::FALLBACK_LABEL,
+                'error'     => $exception::class,
+                'reference' => $failure->reference,
+                'detail'    => $failure->detail,
+            ]);
 
-            throw $exception;
+            throw $failure;
         }
 
         $this->recorder?->sent($id, $snapshot, $label, $sent?->getMessageId(), $sent instanceof SentMessage ? strlen($sent->toString()) : null);
 
         return $sent;
+    }
+
+    /**
+     * Credentials of a DSN (user, password, decoded and raw) for the error scrubber.
+     *
+     * @return list<string>
+     */
+    private function credentials(?RuntimeDsn $dsn): array
+    {
+        if (!$dsn instanceof RuntimeDsn) {
+            return [];
+        }
+        try {
+            $parsed = Dsn::fromString($dsn->dsn);
+        } catch (Throwable) {
+            return [];
+        }
+        $list = [];
+        foreach ([$parsed->getUser(), $parsed->getPassword()] as $value) {
+            if ($value !== null && $value !== '') {
+                $list[] = $value;
+            }
+        }
+
+        return $list;
     }
 
     private function transportFor(RuntimeDsn $dsn): TransportInterface

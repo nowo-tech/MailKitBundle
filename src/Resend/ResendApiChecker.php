@@ -13,6 +13,7 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 use function count;
 use function is_array;
 use function is_string;
+use function mb_substr;
 
 /**
  * Checks a Resend API key with `GET https://api.resend.com/domains` (fixed host: no SSRF surface), bounded by
@@ -23,6 +24,9 @@ final readonly class ResendApiChecker
 {
     /** Endpoint of the check. */
     public const DOMAINS_URL = 'https://api.resend.com/domains';
+
+    /** Longest error message kept from the API answer. */
+    public const MESSAGE_MAX = 200;
 
     /**
      * @param float $timeout seconds (connect and total)
@@ -51,7 +55,7 @@ final readonly class ResendApiChecker
         } catch (ExceptionInterface $exception) {
             $this->logger?->warning('Resend API key check failed.', ['bundle' => 'NowoMailKitBundle', 'error' => $exception::class]);
 
-            return ResendCheckResult::failed(ErrorScrubber::scrub($exception->getMessage()));
+            return ResendCheckResult::failed(mb_substr(ErrorScrubber::scrub($exception->getMessage(), $apiKey), 0, self::MESSAGE_MAX));
         }
 
         if ($status === 200) {
@@ -73,6 +77,6 @@ final readonly class ResendApiChecker
         $message = is_string($body['message'] ?? null) && $body['message'] !== '' ? $body['message'] : 'HTTP ' . $status;
         $this->logger?->warning('Resend API key check rejected.', ['bundle' => 'NowoMailKitBundle', 'status' => $status]);
 
-        return ResendCheckResult::failed(ErrorScrubber::scrub($message));
+        return ResendCheckResult::failed(mb_substr(ErrorScrubber::scrub($message, $apiKey), 0, self::MESSAGE_MAX));
     }
 }

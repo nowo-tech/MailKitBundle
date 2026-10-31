@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "cc81c6462734fb839f2cd657d8ab4ab6",
+    "content-hash": "cb5f75d89502ddf46840e01a1bed8ac1",
     "packages": [
         {
             "name": "doctrine/collections",
@@ -1004,16 +1004,16 @@
         },
         {
             "name": "nowo-tech/doctrine-encrypt-bundle",
-            "version": "v2.10.0",
+            "version": "v2.10.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/DoctrineEncryptBundle.git",
-                "reference": "aadc75dae1339ca1e698e3a0c5a83baa95d43e26"
+                "reference": "c6290632a051f8d0158b5f78d662c98c60b59cfe"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/DoctrineEncryptBundle/zipball/aadc75dae1339ca1e698e3a0c5a83baa95d43e26",
-                "reference": "aadc75dae1339ca1e698e3a0c5a83baa95d43e26",
+                "url": "https://api.github.com/repos/nowo-tech/DoctrineEncryptBundle/zipball/c6290632a051f8d0158b5f78d662c98c60b59cfe",
+                "reference": "c6290632a051f8d0158b5f78d662c98c60b59cfe",
                 "shasum": ""
             },
             "require": {
@@ -1101,7 +1101,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-10-31T20:43:53+00:00"
+            "time": "2026-10-31T21:17:02+00:00"
         },
         {
             "name": "nowo-tech/form-kit-bundle",
@@ -1222,16 +1222,16 @@
         },
         {
             "name": "nowo-tech/instance-settings-bundle",
-            "version": "v1.0.0",
+            "version": "v1.1.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/InstanceSettingsBundle.git",
-                "reference": "1d72375e8946e0d3d154b620fd543b908c427fae"
+                "reference": "1e714d909b05e448b73bd4653caf05d2de559a6d"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/InstanceSettingsBundle/zipball/1d72375e8946e0d3d154b620fd543b908c427fae",
-                "reference": "1d72375e8946e0d3d154b620fd543b908c427fae",
+                "url": "https://api.github.com/repos/nowo-tech/InstanceSettingsBundle/zipball/1e714d909b05e448b73bd4653caf05d2de559a6d",
+                "reference": "1e714d909b05e448b73bd4653caf05d2de559a6d",
                 "shasum": ""
             },
             "require": {
@@ -1288,7 +1288,8 @@
             },
             "suggest": {
                 "symfony/flex": "For automatic recipe installation",
-                "symfony/security-bundle": "Required for the admin UI unless security.allow_unauthenticated is true (dev / demo only)"
+                "symfony/security-bundle": "Required for the admin UI unless security.allow_unauthenticated is true (dev / demo only)",
+                "symfony/translation": "To return a TranslatableMessage (key + parameters) from SettingsSectionInterface::getIntro()"
             },
             "type": "symfony-bundle",
             "extra": {
@@ -1345,7 +1346,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-10-31T20:55:43+00:00"
+            "time": "2026-10-31T21:09:50+00:00"
         },
         {
             "name": "nowo-tech/outbound-url-guard-bundle",
@@ -10620,6 +10621,79 @@
             "time": "2026-10-25T14:40:16+00:00"
         },
         {
+            "name": "symfony/mailgun-mailer",
+            "version": "v7.4.18",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/symfony/mailgun-mailer.git",
+                "reference": "9dd193391d38e21703455a5b41fbe8b836bbac9c"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/symfony/mailgun-mailer/zipball/9dd193391d38e21703455a5b41fbe8b836bbac9c",
+                "reference": "9dd193391d38e21703455a5b41fbe8b836bbac9c",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=8.2",
+                "symfony/mailer": "^7.2|^8.0"
+            },
+            "conflict": {
+                "symfony/http-foundation": "<6.4"
+            },
+            "require-dev": {
+                "symfony/http-client": "^6.4|^7.0|^8.0",
+                "symfony/webhook": "^6.4|^7.0|^8.0"
+            },
+            "type": "symfony-mailer-bridge",
+            "autoload": {
+                "psr-4": {
+                    "Symfony\\Component\\Mailer\\Bridge\\Mailgun\\": ""
+                },
+                "exclude-from-classmap": [
+                    "/Tests/"
+                ]
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Fabien Potencier",
+                    "email": "fabien@symfony.com"
+                },
+                {
+                    "name": "Symfony Community",
+                    "homepage": "https://symfony.com/contributors"
+                }
+            ],
+            "description": "Symfony Mailgun Mailer Bridge",
+            "homepage": "https://symfony.com",
+            "support": {
+                "source": "https://github.com/symfony/mailgun-mailer/tree/v7.4.18"
+            },
+            "funding": [
+                {
+                    "url": "https://symfony.com/sponsor",
+                    "type": "custom"
+                },
+                {
+                    "url": "https://github.com/fabpot",
+                    "type": "github"
+                },
+                {
+                    "url": "https://github.com/nicolas-grekas",
+                    "type": "github"
+                },
+                {
+                    "url": "https://tidelift.com/funding/github/packagist/symfony/symfony",
+                    "type": "tidelift"
+                }
+            ],
+            "time": "2026-08-30T00:47:26+00:00"
+        },
+        {
             "name": "symfony/messenger",
             "version": "v7.4.22",
             "source": {
@@ -11167,6 +11241,81 @@
                 }
             ],
             "time": "2026-10-28T10:54:34+00:00"
+        },
+        {
+            "name": "symfony/sendgrid-mailer",
+            "version": "v7.4.19",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/symfony/sendgrid-mailer.git",
+                "reference": "6563573abd9d0316cb49f8e28e2eec7df062977c"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/symfony/sendgrid-mailer/zipball/6563573abd9d0316cb49f8e28e2eec7df062977c",
+                "reference": "6563573abd9d0316cb49f8e28e2eec7df062977c",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=8.2",
+                "symfony/mailer": "^7.2|^8.0"
+            },
+            "conflict": {
+                "symfony/http-foundation": "<6.4",
+                "symfony/mime": "<6.4",
+                "symfony/webhook": "<7.2"
+            },
+            "require-dev": {
+                "symfony/http-client": "^6.4|^7.0|^8.0",
+                "symfony/webhook": "^7.2|^8.0"
+            },
+            "type": "symfony-mailer-bridge",
+            "autoload": {
+                "psr-4": {
+                    "Symfony\\Component\\Mailer\\Bridge\\Sendgrid\\": ""
+                },
+                "exclude-from-classmap": [
+                    "/Tests/"
+                ]
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Fabien Potencier",
+                    "email": "fabien@symfony.com"
+                },
+                {
+                    "name": "Symfony Community",
+                    "homepage": "https://symfony.com/contributors"
+                }
+            ],
+            "description": "Symfony Sendgrid Mailer Bridge",
+            "homepage": "https://symfony.com",
+            "support": {
+                "source": "https://github.com/symfony/sendgrid-mailer/tree/v7.4.19"
+            },
+            "funding": [
+                {
+                    "url": "https://symfony.com/sponsor",
+                    "type": "custom"
+                },
+                {
+                    "url": "https://github.com/fabpot",
+                    "type": "github"
+                },
+                {
+                    "url": "https://github.com/nicolas-grekas",
+                    "type": "github"
+                },
+                {
+                    "url": "https://tidelift.com/funding/github/packagist/symfony/symfony",
+                    "type": "tidelift"
+                }
+            ],
+            "time": "2026-08-31T17:13:32+00:00"
         },
         {
             "name": "symfony/stopwatch",

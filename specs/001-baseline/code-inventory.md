@@ -4,7 +4,7 @@
 **Package**: `nowo-tech/mail-kit-bundle`  
 **Last audited**: 2026-10-31
 
-Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **68**.
+Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **69**.
 
 ## Bundle and dependency injection
 
@@ -51,6 +51,7 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 | `src/Mailer/RuntimeTransport.php` | Delivery | FR-MAIL-001 |
 | `src/Mailer/MailKitMailer.php` | Delivery | FR-MAIL-002 |
 | `src/Mailer/MailHeaders.php` | Delivery | FR-MAIL-003 |
+| `src/Mailer/DeliveryFailedException.php` | Delivery | FR-MAIL-004 |
 
 ## Test e-mail and Resend
 

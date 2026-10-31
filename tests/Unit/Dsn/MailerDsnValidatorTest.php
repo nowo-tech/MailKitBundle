@@ -27,7 +27,7 @@ final class MailerDsnValidatorTest extends TestCase
         yield 'sendmail' => ['sendmail://default', MailerDsnValidator::SCHEME_NOT_ALLOWED];
         yield 'native' => ['native://default', MailerDsnValidator::SCHEME_NOT_ALLOWED];
         yield 'private smtp' => ['smtp://10.0.0.1:25', DsnHostGuard::HOST_NOT_ALLOWED];
-        yield 'smtp default host is a host name' => ['smtp://default', null];
+        yield 'smtp default host is a single-label name' => ['smtp://default', DsnHostGuard::HOST_NOT_ALLOWED];
         yield 'smtp localhost' => ['smtp://localhost:1025', DsnHostGuard::HOST_NOT_ALLOWED];
         yield 'provider default host' => ['memory://default', null];
         yield 'no bridge' => ['resend+api://REDACTED-TEST@default', MailerDsnValidator::UNSUPPORTED];
@@ -39,7 +39,7 @@ final class MailerDsnValidatorTest extends TestCase
     {
         $validator = new MailerDsnValidator(
             ['SMTP', 'memory', 'resend+api'],
-            new DsnHostGuard(resolveDns: false),
+            new DsnHostGuard(['broken', 'weird'], resolveDns: false),
             new Transport([new EsmtpTransportFactory(), new MemoryTransportFactory(new MemoryMailStore())]),
         );
 

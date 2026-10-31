@@ -9,6 +9,7 @@ use Doctrine\Persistence\ManagerRegistry;
 use Nowo\MailKitBundle\Dsn\DsnSource;
 use Nowo\MailKitBundle\Entity\SentMail;
 use Nowo\MailKitBundle\Log\SentMailStatus;
+use Nowo\MailKitBundle\Mailer\DeliveryFailedException;
 use Nowo\MailKitBundle\Mailer\MailHeaders;
 use Nowo\MailKitBundle\Mailer\MailKitMailer;
 use Nowo\MailKitBundle\Mailer\RuntimeTransport;
@@ -94,6 +95,25 @@ final class RuntimeMailerTest extends KernelTestCase
         self::assertIsArray($body);
         self::assertSame('code [redacted]', $body['text_body']);
         self::assertSame('<p>code [redacted]</p>', $body['html_body']);
+    }
+
+    public function testEchoedCredentialsAreScrubbedFromTheLogAndTheException(): void
+    {
+        $kernel = $this->bootKernel();
+        $this->settings($kernel)->save('mailer', ['dsn' => 'memory://mk-user:REDACTED-TEST-PASS@leak', 'from' => 'noreply@example.com']);
+
+        try {
+            $this->mailer($kernel)->send((new Email())->to('a@example.com')->subject('Leak')->text('t'));
+            self::fail('The failure must reach the caller.');
+        } catch (DeliveryFailedException $e) {
+            self::assertStringNotContainsString('mk-user', $e->getMessage());
+            self::assertStringNotContainsString('REDACTED-TEST-PASS', $e->getMessage());
+            self::assertStringNotContainsString('REDACTEDTESTAAAA', $e->getMessage());
+            self::assertNull($e->getPrevious());
+        }
+        $error = (string) $this->connection($kernel)->fetchOne('SELECT error FROM mail_kit_sent_mail');
+        self::assertStringNotContainsString('REDACTED-TEST-PASS', $error);
+        self::assertStringContainsString('reference', $error);
     }
 
     public function testARefusedDsnFromAHostProviderFailsClosed(): void

@@ -45,6 +45,10 @@ class SentMail
     #[ORM\Column(type: Types::JSON)]
     private array $recipients;
 
+    /** `|a@x|b@y|` normalised to / cc / bcc addresses: search and erasure without JSON matching. */
+    #[ORM\Column(name: 'recipient_index', type: Types::TEXT)]
+    private string $recipientIndex;
+
     #[ORM\Column(length: 32)]
     private string $transport;
 
@@ -96,6 +100,7 @@ class SentMail
         $this->subject           = $subject;
         $this->sender            = $sender;
         $this->recipients        = $recipients;
+        $this->recipientIndex    = SentMailRecorder::recipientIndex($recipients);
         $this->transport         = $transport;
         $this->tag               = $tag;
         $this->providerMessageId = $providerMessageId;
@@ -154,6 +159,12 @@ class SentMail
     public function getTo(): array
     {
         return $this->recipients['to'] ?? [];
+    }
+
+    /** Normalised `|a@x|b@y|` index of the recipients. */
+    public function getRecipientIndex(): string
+    {
+        return $this->recipientIndex;
     }
 
     /** Transport scheme ("smtp", "resend+api", "default" for the framework transport). */

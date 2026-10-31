@@ -8,6 +8,7 @@ use Nowo\MailKitBundle\Dsn\DsnHostGuard;
 use Nowo\MailKitBundle\Dsn\DsnSource;
 use Nowo\MailKitBundle\Dsn\MailerDsnValidator;
 use Nowo\MailKitBundle\Dsn\RuntimeDsn;
+use Nowo\MailKitBundle\Mailer\DeliveryFailedException;
 use Nowo\MailKitBundle\Mailer\MailHeaders;
 use Nowo\MailKitBundle\Mailer\MailKitMailer;
 use Nowo\MailKitBundle\Mailer\RuntimeTransport;
@@ -83,6 +84,27 @@ final class RuntimeTransportTest extends TestCase
         $this->transport(new StaticDsnProvider())->sendVia(new RuntimeDsn('resend+api://k@default', DsnSource::Resend), $this->email());
     }
 
+    public function testFallbackAndUnparsableDsnFailuresAreWrappedToo(): void
+    {
+        $failing = new RuntimeTransport(
+            new MemoryTransport('fail', $this->store),
+            new StaticDsnProvider(),
+            new MailerDsnValidator(['memory'], new DsnHostGuard(resolveDns: false)),
+            new Transport([]),
+            new SenderPolicy(new MailSettings(new FakeSettings(['mailer.from' => 'noreply@example.com']))),
+        );
+        try {
+            $failing->send($this->email());
+            self::fail('The fallback failure must be rethrown.');
+        } catch (DeliveryFailedException $e) {
+            self::assertStringContainsString('smtp://***@relay.example.com', $e->getMessage());
+        }
+
+        $this->expectException(DeliveryFailedException::class);
+        $this->expectExceptionMessage('dsn.invalid');
+        $this->transport(new StaticDsnProvider('not a dsn'))->send($this->email());
+    }
+
     public function testFailuresAreRethrown(): void
     {
         $this->expectException(TransportException::class);
@@ -110,7 +132,7 @@ final class RuntimeTransportTest extends TestCase
         return new RuntimeTransport(
             new MemoryTransport('fallback', $this->store),
             $provider,
-            new MailerDsnValidator(['memory', 'smtp'], new DsnHostGuard(resolveDns: false), $factory),
+            new MailerDsnValidator(['memory', 'smtp'], new DsnHostGuard(['one', 'two', 'fail', 'via', 'leak'], resolveDns: false), $factory),
             $factory,
             new SenderPolicy(new MailSettings(new FakeSettings(['mailer.from' => 'noreply@example.com']))),
         );

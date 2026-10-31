@@ -25,6 +25,21 @@ final class MemoryTransportFactory implements TransportFactoryInterface
             throw new InvalidArgumentException('Broken test transport.');
         }
 
+        if ($dsn->getHost() === 'weird') {
+            // A transport whose endpoint cannot be read (no scheme separator).
+            return new class($this->store) extends MemoryTransport {
+                public function __construct(MemoryMailStore $store)
+                {
+                    parent::__construct('weird', $store);
+                }
+
+                public function __toString(): string
+                {
+                    return 'weird';
+                }
+            };
+        }
+
         return new MemoryTransport($dsn->getHost(), $this->store);
     }
 

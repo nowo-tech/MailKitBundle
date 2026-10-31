@@ -14,6 +14,7 @@ use function in_array;
 use function is_array;
 use function is_string;
 use function rtrim;
+use function str_contains;
 use function strtolower;
 use function trim;
 
@@ -55,8 +56,10 @@ final readonly class DsnHostGuard
 
     /**
      * Null when the host is acceptable, else an error translation key.
+     *
+     * @param bool|null $resolveDns override of `resolve_dns` (false = no lookup, for readiness checks)
      */
-    public function check(string $host): ?string
+    public function check(string $host, ?bool $resolveDns = null): ?string
     {
         $ascii = PrivateNetworkTarget::asciiHost(trim($host, '[] '));
         $ascii = $ascii === null ? '' : rtrim($ascii, '.');
@@ -83,7 +86,12 @@ final readonly class DsnHostGuard
         if ($ip !== null) {
             return PrivateNetworkTarget::isBlockedIp($ip) ? self::HOST_NOT_ALLOWED : null;
         }
-        if (!$this->resolveDns) {
+        // CA I2: a single-label name (no dot) is an internal name ("mailpit", "redis"): refused unless allow-listed,
+        // with or without DNS resolution.
+        if (!str_contains($ascii, '.')) {
+            return self::HOST_NOT_ALLOWED;
+        }
+        if (!($resolveDns ?? $this->resolveDns)) {
             return null;
         }
 

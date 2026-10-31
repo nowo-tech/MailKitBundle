@@ -6,6 +6,7 @@ namespace Nowo\MailKitBundle\Validator;
 
 use Nowo\MailKitBundle\Dsn\MailerDsnValidator;
 use Nowo\MailKitBundle\NowoMailKitBundle;
+use SensitiveParameter;
 use Symfony\Component\Validator\Constraint;
 use Symfony\Component\Validator\ConstraintValidator;
 use Symfony\Component\Validator\Exception\UnexpectedTypeException;
@@ -30,7 +31,7 @@ final class MailerDsnConstraintValidator extends ConstraintValidator
     /**
      * Adds one violation when the DSN is refused.
      */
-    public function validate(mixed $value, Constraint $constraint): void
+    public function validate(#[SensitiveParameter] mixed $value, Constraint $constraint): void
     {
         if (!$constraint instanceof MailerDsn) {
             throw new UnexpectedTypeException($constraint, MailerDsn::class);

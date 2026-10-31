@@ -9,7 +9,6 @@ use Nowo\MailKitBundle\Log\SentMailFilters;
 use Nowo\MailKitBundle\Log\SentMailRecorder;
 use Nowo\MailKitBundle\Log\SentMailRepository;
 use Nowo\MailKitBundle\Mailer\MailHeaders;
-use RuntimeException;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -58,7 +57,7 @@ final class DemoSeedCommand extends Command
             }
             $bounce = (new Email())->from('noreply@example.com')->to('carol@unreachable.example')->subject('Weekly incident digest')->text('…');
             MailHeaders::tag($bounce, 'digest');
-            $this->recorder->failed(null, $bounce, 'smtp', new RuntimeException('Expected response code "250" but got code "550", with message "550 5.1.1 <carol@unreachable.example>: mailbox unavailable".'));
+            $this->recorder->failed(null, $bounce, 'smtp', 'Expected response code "250" but got code "550", with message "550 5.1.1 mailbox unavailable".');
             ++$sent;
         }
 

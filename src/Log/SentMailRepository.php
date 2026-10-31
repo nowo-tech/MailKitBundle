@@ -82,7 +82,7 @@ final readonly class SentMailRepository
             $qb->andWhere('m.queuedAt >= :since')->setParameter('since', $filters->since);
         }
         if ($filters->query !== null) {
-            $qb->andWhere("(LOWER(m.subject) LIKE :q ESCAPE '!' OR m.recipients LIKE :q ESCAPE '!')")
+            $qb->andWhere("(LOWER(m.subject) LIKE :q ESCAPE '!' OR m.recipientIndex LIKE :q ESCAPE '!')")
                 ->setParameter('q', '%' . SentMailRecorder::likeEscape(mb_strtolower($filters->query)) . '%');
         }
 

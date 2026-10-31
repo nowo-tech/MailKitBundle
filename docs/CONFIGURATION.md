@@ -82,12 +82,12 @@ Applies to the DSNs stored in the settings and returned by a custom provider; th
 | Key | Default | Description |
 | --- | --- | --- |
 | `allowed_schemes` | SMTP + provider bridges | `smtp`, `smtps`, `mailgun(+api/+https/+smtp)`, `postmark(+api/+smtp)`, `sendgrid(+api/+smtp)`, `ses(+api/+https/+smtp)`, `brevo(+api/+smtp)`, `resend(+api/+smtp)`, `mailjet(+api/+smtp)`, `mailpace(+api/+smtp)`, `scaleway(+api/+smtp)`. `sendmail`, `sendmail+smtp`, `native` and `null` are refused at compile time. |
-| `allowed_hosts` | `[]` | Exact host names (case-insensitive) accepted without the private / DNS checks. |
+| `allowed_hosts` | `[]` | Exact host names (case-insensitive) accepted without the private / DNS checks. Single-label names (`mailpit`, `relay`) are refused unless listed here. |
 | `allow_private_hosts` | `false` | Accept private, loopback, link-local and reserved hosts. Cloud-metadata hosts (`169.254.169.254`, `metadata.google.internal`, `100.100.100.200`, `fd00:ec2::254`…) stay refused. |
 | `resolve_dns` | `true` | Resolve host names (A / AAAA, `gethostbynamel` fallback) and refuse a name that does not resolve or resolves to any private address. The lookup runs in a bounded child process (`dns_timeout`). |
 | `dns_timeout` | `2.0` | Seconds per lookup. |
 
-Validation runs on save and once per DSN per process (the result is memoized with the transport). DNS rebinding after validation is a residual risk: see [SECURITY](SECURITY.md).
+Validation (query options and the built transport's endpoint included) runs on save / import and once per DSN per worker before sending (memoized with the transport). Readiness checks skip DNS. DNS rebinding after validation is a residual risk: see [SECURITY](SECURITY.md).
 
 ## sender
 
@@ -108,7 +108,7 @@ Validation runs on save and once per DSN per process (the result is memoized wit
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `rate_limit` | `5` | Test e-mails per user (`getUserIdentifier()`, else the client address) per window. Sliding window over `cache.app` (limiter `nowo_mail_kit.test_email.limiter`). |
+| `rate_limit` | `5` | Test e-mails and Resend key checks per user (`getUserIdentifier()`, else the client address) per window. Sliding window over `cache.app` (limiter `nowo_mail_kit.test_email.limiter`). |
 | `rate_interval` | `'10 minutes'` | Relative time (`strtotime` syntax). |
 
 ## log

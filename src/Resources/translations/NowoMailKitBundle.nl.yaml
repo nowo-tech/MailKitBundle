@@ -33,6 +33,7 @@ dsn:
     host_not_allowed: 'De host van deze mailserver is privé, lokaal of gereserveerd en niet toegestaan.'
     host_unresolvable: 'De hostnaam van deze mailserver kan niet worden opgezocht.'
     option_not_allowed: 'Een optie van deze DSN is niet toegestaan (regio buiten de lijst van de provider, of een waarde die het serveradres kan wijzigen).'
+    insecure_tls: 'Deze DSN schakelt de controle van TLS-certificaten uit (verify_peer); dat mag alleen met dsn.allow_insecure_tls tijdens ontwikkeling.'
 sender:
     not_deliverable: 'Gebruik een adres op een publiek domein: {{ value }} zou door mailproviders worden geweigerd.'
 test_email:

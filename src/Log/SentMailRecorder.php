@@ -11,6 +11,7 @@ use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\Persistence\ManagerRegistry;
 use LogicException;
+use Normalizer;
 use Nowo\MailKitBundle\Entity\SentMail;
 use Nowo\MailKitBundle\Entity\SentMailBody;
 use Nowo\MailKitBundle\Mailer\MailHeaders;
@@ -24,6 +25,7 @@ use Symfony\Component\Mime\RawMessage;
 use Symfony\Component\Uid\Uuid;
 use Throwable;
 
+use function array_fill;
 use function array_filter;
 use function array_keys;
 use function array_map;
@@ -33,6 +35,8 @@ use function array_values;
 use function base64_encode;
 use function count;
 use function htmlspecialchars;
+use function idn_to_ascii;
+use function idn_to_utf8;
 use function implode;
 use function is_string;
 use function json_encode;
@@ -44,11 +48,16 @@ use function preg_quote;
 use function preg_replace;
 use function rawurlencode;
 use function str_replace;
+use function strrpos;
+use function substr;
 use function trim;
 use function urlencode;
 
 use const ENT_HTML5;
 use const ENT_QUOTES;
+use const IDNA_DEFAULT;
+use const IDNA_NONTRANSITIONAL_TO_ASCII;
+use const INTL_IDNA_VARIANT_UTS46;
 use const JSON_THROW_ON_ERROR;
 use const JSON_UNESCAPED_SLASHES;
 use const JSON_UNESCAPED_UNICODE;
@@ -63,6 +72,9 @@ use const JSON_UNESCAPED_UNICODE;
  */
 final readonly class SentMailRecorder
 {
+    /** Separator of the recipient index (unit separator: refused in addresses). */
+    public const SEPARATOR = "\x1F";
+
     /** Masking text of redacted values. */
     public const REDACTED = '[redacted]';
 
@@ -158,27 +170,33 @@ final readonly class SentMailRecorder
      */
     public function forgetAddress(string $email): array
     {
-        $email = self::normalize($email);
-        if ($email === '') {
+        $forms = self::forms($email);
+        if ($forms === []) {
             return ['deleted' => 0, 'redacted' => 0];
         }
         $connection = $this->connection();
-        $ids        = $connection->fetchFirstColumn(
-            'SELECT id FROM ' . $this->table() . " WHERE recipient_index LIKE ? ESCAPE '!' OR sender = ?",
-            ['%' . self::likeEscape('|' . $email . '|') . '%', $email],
-        );
-        $deleted  = $this->deleteIds($connection, $ids);
-        $pattern  = '%' . self::likeEscape($email) . '%';
-        $redacted = 0;
-
-        foreach ($connection->fetchAllAssociative('SELECT id, subject FROM ' . $this->table() . " WHERE LOWER(subject) LIKE ? ESCAPE '!'", [$pattern]) as $row) {
-            $redacted += (int) $connection->update($this->table(), ['subject' => $this->mask((string) $row['subject'], $email)], ['id' => $row['id']]);
+        $where      = [];
+        $params     = [];
+        foreach ($forms as $form) {
+            $where[]  = "recipient_index LIKE ? ESCAPE '!'";
+            $params[] = '%' . self::likeEscape(self::SEPARATOR . $form . self::SEPARATOR) . '%';
         }
-        foreach ($connection->fetchAllAssociative('SELECT id, html_body, text_body FROM ' . $this->bodyTable() . " WHERE LOWER(html_body) LIKE ? ESCAPE '!' OR LOWER(text_body) LIKE ? ESCAPE '!'", [$pattern, $pattern]) as $row) {
-            $redacted += (int) $connection->update($this->bodyTable(), [
-                'html_body' => is_string($row['html_body']) ? $this->mask($row['html_body'], $email) : null,
-                'text_body' => is_string($row['text_body']) ? $this->mask($row['text_body'], $email) : null,
-            ], ['id' => $row['id']]);
+        $where[] = 'sender IN (' . implode(', ', array_fill(0, count($forms), '?')) . ')';
+        $ids     = $connection->fetchFirstColumn('SELECT id FROM ' . $this->table() . ' WHERE ' . implode(' OR ', $where), [...$params, ...$forms]);
+        $deleted = $this->deleteIds($connection, $ids);
+
+        $redacted = 0;
+        foreach ($forms as $form) {
+            $pattern = '%' . self::likeEscape($form) . '%';
+            foreach ($connection->fetchAllAssociative('SELECT id, subject FROM ' . $this->table() . " WHERE LOWER(subject) LIKE ? ESCAPE '!'", [$pattern]) as $row) {
+                $redacted += (int) $connection->update($this->table(), ['subject' => $this->mask((string) $row['subject'], $forms)], ['id' => $row['id']]);
+            }
+            foreach ($connection->fetchAllAssociative('SELECT id, html_body, text_body FROM ' . $this->bodyTable() . " WHERE LOWER(html_body) LIKE ? ESCAPE '!' OR LOWER(text_body) LIKE ? ESCAPE '!'", [$pattern, $pattern]) as $row) {
+                $redacted += (int) $connection->update($this->bodyTable(), [
+                    'html_body' => is_string($row['html_body']) ? $this->mask($row['html_body'], $forms) : null,
+                    'text_body' => is_string($row['text_body']) ? $this->mask($row['text_body'], $forms) : null,
+                ], ['id' => $row['id']]);
+            }
         }
 
         return ['deleted' => $deleted, 'redacted' => $redacted];
@@ -189,11 +207,49 @@ final readonly class SentMailRecorder
      */
     public static function normalize(string $email): string
     {
-        return mb_strtolower(trim($email));
+        $email = trim($email);
+        $email = Normalizer::normalize($email, Normalizer::FORM_C);
+        $email = mb_strtolower(is_string($email) ? $email : '');
+        $at    = strrpos($email, '@');
+        if ($at === false) {
+            return $email;
+        }
+        $domain = idn_to_utf8(substr($email, $at + 1), IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46);
+
+        return substr($email, 0, $at + 1) . (is_string($domain) && $domain !== '' ? $domain : substr($email, $at + 1));
     }
 
     /**
-     * `|a@x|b@y|` index of the to / cc / bcc addresses (search and erasure without JSON matching).
+     * Normalised form with the domain in punycode (`user@xn--bcher-kva.de`).
+     */
+    public static function asciiForm(string $email): string
+    {
+        $email = self::normalize($email);
+        $at    = strrpos($email, '@');
+        if ($at === false) {
+            return $email;
+        }
+        $domain = idn_to_ascii(substr($email, $at + 1), IDNA_DEFAULT | IDNA_NONTRANSITIONAL_TO_ASCII, INTL_IDNA_VARIANT_UTS46);
+
+        return substr($email, 0, $at + 1) . (is_string($domain) && $domain !== '' ? strtolower($domain) : substr($email, $at + 1));
+    }
+
+    /**
+     * Unicode and punycode forms of an address (one when they are equal), empty for a blank input.
+     *
+     * @return list<string>
+     */
+    public static function forms(string $email): array
+    {
+        $display = self::normalize($email);
+
+        return $display === '' ? [] : array_values(array_unique([$display, self::asciiForm($email)]));
+    }
+
+    /**
+     * Index of the to / cc / bcc addresses (search and erasure without JSON matching): each address in its Unicode and
+     * punycode forms, wrapped in {@see self::SEPARATOR} (a control character no address can contain, so `bob@x.com` never
+     * matches `a|bob@x.com`).
      *
      * @param array{to?: list<string>, cc?: list<string>, bcc?: list<string>} $recipients
      */
@@ -201,7 +257,14 @@ final readonly class SentMailRecorder
     {
         $all = array_merge($recipients['to'] ?? [], $recipients['cc'] ?? [], $recipients['bcc'] ?? []);
 
-        return $all === [] ? '' : '|' . implode('|', array_values(array_unique($all))) . '|';
+        $forms = [];
+        foreach ($all as $address) {
+            foreach (self::forms($address) as $form) {
+                $forms[] = $form;
+            }
+        }
+
+        return $forms === [] ? '' : self::SEPARATOR . implode(self::SEPARATOR, array_values(array_unique($forms))) . self::SEPARATOR;
     }
 
     /**
@@ -347,9 +410,18 @@ final readonly class SentMailRecorder
         return array_values(array_map(static fn (Address $address): string => self::normalize($address->getAddress()), $addresses));
     }
 
-    private function mask(string $text, string $email): string
+    /**
+     * @param list<string> $forms
+     */
+    private function mask(string $text, array $forms): string
     {
-        return (string) preg_replace('/' . preg_quote($email, '/') . '|' . preg_quote(rawurlencode($email), '/') . '/iu', self::REDACTED, $text);
+        $alternatives = [];
+        foreach ($forms as $form) {
+            $alternatives[] = preg_quote($form, '/');
+            $alternatives[] = preg_quote(rawurlencode($form), '/');
+        }
+
+        return (string) preg_replace('/' . implode('|', $alternatives) . '/iu', self::REDACTED, $text);
     }
 
     private function connection(): Connection

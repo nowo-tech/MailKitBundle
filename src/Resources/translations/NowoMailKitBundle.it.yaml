@@ -33,6 +33,7 @@ dsn:
     host_not_allowed: "L'host di questo server di posta è privato, locale o riservato e non è consentito."
     host_unresolvable: "Il nome host di questo server di posta non si risolve."
     option_not_allowed: "Un'opzione di questo DSN non è consentita (regione fuori dall'elenco del provider o un valore che potrebbe cambiare l'indirizzo del server)."
+    insecure_tls: 'Questo DSN disattiva la verifica dei certificati TLS (verify_peer); consentito solo con dsn.allow_insecure_tls in sviluppo.'
 sender:
     not_deliverable: 'Usa un indirizzo su un dominio pubblico: {{ value }} verrebbe rifiutato dai provider di posta.'
 test_email:

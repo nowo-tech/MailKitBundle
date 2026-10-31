@@ -56,7 +56,7 @@ final class LogHelpersTest extends TestCase
         self::assertSame(SentMailStatus::Queued, $row->getStatus());
         self::assertSame([], $row->getTo());
         self::assertSame('', $row->getRecipientIndex());
-        self::assertSame('|a@x.example|b@x.example|', (new SentMail('id-2', new DateTimeImmutable(), recipients: ['to' => ['a@x.example'], 'cc' => ['b@x.example'], 'bcc' => ['a@x.example']]))->getRecipientIndex());
+        self::assertSame(SentMailRecorder::SEPARATOR . 'a@x.example' . SentMailRecorder::SEPARATOR . 'b@x.example' . SentMailRecorder::SEPARATOR, (new SentMail('id-2', new DateTimeImmutable(), recipients: ['to' => ['a@x.example'], 'cc' => ['b@x.example'], 'bcc' => ['a@x.example']]))->getRecipientIndex());
         self::assertNull($row->getTag());
         self::assertSame('', $row->getTransport());
         $body = new SentMailBody('id-1', '<p>x</p>', 'x');
@@ -64,6 +64,12 @@ final class LogHelpersTest extends TestCase
         self::assertSame('<p>x</p>', $body->getHtmlBody());
         self::assertSame('x', $body->getTextBody());
         self::assertSame('a!%b!_c!!', SentMailRecorder::likeEscape('a%b_c!'));
+        self::assertSame('user@bücher.de', SentMailRecorder::normalize(' User@XN--BCHER-KVA.DE '));
+        self::assertSame('user@xn--bcher-kva.de', SentMailRecorder::asciiForm('user@Bücher.de'));
+        self::assertSame('no-at-sign', SentMailRecorder::normalize('no-at-sign'));
+        self::assertSame('no-at-sign', SentMailRecorder::asciiForm('no-at-sign'));
+        self::assertSame([], SentMailRecorder::forms('  '));
+        self::assertSame(['a@x.example'], SentMailRecorder::forms('A@x.example'));
     }
 
     public function testHeaders(): void

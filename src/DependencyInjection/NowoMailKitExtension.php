@@ -125,7 +125,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $config = $this->processConfiguration(new Configuration(), $configs);
         $this->assertLiteralBooleans($config);
 
-        /** @var array{mailer: array{decorate: bool, dsn_provider: string|null, fallback_counts_as_ready: bool}, dsn: array{allowed_schemes: list<string>, allowed_hosts: list<string>, allow_private_hosts: bool, resolve_dns: bool, dns_timeout: float}, sender: array{default_from: string|null, default_from_name: string|null, require_public_domain: bool}, resend: array{enabled: bool, api_timeout: float}, test_email: array{rate_limit: int, rate_interval: string}, log: array{enabled: bool, store_bodies: bool, retention_days: int, purge_batch_size: int}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>, page_size: int}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}} $config */
+        /** @var array{mailer: array{decorate: bool, dsn_provider: string|null, fallback_counts_as_ready: bool}, dsn: array{allowed_schemes: list<string>, allowed_hosts: list<string>, allow_private_hosts: bool, allow_insecure_tls: bool, resolve_dns: bool, dns_timeout: float}, sender: array{default_from: string|null, default_from_name: string|null, require_public_domain: bool}, resend: array{enabled: bool, api_timeout: float}, test_email: array{rate_limit: int, rate_interval: string}, log: array{enabled: bool, store_bodies: bool, retention_days: int, purge_batch_size: int}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>, page_size: int}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}} $config */
         $webUi = $config['web_ui'];
 
         if (!$this->hasBundle($container, 'NowoInstanceSettingsBundle') && !$container->hasExtension('nowo_instance_settings')) {
@@ -198,7 +198,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
     }
 
     /**
-     * @param array{allowed_schemes: list<string>, allowed_hosts: list<string>, allow_private_hosts: bool, resolve_dns: bool, dns_timeout: float} $dsn
+     * @param array{allowed_schemes: list<string>, allowed_hosts: list<string>, allow_private_hosts: bool, allow_insecure_tls: bool, resolve_dns: bool, dns_timeout: float} $dsn
      */
     private function registerValidation(ContainerBuilder $container, array $dsn): void
     {
@@ -213,6 +213,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             Configuration::lower($dsn['allowed_schemes']),
             new Reference(DsnHostGuard::class),
             new Reference('mailer.transport_factory', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            $dsn['allow_insecure_tls'],
         ]))->setPublic(true));
 
         $container->setDefinition(MailerDsnConstraintValidator::class, (new Definition(MailerDsnConstraintValidator::class, [new Reference(MailerDsnValidator::class)]))
@@ -469,6 +470,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $switches = [
             'mailer.decorate'                => $config['mailer']['decorate'] ?? null,
             'dsn.allow_private_hosts'        => $config['dsn']['allow_private_hosts'] ?? null,
+            'dsn.allow_insecure_tls'         => $config['dsn']['allow_insecure_tls'] ?? null,
             'resend.enabled'                 => $config['resend']['enabled'] ?? null,
             'log.enabled'                    => $config['log']['enabled'] ?? null,
             'log.store_bodies'               => $config['log']['store_bodies'] ?? null,

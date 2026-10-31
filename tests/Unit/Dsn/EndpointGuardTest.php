@@ -43,7 +43,9 @@ final class EndpointGuardTest extends TestCase
         yield 'sendgrid eu' => ['sendgrid+api://REDACTED-TEST@default?region=eu', null];
         yield 'ses aws region syntax (no bridge installed)' => ['ses+api://REDACTED-TEST:REDACTED-TEST@default?region=eu-west-1', MailerDsnValidator::UNSUPPORTED];
         yield 'credential option with base64 characters' => ['smtp://8.8.8.8:587?session_token=ab/c%2Bd==', null];
-        yield 'plain option' => ['smtp://8.8.8.8:587?verify_peer=0', null];
+        yield 'plain option' => ['smtp://8.8.8.8:587?local_domain=mail.example.com', null];
+        yield 'option value with letters s' => ['smtp://8.8.8.8:587?verify_peer=false', MailerDsnValidator::INSECURE_TLS];
+        yield 'backslash in an option' => ['smtp://8.8.8.8:587?local_domain=a%5Cb', MailerDsnValidator::OPTION_NOT_ALLOWED];
         // Second line of defence: the real endpoint of the built transport.
         yield 'mailgun private host in place of default' => ['mailgun+api://REDACTED-TEST:example.com@10.0.0.5', DsnHostGuard::HOST_NOT_ALLOWED];
         yield 'endpoint on a public non-provider host' => ['memory://mail.example.com', null];

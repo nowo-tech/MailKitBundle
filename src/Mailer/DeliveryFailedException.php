@@ -61,7 +61,12 @@ final class DeliveryFailedException extends TransportException
         $first     = trim((string) strtok($detail, "\r\n"));
 
         if ($exception instanceof HttpTransportException) {
-            $message = sprintf('The mail provider answered HTTP %d (reference %s).', $exception->getResponse()->getStatusCode(), $reference);
+            try {
+                $message = sprintf('The mail provider answered HTTP %d (reference %s).', $exception->getResponse()->getStatusCode(), $reference);
+            } catch (Throwable) {
+                // Connect / TLS / DNS failure: no status to read (CA N1).
+                $message = sprintf('The mail provider could not be reached (reference %s).', $reference);
+            }
         } elseif ($exception instanceof TransportExceptionInterface && $first !== '' && !str_contains($first, '<') && preg_match('/Unable to send an email: /', $first) !== 1) {
             $message = sprintf('%s (reference %s)', mb_substr($first, 0, self::PUBLIC_MAX), $reference);
         } else {

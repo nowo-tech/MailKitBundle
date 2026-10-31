@@ -59,3 +59,17 @@ First release (1.0.0): the runtime mailer of Symfony Beacon (kit #2, phase 1) as
   allow-listed. **I4** Redacted values are also masked URL-encoded and base64. **I7** `#[SensitiveParameter]` on the
   validators.
 - Requires `nowo-tech/instance-settings-bundle` ^1.1 (secret-field errors rendered on the section page).
+
+### Security (re-verification follow-ups)
+
+- **N2** SES (`ses+api`, `ses+https`) and Scaleway (`scaleway+api`) DSNs validate again: the endpoint of these bridges is
+  read per bridge (`accessKey@region` → `email.<region>.amazonaws.com`, `endpoint@project`), `scaleway.com` is a provider
+  host; CI installs the amazon and scaleway bridges and sends through a mocked client.
+- **N1** An unreachable API endpoint (connect / TLS / DNS failure) gives the scrubbed `DeliveryFailedException`
+  ("could not be reached") instead of the raw HttpClient exception.
+- **R1** The recipient index separates addresses with a control character no address can contain (forgetting
+  `bob@x.com` no longer touches `a|bob@x.com`). **R2** Addresses are NFC-normalised and indexed in Unicode and punycode
+  forms (erasing `user@xn--bcher-kva.de` also erases `user@bücher.de`). **R3** documented.
+- `verify_peer=0` / `verify_peer_name=0` are refused unless `dsn.allow_insecure_tls: true` (dev only, literal
+  boolean); the SES region pattern is anchored at the end of the string; a backslash-escaping bug that refused every
+  option value containing `s` is fixed.

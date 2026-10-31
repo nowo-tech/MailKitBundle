@@ -97,6 +97,9 @@ when not every admin may change the transport.
 - `info` / `warning` test e-mail, Resend check (domain count / HTTP status), purge (days, count), erasure (count only).
 - `warning` "Sent-mail log insert / update failed." — exception class only.
 - Never logged: DSNs, passwords, API keys, message bodies, recipient addresses.
+- `warning` "Mail delivery failed." carries a `reference` and a `detail`: the scrubbed transport message, which **may
+  contain a provider response body** (with the known credential formats masked). Treat the application log as
+  confidential; the body never reaches the sent-mail log, the flash, the CLI or the Messenger failure transport.
 
 ## Resource limits and timeouts
 
@@ -136,17 +139,17 @@ session and no CSRF.
 | Outbound I/O | SSRF host guard, scheme allow-list, fixed Resend URL, deadlines. |
 | Permissions / exposure | Opt-in routes, roles, section access for actions, firewall-only token trust, fail-closed compile checks. |
 | Limits / DoS | Rate limit, pagination, capped bodies and errors. |
-| AI security audit (REQ-SEC-004) | Appendix CA: Pass (conditional) / Medium on `e30bcb9`; fixes on `fix/ca-audit`, re-audit pending — see below. |
+| AI security audit (REQ-SEC-004) | Appendix CA: Pass (good) / Low after re-verification on `de7dbbd` — see below. |
 
 ## AI security audit (REQ-SEC-004)
 
 | Date | Revision | Auditor | Grade | Findings |
 | --- | --- | --- | --- | --- |
 | 2026-10-31 | `e30bcb9` (PR #1) | Independent AI audit, Appendix CA | **Pass (conditional) / Medium** | M1 SSRF through provider `region` options; L1 DNS on every readiness check; L2 erasure / search missed rows (JSON escaping, PostgreSQL, IDN); L3 credentials echoed in errors, provider bodies kept; Info I1–I10 |
-| 2026-10-31 | branch `fix/ca-audit` | Fixes of M1, L1–L3, I1–I4, I7; I5, I6, I8–I10 documented below | Re-audit pending (expected Pass (good) / Low) | — |
+| 2026-10-31 | `de7dbbd` (PR #3) | Independent re-verification, Appendix CA | **Pass (good) / Low** | M1 held against 46 bypass cases; follow-ups N1 (unreachable API → raw HttpClient exception), N2 (SES / Scaleway DSNs refused), R1–R3 (erasure index separator, IDN forms, collations), info (insecure TLS option, SES regex anchor) |
+| 2026-10-31 | branch `fix/ca-followup` | Fixes of N1, N2, R1, R2, the info items; R3 documented | — | — |
 
-Recorded in the monorepo `BUNDLES_SECURITY_ANALYSIS.md` (Appendix CA). The first release (1.0.0) is tagged only after
-the re-audit confirms the fixes.
+Recorded in the monorepo `BUNDLES_SECURITY_ANALYSIS.md` (Appendix CA). Current grade: **Pass (good) / Low**.
 
 ## Residual risks and host guidance
 
@@ -163,6 +166,12 @@ the re-audit confirms the fixes.
   content).
 - **I8 — demo tooling.** The Playwright screenshot converter (`sharp`, dev only, not shipped) may carry upstream
   image-library advisories; it never processes untrusted images.
+- **R3 — case and accent folding.** Subject / body erasure matches with SQL `LOWER()`: on SQLite it folds ASCII only (an
+  upper-case non-ASCII address in a subject may survive the masking — the rows addressed to the person are still deleted
+  through the normalised index), and MySQL / MariaDB accent-insensitive collations (`*_ai_ci`) may match more rows than
+  the exact address (`jose@` also matches `josé@`): erasure then deletes / masks more, never less.
+- **TLS checks.** `verify_peer=0` / `verify_peer_name=0` in a stored DSN are refused unless `dsn.allow_insecure_tls: true`
+  (development only).
 - **I10 — log visibility.** Every user who passes the MailKit access checker sees every log row (an admin log, no
   per-row ownership); Instance Settings `area_roles` for `mailer` restrict the settings, not the log — use
   `security.access_roles` / `access_checker` for that.

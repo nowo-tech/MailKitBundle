@@ -33,6 +33,7 @@ nowo_mail_kit:
         allowed_schemes: [smtp, smtps, mailgun, mailgun+api, …, scaleway+smtp]   # sendmail / native / null refused
         allowed_hosts: []              # hosts accepted even when private ("mailpit", "relay.corp.example")
         allow_private_hosts: false     # SSRF guard off for private / local hosts (metadata stays refused)
+        allow_insecure_tls: false      # DEV only: accept verify_peer=0 / verify_peer_name=0
         resolve_dns: true              # resolve host names; refuse private answers
         dns_timeout: 2.0               # seconds per lookup (0.1 … 10)
     sender:
@@ -65,7 +66,7 @@ nowo_mail_kit:
         allow_unauthenticated: false   # DEV / DEMO only; refused unless kernel.debug is true
 ```
 
-Unknown keys are rejected. Switches (`mailer.decorate`, `dsn.allow_private_hosts`, `resend.enabled`, `log.enabled`, `log.store_bodies`, `web_ui.enabled`, `security.allow_unauthenticated`) must be literal booleans: `%env(bool:…)%` placeholders are refused because they would read as `true` while the container is built.
+Unknown keys are rejected. Switches (`mailer.decorate`, `dsn.allow_private_hosts`, `dsn.allow_insecure_tls`, `resend.enabled`, `log.enabled`, `log.store_bodies`, `web_ui.enabled`, `security.allow_unauthenticated`) must be literal booleans: `%env(bool:…)%` placeholders are refused because they would read as `true` while the container is built.
 
 ## mailer
 
@@ -84,6 +85,7 @@ Applies to the DSNs stored in the settings and returned by a custom provider; th
 | `allowed_schemes` | SMTP + provider bridges | `smtp`, `smtps`, `mailgun(+api/+https/+smtp)`, `postmark(+api/+smtp)`, `sendgrid(+api/+smtp)`, `ses(+api/+https/+smtp)`, `brevo(+api/+smtp)`, `resend(+api/+smtp)`, `mailjet(+api/+smtp)`, `mailpace(+api/+smtp)`, `scaleway(+api/+smtp)`. `sendmail`, `sendmail+smtp`, `native` and `null` are refused at compile time. |
 | `allowed_hosts` | `[]` | Exact host names (case-insensitive) accepted without the private / DNS checks. Single-label names (`mailpit`, `relay`) are refused unless listed here. |
 | `allow_private_hosts` | `false` | Accept private, loopback, link-local and reserved hosts. Cloud-metadata hosts (`169.254.169.254`, `metadata.google.internal`, `100.100.100.200`, `fd00:ec2::254`…) stay refused. |
+| `allow_insecure_tls` | `false` | DEV only. Accept `verify_peer=0` / `verify_peer_name=0` (TLS certificate checks off) in stored DSNs; otherwise `dsn.insecure_tls`. Literal boolean. |
 | `resolve_dns` | `true` | Resolve host names (A / AAAA, `gethostbynamel` fallback) and refuse a name that does not resolve or resolves to any private address. The lookup runs in a bounded child process (`dns_timeout`). |
 | `dns_timeout` | `2.0` | Seconds per lookup. |
 

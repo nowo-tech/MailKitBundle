@@ -25,6 +25,7 @@ use function dirname;
 use function getenv;
 use function in_array;
 use function is_string;
+use function md5;
 use function sys_get_temp_dir;
 
 /**
@@ -72,6 +73,16 @@ final class MailKitTestKernel extends Kernel
     public function getProjectDir(): string
     {
         return dirname(__DIR__, 3);
+    }
+
+    /**
+     * One container class per test kernel. Kernels with the same configuration would otherwise share the class (and
+     * its lazy-ghost namespace) while each one has its own cache directory, removed after every test: a later kernel
+     * then required a ghost proxy (`UriSignerGhost…`) from a directory that no longer exists, depending on test order.
+     */
+    protected function getContainerClass(): string
+    {
+        return parent::getContainerClass() . '_' . md5($this->id);
     }
 
     public function getCacheDir(): string

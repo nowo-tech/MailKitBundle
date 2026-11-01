@@ -31,8 +31,15 @@ up:
 	@if [ ! -f .env ]; then cp .env.example .env 2>/dev/null || true; fi
 	@echo "Waiting…"
 	$(COMPOSE) up -d
-	@echo "Installing…"
+	@echo "Waiting for container to be ready..."
 	@sleep 5
+	@# The entrypoint runs the first composer install and the schema, then starts FrankenPHP: wait for the server
+	@# instead of racing that install on the shared vendor/ (up to 15 minutes on a cold cache).
+	@PORT=$$(grep "^PORT=" .env 2>/dev/null | cut -d= -f2 | tr -d '\r'); \
+	[ -z "$$PORT" ] && PORT=$$(grep "^PORT=" .env.example 2>/dev/null | cut -d= -f2 | tr -d '\r'); \
+	[ -z "$$PORT" ] && PORT=8085; \
+	i=0; while [ $$i -lt 300 ] && [ "$$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$$PORT 2>/dev/null)" = "000" ]; do i=$$((i+1)); sleep 3; done
+	@echo "Installing dependencies..."
 	@$(COMPOSE) exec -T -e COMPOSER_MEMORY_LIMIT=-1 $(SERVICE_PHP) composer install --no-interaction || true
 	@PORT=$$(grep "^PORT=" .env 2>/dev/null | cut -d= -f2 | tr -d '\r'); \
 	[ -z "$$PORT" ] && PORT=$$(grep "^PORT=" .env.example 2>/dev/null | cut -d= -f2 | tr -d '\r'); \

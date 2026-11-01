@@ -125,6 +125,7 @@ to compile with a message naming the fix; routes exist only through the `nowo_ma
 - **FR-LOG-003** — `SentMailRepository` + `SentMailFilters`: filtered count / page, find.
 - **FR-LOG-004** — `ErrorScrubber`; `SentMailStatus`.
 - **FR-LOG-005** — CLI `nowo:mail-kit:log:purge`, `nowo:mail-kit:log:forget`.
+- **FR-LOG-006** — `SentMailCsvExporter`: streamed CSV export of the filtered, sorted log through ControllerKit's formula-injection-safe writer; `max_rows` cap with a notice row; optional bodies loaded by byte budget.
 - **FR-ORM-001** — `TablePrefixListener` prefixes the bundle tables and indexes only.
 
 ### Readiness

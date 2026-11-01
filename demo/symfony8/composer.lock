@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "9cc3ca62072bf81ae2427f3019127fd3",
+    "content-hash": "ee2244365de517c139449c15ba0e7a47",
     "packages": [
         {
             "name": "doctrine/collections",
@@ -1446,11 +1446,11 @@
         },
         {
             "name": "nowo-tech/mail-kit-bundle",
-            "version": "dev-feat/log-csv-sort",
+            "version": "dev-main",
             "dist": {
                 "type": "path",
                 "url": "/var/mail-kit-bundle",
-                "reference": "1d723a2d029012f4d5877e01a05af5d9550e0849"
+                "reference": "c70fd6cbf0a5b5c42daf9ede56ebedbf2b712ec2"
             },
             "require": {
                 "doctrine/dbal": "^3.8 || ^4.0",
@@ -1461,7 +1461,7 @@
                 "nowo-tech/form-kit-bundle": "^2.17",
                 "nowo-tech/instance-settings-bundle": "^1.1",
                 "nowo-tech/outbound-url-guard-bundle": "^1.3",
-                "nowo-tech/ui-kit-bundle": "^2.20",
+                "nowo-tech/ui-kit-bundle": "^2.21",
                 "php": ">=8.2 <8.6",
                 "psr/clock": "^1.0",
                 "psr/log": "^2.0 || ^3.0",
@@ -1721,16 +1721,16 @@
         },
         {
             "name": "nowo-tech/ui-kit-bundle",
-            "version": "v2.20.0",
+            "version": "v2.21.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/UiKitBundle.git",
-                "reference": "2225ff59ddfbbc5d8ca10f73e6665b92818753ac"
+                "reference": "e0f552ed48ba35a690c39ac9a239e3238bc327ca"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/UiKitBundle/zipball/2225ff59ddfbbc5d8ca10f73e6665b92818753ac",
-                "reference": "2225ff59ddfbbc5d8ca10f73e6665b92818753ac",
+                "url": "https://api.github.com/repos/nowo-tech/UiKitBundle/zipball/e0f552ed48ba35a690c39ac9a239e3238bc327ca",
+                "reference": "e0f552ed48ba35a690c39ac9a239e3238bc327ca",
                 "shasum": ""
             },
             "require": {
@@ -1811,7 +1811,8 @@
                 "issues": "https://github.com/nowo-tech/UiKitBundle/issues",
                 "source": "https://github.com/nowo-tech/UiKitBundle"
             },
-            "time": "2026-10-31T07:41:38+00:00"
+            "time": "2026-11-01T09:40:10+00:00",
+            "published-time": "2026-11-01T09:53:36+00:00"
         },
         {
             "name": "paragonie/constant_time_encoding",
@@ -9547,5 +9548,5 @@
         "php": ">=8.4,<8.6"
     },
     "platform-dev": {},
-    "plugin-api-version": "2.9.0"
+    "plugin-api-version": "2.11.0"
 }

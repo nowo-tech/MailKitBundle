@@ -89,7 +89,7 @@ The sections below state **behavior**; this subsection states **intent** in back
 | REQ-RUNTIME-001 | `src/Dsn/DsnHostGuard.php`, `src/Resend/ResendApiChecker.php`, `tests/Unit/Resend/ResendApiCheckerTest.php` | Bounded DNS lookups and Resend API deadline. |
 | REQ-TWIG-004 / REQ-TWIG-005 | `Makefile` `check-twig-extra`, `check-no-raw-html-form` | Twig Extra installed; no raw form markup in bundle or demo Twig. |
 | REQ-MAKE-004 | `Makefile` `validate-translations` | YAML syntax + key parity of the 7 locales. |
-| REQ-TEST-005 | `Makefile` `test-with-db`, `test-coverage-with-db` | Integration suite (Doctrine) in the root php service. |
+| REQ-TEST-005 | `Makefile` `test-with-db`, `test-coverage-with-db` | Integration suite (Doctrine, SQLite) in the root php service, then `tests/Integration/Log` on the optional MySQL 8.4 `db` service of the root `docker-compose.yml` (`db` profile, `MAIL_KIT_TEST_DATABASE_URL` exported). |
 | REQ-SF-004 rule 7 | `tests/Integration/Routing/RoutesOptInTest.php` | `routing.controllers` alone exposes no bundle route. |
 | REQ-UI-003 | `tests/Integration/Contract/PageContractTest.php` | UiKit page contract of every page. |
 

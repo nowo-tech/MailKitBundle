@@ -16,6 +16,25 @@ services:
     networks:
       - mail-kit-bundle-network
 
+  # Optional real database for `make test-with-db` (REQ-TEST-005); started only with the `db` profile.
+  db:
+    image: mysql:8.4
+    profiles: ["db"]
+    container_name: mail-kit-bundle-db
+    environment:
+      # Throw-away local test credential (not a secret), same as CI.
+      MYSQL_ROOT_PASSWORD: ci-throwaway
+      MYSQL_DATABASE: mailkit
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pci-throwaway"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+    networks:
+      - mail-kit-bundle-network
+
 volumes:
   composer-cache:
     driver: local

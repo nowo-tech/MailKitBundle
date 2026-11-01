@@ -9,7 +9,7 @@ COMPOSE_BIN := $(shell $(DOCKER_BIN) compose version >/dev/null 2>&1 && echo "$(
 COMPOSE     := $(COMPOSE_BIN) -f $(COMPOSE_FILE)
 SERVICE_PHP := php
 
-.PHONY: help up down down-dev build shell install ensure-up test test-coverage test-coverage-100 coverage-check validate-phpdoc test-e2e demo-screenshots coverage-php-percent cs-check cs-fix qa clean release-check release-check-demos demo-smoke composer-sync rector rector-dry phpstan igor update validate assets setup-hooks check-no-cursor-coauthor check-open-prs check-no-raw-html-form check-twig-extra validate-translations test-with-db test-coverage-with-db strip-cursor-coauthor-from-history
+.PHONY: help up down down-dev build shell install ensure-up test test-coverage test-coverage-100 coverage-check validate-phpdoc test-e2e demo-screenshots coverage-php-percent cs-check cs-fix qa clean release-check release-check-demos demo-smoke composer-sync rector rector-dry phpstan igor update validate assets setup-hooks check-no-cursor-coauthor check-open-prs check-no-raw-html-form check-twig-extra validate-translations test-with-db test-coverage-with-db db-up strip-cursor-coauthor-from-history
 
 help:
 	@echo "Mail Kit Bundle - Development Commands"
@@ -40,8 +40,8 @@ help:
 	@echo "  check-no-raw-html-form No raw <form>/<input>/<textarea>/<select> in bundle or demo Twig (REQ-TWIG-005)"
 	@echo "  check-twig-extra       twig/extra-bundle in the package and every Twig demo (REQ-TWIG-004)"
 	@echo "  validate-translations  YAML syntax + key parity of the 7 locales (REQ-MAKE-004 / REQ-I18N-002)"
-	@echo "  test-with-db           Integration suite (Doctrine on SQLite in the php container; REQ-TEST-005)"
-	@echo "  test-coverage-with-db  Integration suite with text coverage (REQ-TEST-005)"
+	@echo "  test-with-db           Integration suite on SQLite + log tests on the root-compose MySQL 8.4 (db profile; REQ-TEST-005)"
+	@echo "  test-coverage-with-db  Log tests on the root-compose MySQL 8.4 with text coverage (REQ-TEST-005)"
 	@echo "  check-open-prs Fail if unresolved open GitHub PRs remain (REQ-REL-003)"
 	@echo "  demo-smoke    REQ-TEST-011: boot demo + HTTP 200 (make -C demo demo-smoke)"
 	@echo "  composer-sync Validate composer.json and align composer.lock (no install)"
@@ -68,11 +68,11 @@ up:
 	@echo "✅ Container ready!"
 
 down:
-	$(COMPOSE) down
+	$(COMPOSE) --profile db down
 
 # Stop containers without removing volumes (REQ-MAKE-007)
 down-dev:
-	$(COMPOSE) down --remove-orphans
+	$(COMPOSE) --profile db down --remove-orphans
 
 shell:
 	$(COMPOSE) exec $(SERVICE_PHP) sh
@@ -170,12 +170,19 @@ check-twig-extra:
 validate-translations: ensure-up
 	$(COMPOSE) exec -T $(SERVICE_PHP) php .scripts/validate-translations.php
 
-# REQ-TEST-005: the integration suite boots Doctrine (SQLite in memory) inside the root php service.
-test-with-db: ensure-up
-	$(COMPOSE) exec -T $(SERVICE_PHP) vendor/bin/phpunit --testsuite Integration
+# REQ-TEST-005: the Integration suite on SQLite, then the sent-mail log tests (tests/Integration/Log) on the MySQL 8.4
+# service of the root compose (`db` profile, data in tmpfs), like the "Log on …" CI jobs.
+MAIL_KIT_TEST_DATABASE_URL ?= mysql://root:ci-throwaway@db:3306/mailkit?serverVersion=8.4&charset=utf8mb4
 
-test-coverage-with-db: ensure-up
-	$(COMPOSE) exec -T $(SERVICE_PHP) vendor/bin/phpunit --testsuite Integration --coverage-text
+db-up:
+	$(COMPOSE) --profile db up -d --wait db
+
+test-with-db: ensure-up db-up
+	$(COMPOSE) exec -T $(SERVICE_PHP) vendor/bin/phpunit --testsuite Integration
+	$(COMPOSE) exec -T -e MAIL_KIT_TEST_DATABASE_URL='$(MAIL_KIT_TEST_DATABASE_URL)' $(SERVICE_PHP) vendor/bin/phpunit --no-coverage tests/Integration/Log
+
+test-coverage-with-db: ensure-up db-up
+	$(COMPOSE) exec -T -e MAIL_KIT_TEST_DATABASE_URL='$(MAIL_KIT_TEST_DATABASE_URL)' $(SERVICE_PHP) vendor/bin/phpunit tests/Integration/Log --coverage-text
 
 # REQ-TWIG-005: no raw <form>/<input>/<textarea>/<select> in bundle or demo Twig templates.
 check-no-raw-html-form:

@@ -102,7 +102,7 @@ test: ensure-up
 	$(COMPOSE) exec -T $(SERVICE_PHP) php bin/console lint:twig templates
 
 # REQ-DEMO-013: Playwright e2e and README screenshots (official Playwright image, nothing to install on the host).
-PLAYWRIGHT_IMAGE ?= mcr.microsoft.com/playwright:v1.63.0-jammy
+PLAYWRIGHT_IMAGE ?= mcr.microsoft.com/playwright:v1.64.1-jammy
 
 test-e2e: ensure-up seed
 	@mkdir -p e2e/node_modules

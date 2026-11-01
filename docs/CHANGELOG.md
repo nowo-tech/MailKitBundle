@@ -5,6 +5,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Release notes link UPGRADING with an absolute URL: `release.yml` rewrites relative `UPGRADING.md` links to the
+  tagged `docs/UPGRADING.md` blob, as InstanceSettings, SmsKit and MessengerMonitorKit already do; relative links broke
+  on the GitHub release page. Existing releases are unchanged.
+
 ## [1.1.1] - 2026-11-01
 
 CSV export: body batches by byte budget, max_rows capped at 100000, controller-kit ^2.3.1 (formula guard after separators); demo install race fixed See [UPGRADING](UPGRADING.md#to-111).

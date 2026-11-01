@@ -72,6 +72,9 @@ jobs:
           if [ "$HAS_CHANGELOG" = "true" ] && [ -n "$CHANGELOG_ENTRY" ]; then
             BODY=$(printf '%s\n\n## Changelog\n\n%s' "$TAG_MSG" "$CHANGELOG_ENTRY")
           fi
+          # Relative docs links break on the release page: point UPGRADING links at the tagged file.
+          UPGRADING_URL="https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF#refs/tags/}/docs/UPGRADING.md"
+          BODY=$(printf '%s' "$BODY" | sed -E "s#\]\((\./|\.\./)?(docs/)?UPGRADING\.md#](${UPGRADING_URL}#g")
           DELIM=$(openssl rand -hex 16)
           { echo "content<<${DELIM}"; printf '%s' "$BODY"; echo ""; echo "${DELIM}"; } >> $GITHUB_OUTPUT
 

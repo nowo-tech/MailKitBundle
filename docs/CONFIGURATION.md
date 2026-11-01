@@ -60,13 +60,18 @@ nowo_mail_kit:
         layout_template: null          # null = nowo_ui_kit.layouts.admin
         templates: {}                  # log_index, log_show
         page_size: 25                  # rows per log page (5 … 200)
+        export:
+            enabled: true              # GET <path_prefix>/log/export (CSV of the filtered, sorted log)
+            max_rows: 10000            # rows per export (1 … 1 000 000); longer results end with a notice row
+            access_roles: []           # extra roles the export needs (any of them); [] = the log access is enough
+            include_bodies: false      # offer "Export CSV with bodies" (needs log.store_bodies: true)
     security:
         access_roles: [ROLE_ADMIN]     # any of them; must not be empty (unless access_checker / allow_unauthenticated)
         access_checker: null           # service id implementing MailKitAccessCheckerInterface
         allow_unauthenticated: false   # DEV / DEMO only; refused unless kernel.debug is true
 ```
 
-Unknown keys are rejected. Switches (`mailer.decorate`, `dsn.allow_private_hosts`, `dsn.allow_insecure_tls`, `resend.enabled`, `log.enabled`, `log.store_bodies`, `web_ui.enabled`, `security.allow_unauthenticated`) must be literal booleans: `%env(bool:…)%` placeholders are refused because they would read as `true` while the container is built.
+Unknown keys are rejected. Switches (`mailer.decorate`, `dsn.allow_private_hosts`, `dsn.allow_insecure_tls`, `resend.enabled`, `log.enabled`, `log.store_bodies`, `web_ui.enabled`, `web_ui.export.enabled`, `web_ui.export.include_bodies`, `security.allow_unauthenticated`) must be literal booleans: `%env(bool:…)%` placeholders are refused because they would read as `true` while the container is built.
 
 ## mailer
 
@@ -138,6 +143,22 @@ Validation (query options and the built transport's endpoint included) runs on s
 | `layout_template` | `null` | Layout the pages extend; `null` uses `nowo_ui_kit.layouts.admin` (REQ-UI-003). It must render the UiKit canonical blocks. |
 | `templates` | `{}` | Per-page overrides: `log_index`, `log_show` (see [TEMPLATES](TEMPLATES.md)). |
 | `page_size` | `25` | Rows per log page (`per_page` query values 10, 25, 50, 100 and this one are accepted). |
+| `export.enabled` | `true` | Route `nowo_mail_kit_log_export` (`GET <path_prefix>/log/export`) and the "Export CSV" action of the log list. Needs `log.enabled`. |
+| `export.max_rows` | `10000` | Rows of one export at most (1 … 1 000 000). When more rows match, the file ends with a translated notice row ("Export truncated: the first N of M rows…"), the `X-Mail-Kit-Export-Truncated` response header is `1` and the list action reads "Export CSV (first N rows)". |
+| `export.access_roles` | `[]` | Roles the export needs **on top of** the log access (`security.*`), any of them. Empty: whoever may open the log may export it. With roles set, anonymous access (`allow_unauthenticated`) cannot export. |
+| `export.include_bodies` | `false` | Adds "Export CSV with bodies" (`?bodies=1`: text and HTML body columns). Refused at compile time unless `log.store_bodies: true`; without it `?bodies=1` is ignored. |
+
+Example: let support staff read the log but keep the CSV for the DPO role, capped at 5 000 rows.
+
+```yaml
+nowo_mail_kit:
+    security:
+        access_roles: [ROLE_SUPPORT, ROLE_ADMIN]
+    web_ui:
+        export:
+            max_rows: 5000
+            access_roles: [ROLE_DPO]
+```
 
 ### Layout and CSS stack (UiKit)
 

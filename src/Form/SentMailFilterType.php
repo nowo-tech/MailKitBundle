@@ -11,6 +11,7 @@ use Nowo\MailKitBundle\Log\SentMailStatus;
 use Nowo\MailKitBundle\NowoMailKitBundle;
 use Symfony\Component\Form\AbstractType;
 use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
+use Symfony\Component\Form\Extension\Core\Type\HiddenType;
 use Symfony\Component\Form\Extension\Core\Type\SearchType;
 use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\OptionsResolver\OptionsResolver;
@@ -18,8 +19,9 @@ use Symfony\Component\OptionsResolver\OptionsResolver;
 use function array_keys;
 
 /**
- * GET filters of the sent-mail log (REQ-TWIG-005 rules 6 and 11): search, status, period. No CSRF (idempotent,
- * bookmarkable); empty block prefix so the query keys stay `q`, `status`, `period`.
+ * GET filters of the sent-mail log (REQ-TWIG-005 rules 6 and 11): search, status, period, plus the hidden `sort` /
+ * `dir` of the current order (a new filter keeps the sort). No CSRF (idempotent, bookmarkable); empty block prefix
+ * so the query keys stay `q`, `status`, `period`, `sort`, `dir`.
  *
  * @extends AbstractType<array<string, string>>
  */
@@ -29,7 +31,7 @@ final class SentMailFilterType extends AbstractType
     use FormOptionsTrait;
 
     /**
-     * Fields `q`, `status`, `period`.
+     * Fields `q`, `status`, `period`, hidden `sort`, `dir`.
      */
     public function buildForm(FormBuilderInterface $builder, array $options): void
     {
@@ -58,6 +60,8 @@ final class SentMailFilterType extends AbstractType
             'required' => true,
             'choices'  => $periods,
         ]);
+        $this->addWithDefaults($builder, 'sort', HiddenType::class, ['required' => false]);
+        $this->addWithDefaults($builder, 'dir', HiddenType::class, ['required' => false]);
     }
 
     /**

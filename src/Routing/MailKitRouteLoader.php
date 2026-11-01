@@ -20,8 +20,9 @@ use function str_starts_with;
 /**
  * Route loader `nowo_mail_kit` (REQ-SF-004 rule 7: the only way to expose the bundle routes). Reads the `#[Route]`
  * attributes of {@see MailKitController} and mounts them under `web_ui.path_prefix`, leaving out the groups that are
- * switched off: the log pages without `log.enabled`, the body page without `log.store_bodies`, the Resend actions
- * without `resend.enabled`. Nothing is loaded when `web_ui.enabled` is false.
+ * switched off: the log pages without `log.enabled`, the body page without `log.store_bodies`, the CSV export without
+ * `web_ui.export.enabled`, the Resend actions without `resend.enabled`. Nothing is loaded when `web_ui.enabled` is
+ * false.
  *
  * ```yaml
  * # config/routes/nowo_mail_kit.yaml
@@ -39,6 +40,7 @@ final class MailKitRouteLoader extends Loader
 
     /**
      * @param string $pathPrefix `web_ui.path_prefix`
+     * @param bool $exportEnabled `web_ui.export.enabled`
      */
     public function __construct(
         private readonly bool $webUiEnabled,
@@ -47,6 +49,7 @@ final class MailKitRouteLoader extends Loader
         private readonly bool $storeBodies = false,
         private readonly bool $resendEnabled = false,
         ?string $env = null,
+        private readonly bool $exportEnabled = true,
     ) {
         parent::__construct($env);
     }
@@ -100,6 +103,7 @@ final class MailKitRouteLoader extends Loader
         return match (true) {
             str_starts_with($path, '/actions/resend') => $this->resendEnabled,
             str_starts_with($path, '/log/{id}/body')  => $this->logEnabled && $this->storeBodies,
+            str_starts_with($path, '/log/export')     => $this->logEnabled && $this->exportEnabled,
             str_starts_with($path, '/log')            => $this->logEnabled,
             default                                   => true,
         };

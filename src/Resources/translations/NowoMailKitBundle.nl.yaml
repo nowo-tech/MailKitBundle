@@ -88,6 +88,24 @@ log:
         filter: Filteren
         back: Terug naar de lijst
         html_body: HTML-inhoud openen
+        export: 'CSV exporteren'
+        export_limited: 'CSV exporteren (eerste %max% rijen)'
+        export_bodies: 'CSV met inhoud exporteren'
+    export:
+        truncated: 'Export ingekort: de eerste %max% van %total% rijen. Verfijn de filters om de rest te exporteren.'
+        column:
+            date: 'Datum'
+            status: 'Status'
+            tag: 'Label'
+            from: 'Van'
+            to: 'Aan'
+            cc: 'Cc'
+            bcc: 'Bcc'
+            subject: 'Onderwerp'
+            error: 'Fout'
+            reference: 'Referentie'
+            text_body: 'Tekstinhoud'
+            html_body: 'HTML-inhoud'
     show:
         title: Verstuurde e-mail
         envelope: Envelop

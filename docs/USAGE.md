@@ -18,6 +18,8 @@
 - [Readiness and AuthKit](#readiness-and-authkit)
 - [Sent-mail log](#sent-mail-log)
   - [Admin pages](#admin-pages)
+  - [Sorting](#sorting)
+  - [CSV export](#csv-export)
   - [Retention and erasure](#retention-and-erasure)
 - [Reacting to changes and auditing](#reacting-to-changes-and-auditing)
 - [Admin UI](#admin-ui)
@@ -205,9 +207,57 @@ Switch the log off with `log.enabled: false` (no table writes, no log pages, no 
 
 ### Admin pages
 
-- `GET /admin/mail/log` — UiKit list: search (subject or recipient, ≥ 3 characters), status, period (24 h / 7 d / 30 d / all), `web_ui.page_size` rows per page, the current transport in the header.
+- `GET /admin/mail/log` — UiKit list: search (subject or recipient, ≥ 3 characters), status, period (24 h / 7 d / 30 d / all), sortable columns, `web_ui.page_size` rows per page, the current transport and the "Export CSV" action in the header.
+- `GET /admin/mail/log/export` — CSV of the current filters and sort (see [CSV export](#csv-export)).
 - `GET /admin/mail/log/{id}` — envelope and delivery details; the stored text body (escaped).
 - `GET /admin/mail/log/{id}/body` — stored HTML body as its own response with `Content-Security-Policy: default-src 'none'; …; sandbox` (no script, no remote loads, no forms), `nosniff`, `no-store` (only with `log.store_bodies`).
+
+### Sorting
+
+The date, status, subject, tag and transport headers sort the list on the server (UiKit `Listing\SortRequest`,
+`?sort=<key>&dir=asc|desc`). The keys are a whitelist — `queuedAt`, `status`, `subject`, `tag`, `transport`
+(`SentMailRepository::SORT_FIELDS`, the same keys as the column `sortKey`s); an unknown key falls back to the default
+(newest first) and an unknown direction to the column's first-click direction (`desc` for the date), never an error.
+Ties are broken by the date and then the row id in the same direction, so pages never overlap. The pagination links,
+the filter form (hidden `sort` / `dir` fields) and the export link keep the sort; a click on a header goes back to page
+1 and keeps the filters. Recipients are a list and do not sort.
+
+```php
+// Your own listing of the log, same rules:
+$sort = \Nowo\MailKitBundle\Ui\AdminPages::sort($request);  // SortRequest over the sortable columns
+$rows = $repository->findFiltered($filters, 25, 0, $sort->field, $sort->direction); // unknown key => InvalidArgumentException
+```
+
+### CSV export
+
+"Export CSV" on the log list downloads `sent-mail-<YYYYmmdd-His>.csv` with the **current filters and sort**:
+
+```text
+Date,Status,Tag,From,To,Cc,Bcc,Subject,Error,Reference
+2026-10-31T09:12:44+00:00,sent,invoice,app@example.com,alice@example.com,,,Invoice 42,,0102abc@provider
+```
+
+- Columns: date (ISO 8601), status (`queued` / `sent` / `failed`), tag, from, to / cc / bcc (comma-separated), subject,
+  error (credentials scrubbed again with `ErrorScrubber`), reference (provider message id). The header row is
+  translated (`log.export.column.*`), UTF-8 with a BOM (Excel).
+- Written through ControllerKit's `Http\CsvStreamedResponse` / `CsvSafeWriter`: a cell starting with `=`, `+`, `-`,
+  `@`, a tab or a carriage return is prefixed with `'` (CSV / formula injection), so a subject such as
+  `=HYPERLINK(…)` is shown as text by spreadsheets. Streamed row by row (rows detached after use), `Cache-Control:
+  no-store, private`, `Content-Disposition: attachment`, `X-Robots-Tag: noindex`.
+- At most `web_ui.export.max_rows` (10 000) rows; a longer result ends with a notice row, `X-Mail-Kit-Export-Truncated:
+  1` and the action label "Export CSV (first N rows)" — narrow the filters to export the rest.
+- **Bodies are never exported** unless `log.store_bodies: true` **and** `web_ui.export.include_bodies: true` **and**
+  the request asks for them (`?bodies=1`, the "Export CSV with bodies" action): two more columns, text and HTML body.
+- Access: the same checker as the list (`security.*`) plus, when set, `web_ui.export.access_roles`. Disable it with
+  `web_ui.export.enabled: false`.
+- GET, not a POST form: the export is a read with no side effect, like the list filters (REQ-TWIG-005 asks for a
+  FormKit CSRF form only when a page submits data; a link carries none). A cross-site link can at most make an admin's
+  own browser download a file it could already open; the response is never cached.
+
+**GDPR.** A CSV leaves the application's retention and erasure: rows purged by `nowo:mail-kit:log:purge` or erased by
+`nowo:mail-kit:log:forget` stay in files already downloaded. Restrict the export to the roles that need it
+(`web_ui.export.access_roles`), keep bodies out of it, and treat the files as personal data (storage, retention,
+deletion on request) — see [SECURITY](SECURITY.md#personal-data-gdpr).
 
 ### Retention and erasure
 
@@ -234,11 +284,12 @@ The routes come only from the `nowo_mail_kit` loader (REQ-SF-004 rule 7):
 | `nowo_mail_kit_log` | GET | `/admin/mail/log` |
 | `nowo_mail_kit_log_show` | GET | `/admin/mail/log/{id}` |
 | `nowo_mail_kit_log_body` | GET | `/admin/mail/log/{id}/body` (with `log.store_bodies`) |
+| `nowo_mail_kit_log_export` | GET | `/admin/mail/log/export` (with `web_ui.export.enabled`) |
 | `nowo_mail_kit_test` | POST | `/admin/mail/actions/test` |
 | `nowo_mail_kit_resend_check` | POST | `/admin/mail/actions/resend/check` (with `resend.enabled`) |
 | `nowo_mail_kit_resend_test` | POST | `/admin/mail/actions/resend/test` (with `resend.enabled`) |
 
-Every request under the prefix passes `MailKitAccessCheckerInterface` (`security.access_roles`, or your `security.access_checker`); the actions also need the Instance Settings access of their section and a valid CSRF token. Add a link to the log in your admin menu (`path('nowo_mail_kit_log')`).
+Every request under the prefix passes `MailKitAccessCheckerInterface` (`security.access_roles`, or your `security.access_checker`); the actions also need the Instance Settings access of their section and a valid CSRF token; the export also needs `web_ui.export.access_roles` when set. Add a link to the log in your admin menu (`path('nowo_mail_kit_log')`).
 
 ### Forms (FormKit)
 

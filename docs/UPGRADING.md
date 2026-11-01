@@ -13,6 +13,16 @@
 
 ## Unreleased
 
+No code change is required. Review two defaults:
+
+- The log list now offers **"Export CSV"** to whoever can open it (`web_ui.export.enabled: true`). To keep it for a
+  narrower role, set `web_ui.export.access_roles: [ROLE_…]`; to remove it, `web_ui.export.enabled: false`. Bodies are
+  never exported unless you also set `web_ui.export.include_bodies: true` (needs `log.store_bodies`).
+- New requirements: `nowo-tech/ui-kit-bundle` `^2.20` and `nowo-tech/controller-kit-bundle` `^2.3` (only its
+  `Http\CsvStreamedResponse` / `CsvSafeWriter` classes are used; registering `NowoControllerKitBundle` is not needed).
+- A template override of `log/index.html.twig` keeps working; the table headers now sort (UiKit `sorting`) and the
+  filter form carries two hidden fields (`sort`, `dir`), rendered by `form_end` if your override does not.
+
 ## To 1.0.0
 
 From **0.0.0**:

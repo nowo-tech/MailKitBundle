@@ -9,25 +9,30 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorageInterface;
+use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 use Symfony\Component\Security\Core\Exception\AccessDeniedException;
 
 use function is_object;
 
 /**
  * Applies the MailKit access checker to the current user and, for the settings actions, the Instance Settings
- * access of the section as well (the user must be able to open that settings page). The token is trusted only when
- * a firewall matched the main request.
+ * access of the section as well (the user must be able to open that settings page), and for the CSV export the
+ * optional `web_ui.export.access_roles` on top of the UI access. The token is trusted only when a firewall matched
+ * the main request.
  */
 final readonly class AccessGuard
 {
     /**
      * @param InstanceSettingsAccessGuard|null $settingsGuard Instance Settings access guard (its checker, `allow_unauthenticated` and firewall rules); null denies the actions
+     * @param list<string> $exportRoles `web_ui.export.access_roles`: the export also needs any of them (empty = the UI access is enough)
      */
     public function __construct(
         private MailKitAccessCheckerInterface $accessChecker,
         private ?InstanceSettingsAccessGuard $settingsGuard = null,
         private ?TokenStorageInterface $tokenStorage = null,
         private ?RequestStack $requestStack = null,
+        private array $exportRoles = [],
+        private ?AuthorizationCheckerInterface $authorizationChecker = null,
     ) {
     }
 
@@ -47,6 +52,30 @@ final readonly class AccessGuard
         return $this->isGranted()
             && $this->settingsGuard instanceof InstanceSettingsAccessGuard
             && $this->settingsGuard->isGranted($section);
+    }
+
+    /**
+     * The MailKit UI is open and, when `web_ui.export.access_roles` is set, the user (behind a firewall) holds any of
+     * those roles too. Fails closed without an authorization checker.
+     */
+    public function isExportGranted(): bool
+    {
+        if (!$this->isGranted()) {
+            return false;
+        }
+        if ($this->exportRoles === []) {
+            return true;
+        }
+        if ($this->user() === null || !$this->authorizationChecker instanceof AuthorizationCheckerInterface) {
+            return false;
+        }
+        foreach ($this->exportRoles as $role) {
+            if ($this->authorizationChecker->isGranted($role)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

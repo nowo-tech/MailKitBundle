@@ -1,7 +1,10 @@
 {#
   Sent-mail log list (REQ-UI-003): UiKit list scaffold. Variables: page (Nowo\UiKitBundle\View\ListPage from
-  Ui\AdminPages::listPage(): header with the redacted current transport, GET filters (search, status, period), table,
-  "View" row action, pagination, empty state), filters (Log\SentMailFilters). This template fills only the row cells.
+  Ui\AdminPages::listPage(): header with the redacted current transport and the "Export CSV" actions, GET filters
+  (search, status, period, hidden sort / dir), table with server-side sortable headers (UiKit SortRequest), "View" row
+  action, pagination keeping filters and sort, empty state), filters (Log\SentMailFilters), sort
+  (Nowo\UiKitBundle\Listing\SortRequest). This template fills only the row cells (keep their order in line with
+  Ui\AdminPages::columns()).
 
   Override: a template that extends '@!NowoMailKitBundle/log/index.html.twig' (web_ui.templates.log_index) and
   overrides nowo_ui_list_row (or another scaffold data block). Restyle through nowo_ui_kit.theme (slots), never here.

@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "efc7da42d1c6cf9ac04a124d64737d02",
+    "content-hash": "45c6cca6fb0cfc06d85c1701d26a1aff",
     "packages": [
         {
             "name": "doctrine/collections",
@@ -1001,6 +1001,108 @@
                 }
             ],
             "time": "2025-03-06T22:45:56+00:00"
+        },
+        {
+            "name": "nowo-tech/controller-kit-bundle",
+            "version": "v2.3.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/nowo-tech/ControllerKitBundle.git",
+                "reference": "6029f82f265c97eb9c85dfc11623e5eb348e556c"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/nowo-tech/ControllerKitBundle/zipball/6029f82f265c97eb9c85dfc11623e5eb348e556c",
+                "reference": "6029f82f265c97eb9c85dfc11623e5eb348e556c",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=8.2 <8.6",
+                "symfony/config": "^7.0 || ^8.0",
+                "symfony/dependency-injection": "^7.0 || ^8.0",
+                "symfony/http-foundation": "^7.0 || ^8.0",
+                "symfony/http-kernel": "^7.0 || ^8.0",
+                "symfony/routing": "^7.0 || ^8.0"
+            },
+            "require-dev": {
+                "doctrine/doctrine-bundle": "^2.13 || ^3.0",
+                "doctrine/orm": "^3.4",
+                "friendsofphp/php-cs-fixer": "^3.0",
+                "igor-php/igor-php": "^0.10.1",
+                "nowo-tech/phpstan-frankenphp": "^1.0",
+                "phpstan/extension-installer": "^1.4",
+                "phpstan/phpstan": "^2.0",
+                "phpstan/phpstan-symfony": "^2.0",
+                "phpunit/phpunit": "^10.0",
+                "rector/rector": "^2.0",
+                "symfony/form": "^7.0 || ^8.0",
+                "symfony/framework-bundle": "^7.0 || ^8.0",
+                "symfony/phpunit-bridge": "^7.0 || ^8.0",
+                "symfony/security-core": "^7.0 || ^8.0",
+                "symfony/security-csrf": "^7.0 || ^8.0",
+                "symfony/yaml": "^7.0 || ^8.0"
+            },
+            "suggest": {
+                "doctrine/doctrine-bundle": "Required (with doctrine/orm) to use the #[MapScopedEntity] argument resolver; it provides the `doctrine` registry",
+                "doctrine/orm": "Required (^2.17 || ^3.0, with doctrine/doctrine-bundle) to use the #[MapScopedEntity] owner-scoped entity argument resolver",
+                "symfony/flex": "For automatic recipe installation",
+                "symfony/form": "Required when using RequiresValidFormTrait (form guard helpers)",
+                "symfony/framework-bundle": "Required in your application when using the traits with AbstractController",
+                "symfony/security-core": "Required when using RequiresValidFormTrait (AbstractController::createAccessDeniedException)"
+            },
+            "type": "symfony-bundle",
+            "autoload": {
+                "psr-4": {
+                    "Nowo\\ControllerKitBundle\\": "src/"
+                },
+                "classmap": [
+                    "NowoControllerKitBundle.php"
+                ]
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Héctor Franco Aceituno",
+                    "email": "hectorfranco@nowo.tech",
+                    "homepage": "https://github.com/HecFranco",
+                    "role": "Developer"
+                },
+                {
+                    "name": "Nowo.tech",
+                    "homepage": "https://nowo.tech"
+                }
+            ],
+            "description": "Controller utilities for Symfony: redirectToReferer (configurable default route), SafeForwardTrait for safe request forwarding, RequiresValidFormTrait form guards, formula-injection-safe CSV and JSON download responses and the #[MapScopedEntity] owner-scoped Doctrine entity argument resolver.",
+            "homepage": "https://github.com/nowo-tech/ControllerKitBundle",
+            "keywords": [
+                "bundle",
+                "controller",
+                "csv",
+                "csv-injection",
+                "doctrine",
+                "download",
+                "forward",
+                "frankenphp",
+                "multi-tenant",
+                "php",
+                "redirect",
+                "referer",
+                "symfony",
+                "symfony-bundle",
+                "traits",
+                "utilities",
+                "value-resolver"
+            ],
+            "support": {
+                "changelog": "https://github.com/nowo-tech/ControllerKitBundle/blob/main/docs/CHANGELOG.md",
+                "docs": "https://github.com/nowo-tech/ControllerKitBundle/tree/main/docs",
+                "issues": "https://github.com/nowo-tech/ControllerKitBundle/issues",
+                "source": "https://github.com/nowo-tech/ControllerKitBundle"
+            },
+            "time": "2026-10-31T13:38:22+00:00"
         },
         {
             "name": "nowo-tech/doctrine-encrypt-bundle",

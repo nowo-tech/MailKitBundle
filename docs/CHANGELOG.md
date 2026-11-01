@@ -5,6 +5,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-01
+
+Sent-mail log CSV export (formula-injection safe, filters applied, row cap) and server-side sortable columns (UiKit 2.20 SortRequest). See [UPGRADING](UPGRADING.md#to-110).
+
 ### Added
 
 - **CSV export of the sent-mail log** (`GET <path_prefix>/log/export`, route `nowo_mail_kit_log_export`, "Export CSV"

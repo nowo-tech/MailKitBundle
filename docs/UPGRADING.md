@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.1.0](#to-110)
 - [To 1.0.0](#to-100)
 - [To 1.0.0 (initial release)](#to-100-initial-release)
   - [Requirements](#requirements)
@@ -12,6 +13,14 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+## To 1.1.0
+
+From **1.0.0**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
 
 No code change is required. Review two defaults:
 

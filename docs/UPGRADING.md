@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.1.1](#to-111)
 - [To 1.1.0](#to-110)
 - [To 1.0.0 (initial release)](#to-100-initial-release)
   - [Requirements](#requirements)
@@ -12,6 +13,14 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+## To 1.1.1
+
+From **1.1.0**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
 
 - `nowo-tech/controller-kit-bundle` is now required at `^2.3.1` (`composer update nowo-tech/controller-kit-bundle`).
   Exported cells with a formula trigger after an embedded `;`, `,`, tab, `|` or line break now read `Hi; =x` instead

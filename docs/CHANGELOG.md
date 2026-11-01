@@ -5,6 +5,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-01
+
+CSV export: body batches by byte budget, max_rows capped at 100000, controller-kit ^2.3.1 (formula guard after separators); demo install race fixed See [UPGRADING](UPGRADING.md#to-111).
+
 ### Security
 
 - Formula injection through an embedded list separator (CA delta 1.1.0 D1, Low): `nowo-tech/controller-kit-bundle`

@@ -29,6 +29,9 @@ final class InvalidConfigurationTest extends KernelTestCase
         yield 'bad interval' => [['test_email' => ['rate_interval' => 'whenever']], [], false, InvalidConfigurationException::class, 'rate_interval must be a relative time'];
         yield 'export bodies without stored bodies' => [['web_ui' => ['export' => ['include_bodies' => true]]], [], false, InvalidConfigurationException::class, 'include_bodies needs nowo_mail_kit.log.store_bodies'];
         yield 'export row cap' => [['web_ui' => ['export' => ['max_rows' => 0]]], [], false, InvalidConfigurationException::class, 'max_rows'];
+        yield 'export row cap above the limit' => [['web_ui' => ['export' => ['max_rows' => 100_001]]], [], false, InvalidConfigurationException::class, 'max_rows'];
+        yield 'export body batch too small' => [['web_ui' => ['export' => ['body_batch_bytes' => 1_048_575]]], [], false, InvalidConfigurationException::class, 'body_batch_bytes'];
+        yield 'export body batch too large' => [['web_ui' => ['export' => ['body_batch_bytes' => 67_108_865]]], [], false, InvalidConfigurationException::class, 'body_batch_bytes'];
         yield 'env placeholder export switch' => [['web_ui' => ['export' => ['enabled' => '%env(bool:MAIL_KIT_EXPORT)%']]], [], false, InvalidConfigurationException::class, 'web_ui.export.enabled must be a literal boolean'];
         yield 'env placeholder switch' => [['log' => ['store_bodies' => '%env(bool:MAIL_KIT_BODIES)%']], [], false, InvalidConfigurationException::class, 'must be a literal boolean'];
         yield 'unauthenticated outside debug' => [['security' => ['allow_unauthenticated' => true]], [], false, InvalidConfigurationException::class, 'only allowed when kernel.debug is true'];

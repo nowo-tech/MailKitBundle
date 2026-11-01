@@ -62,9 +62,10 @@ nowo_mail_kit:
         page_size: 25                  # rows per log page (5 … 200)
         export:
             enabled: true              # GET <path_prefix>/log/export (CSV of the filtered, sorted log)
-            max_rows: 10000            # rows per export (1 … 1 000 000); longer results end with a notice row
+            max_rows: 10000            # rows per export (1 … 100 000); longer results end with a notice row
             access_roles: []           # extra roles the export needs (any of them); [] = the log access is enough
             include_bodies: false      # offer "Export CSV with bodies" (needs log.store_bodies: true)
+            body_batch_bytes: 8388608  # approximate body bytes loaded per query by the export with bodies (1 MiB … 64 MiB)
     security:
         access_roles: [ROLE_ADMIN]     # any of them; must not be empty (unless access_checker / allow_unauthenticated)
         access_checker: null           # service id implementing MailKitAccessCheckerInterface
@@ -144,9 +145,10 @@ Validation (query options and the built transport's endpoint included) runs on s
 | `templates` | `{}` | Per-page overrides: `log_index`, `log_show` (see [TEMPLATES](TEMPLATES.md)). |
 | `page_size` | `25` | Rows per log page (`per_page` query values 10, 25, 50, 100 and this one are accepted). |
 | `export.enabled` | `true` | Route `nowo_mail_kit_log_export` (`GET <path_prefix>/log/export`) and the "Export CSV" action of the log list. Needs `log.enabled`. |
-| `export.max_rows` | `10000` | Rows of one export at most (1 … 1 000 000). When more rows match, the file ends with a translated notice row ("Export truncated: the first N of M rows…"), the `X-Mail-Kit-Export-Truncated` response header is `1` and the list action reads "Export CSV (first N rows)". |
+| `export.max_rows` | `10000` | Rows of one export at most (1 … 100 000). On MySQL / MariaDB `pdo_mysql` buffers the whole result in the client before the first row is written (a few KiB per row), so memory grows with this value. When more rows match, the file ends with a translated notice row ("Export truncated: the first N of M rows…"), the `X-Mail-Kit-Export-Truncated` response header is `1` and the list action reads "Export CSV (first N rows)". |
 | `export.access_roles` | `[]` | Roles the export needs **on top of** the log access (`security.*`), any of them. Empty: whoever may open the log may export it. With roles set, anonymous access (`allow_unauthenticated`) cannot export. |
-| `export.include_bodies` | `false` | Adds "Export CSV with bodies" (`?bodies=1`: text and HTML body columns). Refused at compile time unless `log.store_bodies: true`; without it `?bodies=1` is ignored. |
+| `export.include_bodies` | `false` | Adds "Export CSV with bodies" (`?bodies=1`: text and HTML body columns). Refused at compile time unless `log.store_bodies: true`; without it `?bodies=1` is ignored. Each stored body part may be 1 MiB: the bodies are loaded in chunks of `export.body_batch_bytes`. |
+| `export.body_batch_bytes` | `8388608` | Approximate body bytes (text + HTML length) loaded with one query by the export with bodies (1 MiB … 64 MiB); a row over it is loaded alone. The export then needs about this much memory plus one row on top of the request. |
 
 Example: let support staff read the log but keep the CSV for the DPO role, capped at 5 000 rows.
 

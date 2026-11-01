@@ -4,7 +4,6 @@
 
 - [Unreleased](#unreleased)
 - [To 1.1.0](#to-110)
-- [To 1.0.0](#to-100)
 - [To 1.0.0 (initial release)](#to-100-initial-release)
   - [Requirements](#requirements)
   - [Enable and configure](#enable-and-configure)
@@ -13,6 +12,14 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+- `nowo-tech/controller-kit-bundle` is now required at `^2.3.1` (`composer update nowo-tech/controller-kit-bundle`).
+  Exported cells with a formula trigger after an embedded `;`, `,`, tab, `|` or line break now read `Hi; =x` instead
+  of `Hi;=x`, and the response sends `X-Content-Type-Options: nosniff`.
+- **Notable behaviour change:** `web_ui.export.max_rows` accepts at most **100 000** (was 1 000 000). A configuration
+  above it no longer compiles; lower it, or narrow the filters of the export.
+- New optional `web_ui.export.body_batch_bytes` (default 8 MiB, 1 MiB … 64 MiB): approximate body bytes loaded per
+  query by the export with bodies. Nothing to change unless you want a different memory bound.
 
 ## To 1.1.0
 
@@ -31,16 +38,6 @@ No code change is required. Review two defaults:
   `Http\CsvStreamedResponse` / `CsvSafeWriter` classes are used; registering `NowoControllerKitBundle` is not needed).
 - A template override of `log/index.html.twig` keeps working; the table headers now sort (UiKit `sorting`) and the
   filter form carries two hidden fields (`sort`, `dir`), rendered by `form_end` if your override does not.
-
-## To 1.0.0
-
-From **0.0.0**:
-
-```bash
-composer update nowo-tech/mail-kit-bundle
-```
-
-Nothing yet beyond the initial 1.0.0 content below.
 
 ## To 1.0.0 (initial release)
 

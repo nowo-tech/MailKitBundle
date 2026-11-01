@@ -27,7 +27,7 @@ final class ConfigurationTest extends TestCase
         self::assertFalse($config['log']['store_bodies']);
         self::assertSame(30, $config['log']['retention_days']);
         self::assertSame('/admin/mail', $config['web_ui']['path_prefix']);
-        self::assertSame(['enabled' => true, 'max_rows' => 10_000, 'access_roles' => [], 'include_bodies' => false], $config['web_ui']['export']);
+        self::assertSame(['enabled' => true, 'max_rows' => 10_000, 'access_roles' => [], 'include_bodies' => false, 'body_batch_bytes' => 8_388_608], $config['web_ui']['export']);
         self::assertSame(['ROLE_ADMIN'], $config['security']['access_roles']);
         self::assertFalse($config['security']['allow_unauthenticated']);
     }

@@ -998,16 +998,16 @@
         },
         {
             "name": "nowo-tech/controller-kit-bundle",
-            "version": "v2.3.0",
+            "version": "v2.3.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/ControllerKitBundle.git",
-                "reference": "6029f82f265c97eb9c85dfc11623e5eb348e556c"
+                "reference": "49d0d1fcd03fcfabf2c978e5f778eea8a02eede8"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/ControllerKitBundle/zipball/6029f82f265c97eb9c85dfc11623e5eb348e556c",
-                "reference": "6029f82f265c97eb9c85dfc11623e5eb348e556c",
+                "url": "https://api.github.com/repos/nowo-tech/ControllerKitBundle/zipball/49d0d1fcd03fcfabf2c978e5f778eea8a02eede8",
+                "reference": "49d0d1fcd03fcfabf2c978e5f778eea8a02eede8",
                 "shasum": ""
             },
             "require": {
@@ -1096,7 +1096,8 @@
                 "issues": "https://github.com/nowo-tech/ControllerKitBundle/issues",
                 "source": "https://github.com/nowo-tech/ControllerKitBundle"
             },
-            "time": "2026-10-31T13:38:22+00:00"
+            "time": "2026-11-01T12:17:50+00:00",
+            "published-time": "2026-11-01T12:18:31+00:00"
         },
         {
             "name": "nowo-tech/doctrine-encrypt-bundle",
@@ -1450,14 +1451,14 @@
             "dist": {
                 "type": "path",
                 "url": "/var/mail-kit-bundle",
-                "reference": "c70fd6cbf0a5b5c42daf9ede56ebedbf2b712ec2"
+                "reference": "e438f00f81dd17dbd452f5c096b427a1df6bc757"
             },
             "require": {
                 "doctrine/dbal": "^3.8 || ^4.0",
                 "doctrine/doctrine-bundle": "^2.13 || ^3.0",
                 "doctrine/orm": "^3.3",
                 "doctrine/persistence": "^3.1 || ^4.0",
-                "nowo-tech/controller-kit-bundle": "^2.3",
+                "nowo-tech/controller-kit-bundle": "^2.3.1",
                 "nowo-tech/form-kit-bundle": "^2.17",
                 "nowo-tech/instance-settings-bundle": "^1.1",
                 "nowo-tech/outbound-url-guard-bundle": "^1.3",

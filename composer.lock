@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "45c6cca6fb0cfc06d85c1701d26a1aff",
+    "content-hash": "ae7eadc502672764ac5accc5381556de",
     "packages": [
         {
             "name": "doctrine/collections",
@@ -1004,16 +1004,16 @@
         },
         {
             "name": "nowo-tech/controller-kit-bundle",
-            "version": "v2.3.0",
+            "version": "v2.3.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/ControllerKitBundle.git",
-                "reference": "6029f82f265c97eb9c85dfc11623e5eb348e556c"
+                "reference": "49d0d1fcd03fcfabf2c978e5f778eea8a02eede8"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/ControllerKitBundle/zipball/6029f82f265c97eb9c85dfc11623e5eb348e556c",
-                "reference": "6029f82f265c97eb9c85dfc11623e5eb348e556c",
+                "url": "https://api.github.com/repos/nowo-tech/ControllerKitBundle/zipball/49d0d1fcd03fcfabf2c978e5f778eea8a02eede8",
+                "reference": "49d0d1fcd03fcfabf2c978e5f778eea8a02eede8",
                 "shasum": ""
             },
             "require": {
@@ -1102,7 +1102,8 @@
                 "issues": "https://github.com/nowo-tech/ControllerKitBundle/issues",
                 "source": "https://github.com/nowo-tech/ControllerKitBundle"
             },
-            "time": "2026-10-31T13:38:22+00:00"
+            "time": "2026-11-01T12:17:50+00:00",
+            "published-time": "2026-11-01T12:18:31+00:00"
         },
         {
             "name": "nowo-tech/doctrine-encrypt-bundle",
@@ -1543,16 +1544,16 @@
         },
         {
             "name": "nowo-tech/ui-kit-bundle",
-            "version": "v2.20.0",
+            "version": "v2.21.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/UiKitBundle.git",
-                "reference": "2225ff59ddfbbc5d8ca10f73e6665b92818753ac"
+                "reference": "e0f552ed48ba35a690c39ac9a239e3238bc327ca"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/UiKitBundle/zipball/2225ff59ddfbbc5d8ca10f73e6665b92818753ac",
-                "reference": "2225ff59ddfbbc5d8ca10f73e6665b92818753ac",
+                "url": "https://api.github.com/repos/nowo-tech/UiKitBundle/zipball/e0f552ed48ba35a690c39ac9a239e3238bc327ca",
+                "reference": "e0f552ed48ba35a690c39ac9a239e3238bc327ca",
                 "shasum": ""
             },
             "require": {
@@ -1633,7 +1634,8 @@
                 "issues": "https://github.com/nowo-tech/UiKitBundle/issues",
                 "source": "https://github.com/nowo-tech/UiKitBundle"
             },
-            "time": "2026-10-31T07:41:38+00:00"
+            "time": "2026-11-01T09:40:10+00:00",
+            "published-time": "2026-11-01T09:53:36+00:00"
         },
         {
             "name": "paragonie/constant_time_encoding",
@@ -11821,5 +11823,5 @@
     "platform-overrides": {
         "php": "8.2.0"
     },
-    "plugin-api-version": "2.9.0"
+    "plugin-api-version": "2.11.0"
 }

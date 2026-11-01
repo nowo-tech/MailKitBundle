@@ -2,9 +2,9 @@
 
 **Baseline spec**: [`spec.md`](spec.md)  
 **Package**: `nowo-tech/mail-kit-bundle`  
-**Last audited**: 2026-10-31
+**Last audited**: 2026-11-01
 
-Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **69**.
+Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **70**.
 
 ## Bundle and dependency injection
 
@@ -76,6 +76,7 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 | `src/Log/SentMailFilters.php` | Sent-mail log | FR-LOG-003 |
 | `src/Log/ErrorScrubber.php` | Sent-mail log | FR-LOG-004 |
 | `src/Log/SentMailStatus.php` | Sent-mail log | FR-LOG-004 |
+| `src/Log/SentMailCsvExporter.php` | Sent-mail log | FR-LOG-006 |
 | `src/Command/PurgeSentMailLogCommand.php` | Sent-mail log | FR-LOG-005 |
 | `src/Command/ForgetRecipientCommand.php` | Sent-mail log | FR-LOG-005 |
 | `src/Doctrine/TablePrefixListener.php` | Sent-mail log | FR-ORM-001 |

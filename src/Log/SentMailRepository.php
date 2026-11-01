@@ -133,6 +133,33 @@ final readonly class SentMailRepository
     }
 
     /**
+     * Approximate stored body size of several rows (text + HTML length; characters on some platforms, bytes on
+     * MySQL / MariaDB), by id, without loading the bodies (rows without stored bodies are missing).
+     *
+     * @param list<string> $ids
+     *
+     * @return array<string, int>
+     */
+    public function bodySizes(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        /** @var list<array{id: string, text: int|string|null, html: int|string|null}> $rows */
+        $rows = $this->manager()->createQueryBuilder()
+            ->select('b.id AS id', 'COALESCE(LENGTH(b.textBody), 0) AS text', 'COALESCE(LENGTH(b.htmlBody), 0) AS html')
+            ->from(SentMailBody::class, 'b')
+            ->where('b.id IN (:ids)')->setParameter('ids', $ids)
+            ->getQuery()->getArrayResult();
+        $sizes = [];
+        foreach ($rows as $row) {
+            $sizes[$row['id']] = (int) $row['text'] + (int) $row['html'];
+        }
+
+        return $sizes;
+    }
+
+    /**
      * One row, or null.
      */
     public function find(string $id): ?SentMail

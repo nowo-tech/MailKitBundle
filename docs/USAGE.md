@@ -241,13 +241,15 @@ Date,Status,Tag,From,To,Cc,Bcc,Subject,Error,Reference
   error (credentials scrubbed again with `ErrorScrubber`), reference (provider message id). The header row is
   translated (`log.export.column.*`), UTF-8 with a BOM (Excel).
 - Written through ControllerKit's `Http\CsvStreamedResponse` / `CsvSafeWriter`: a cell starting with `=`, `+`, `-`,
-  `@`, a tab or a carriage return is prefixed with `'` (CSV / formula injection), so a subject such as
-  `=HYPERLINK(…)` is shown as text by spreadsheets. Streamed row by row (rows detached after use), `Cache-Control:
+  `@`, a tab or a carriage return is prefixed with `'`, and a trigger after an embedded `;`, `,`, tab, `|` or line
+  break gets a space (CSV / formula injection, also when Excel reads the file with `;`), so a subject such as
+  `=HYPERLINK(…)` or `Hi;=cmd|…` is shown as text by the common spreadsheets. Streamed row by row (rows detached after use), `Cache-Control:
   no-store, private`, `Content-Disposition: attachment`, `X-Robots-Tag: noindex`.
-- At most `web_ui.export.max_rows` (10 000) rows; a longer result ends with a notice row, `X-Mail-Kit-Export-Truncated:
+- At most `web_ui.export.max_rows` (10 000, configurable up to 100 000) rows; a longer result ends with a notice row, `X-Mail-Kit-Export-Truncated:
   1` and the action label "Export CSV (first N rows)" — narrow the filters to export the rest.
 - **Bodies are never exported** unless `log.store_bodies: true` **and** `web_ui.export.include_bodies: true` **and**
-  the request asks for them (`?bodies=1`, the "Export CSV with bodies" action): two more columns, text and HTML body.
+  the request asks for them (`?bodies=1`, the "Export CSV with bodies" action): two more columns, text and HTML body,
+  loaded in chunks of about `web_ui.export.body_batch_bytes` (8 MiB) so the memory stays bounded.
 - Access: the same checker as the list (`security.*`) plus, when set, `web_ui.export.access_roles`. Disable it with
   `web_ui.export.enabled: false`.
 - GET, not a POST form: the export is a read with no side effect, like the list filters (REQ-TWIG-005 asks for a

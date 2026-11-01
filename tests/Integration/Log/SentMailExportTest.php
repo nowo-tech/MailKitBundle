@@ -31,6 +31,7 @@ use function ob_start;
 use function sprintf;
 use function str_getcsv;
 use function str_starts_with;
+use function strlen;
 use function strpos;
 use function substr;
 use function trim;
@@ -88,6 +89,32 @@ final class SentMailExportTest extends KernelTestCase
         self::assertCount(2, $failed);
         self::assertSame('dave@example.com', $failed[1][4]);
         self::assertCount(1, $this->csv($client, '/admin/mail/log/export?q=nobody-matches'));
+    }
+
+    /**
+     * Security (CA delta 1.1.0, D1): Excel in `;` list-separator locales splits `Hi;=cmd|…` into a second cell and
+     * ignores the quoting; ControllerKit ^2.3.1 puts a space before a trigger that follows an embedded separator.
+     */
+    public function testNoCellStartsWithAFormulaWhenTheFileIsReadWithSemicolons(): void
+    {
+        $kernel   = $this->bootKernel();
+        $recorder = $this->service($kernel, SentMailRecorder::class);
+        foreach (["Hi;=cmd|'/Ccalc'!A0", 'Order;=1+1;@SUM(2)', 'x;-2+3'] as $subject) {
+            $email = (new Email())->from('app@example.com')->to('alice@example.com')->subject($subject)->text('t');
+            MailHeaders::tag($email, 'tag;+1');
+            $recorder->sent(null, $email, 'smtp', null, null);
+        }
+        $client = $this->client($kernel);
+
+        $subjects = array_map(static fn (array $row): string => $row[7], array_slice($this->csv($client, '/admin/mail/log/export?sort=subject&dir=asc'), 1));
+        self::assertSame(["Hi; =cmd|'/Ccalc'!A0", 'Order; =1+1; @SUM(2)', 'x; -2+3'], $subjects);
+
+        $content = substr($client->getInternalResponse()->getContent(), 3);
+        foreach (explode("\n", trim($content)) as $line) {
+            foreach (explode(';', $line) as $cell) {
+                self::assertDoesNotMatchRegularExpression('/^[=+\-@\t\r]/', $cell, $line);
+            }
+        }
     }
 
     public function testTheExportFollowsTheLogAccessAndTheExportRoles(): void
@@ -189,6 +216,45 @@ final class SentMailExportTest extends KernelTestCase
         self::assertMatchesRegularExpression('/,one,,[^,]*,"text one",$/', $lines[1]);
         self::assertMatchesRegularExpression('/,three,,[^,]*,"text three",$/', $lines[2]);
         self::assertSame('log.export.truncated', $lines[3]);
+    }
+
+    /**
+     * Security (CA delta 1.1.0, D2): an export with bodies loads them by byte budget, not 100 rows at once (each body
+     * part may be 1 MiB, so a fixed batch could hold ~200 MiB). A budget below one body makes every row its own query;
+     * the output is the same as with one big batch.
+     */
+    public function testBodiesAreLoadedByByteBudgetWithTheSameOutput(): void
+    {
+        $kernel = $this->bootKernel(['log' => ['store_bodies' => true]]);
+        foreach (['one', 'two', 'three'] as $subject) {
+            $this->send($kernel, $subject, 'text ' . $subject, '<p>' . $subject . '</p>');
+        }
+        $this->send($kernel, 'four', 'gone');
+        $this->connection($kernel)->executeStatement("DELETE FROM mail_kit_sent_mail_body WHERE text_body = 'gone'");
+        $repository = $this->service($kernel, SentMailRepository::class);
+
+        $ids   = $this->connection($kernel)->fetchFirstColumn('SELECT id FROM mail_kit_sent_mail_body ORDER BY id');
+        $sizes = $repository->bodySizes([...array_map(static fn (mixed $id): string => (string) $id, $ids), 'missing-id']);
+        self::assertCount(3, $sizes);
+        self::assertSame([], $repository->bodySizes([]));
+        foreach ($sizes as $size) {
+            self::assertContains($size, [strlen('text one<p>one</p>'), strlen('text two<p>two</p>'), strlen('text three<p>three</p>')]);
+        }
+
+        $outputs = [];
+        foreach ([1, SentMailCsvExporter::BODY_BATCH_BYTES] as $budget) {
+            $exporter = new SentMailCsvExporter($repository, 10, true, null, new MockClock('2030-01-02 03:04:05'), SentMailCsvExporter::BODY_BATCH, $budget);
+            $response = $exporter->export(new SentMailFilters(), 'subject', 'asc', true);
+            ob_start();
+            $response->sendContent();
+            $outputs[$budget] = (string) ob_get_clean();
+        }
+        self::assertSame($outputs[1], $outputs[SentMailCsvExporter::BODY_BATCH_BYTES]);
+        $lines = explode("\n", trim(substr($outputs[1], 3)));
+        self::assertCount(5, $lines);
+        self::assertMatchesRegularExpression('/,four,,[^,]*,,$/', $lines[1]);
+        self::assertMatchesRegularExpression('/,one,,[^,]*,"text one",<p>one<\/p>$/', $lines[2]);
+        self::assertMatchesRegularExpression('/,two,,[^,]*,"text two",<p>two<\/p>$/', $lines[4]);
     }
 
     public function testTheLogSortsByWhitelistedColumnsOnly(): void

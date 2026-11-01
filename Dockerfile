@@ -8,7 +8,7 @@ RUN apk add --no-cache \
     libzip-dev \
     libsodium-dev
 
-RUN docker-php-ext-install -j$(nproc) zip sodium
+RUN docker-php-ext-install -j$(nproc) zip sodium pdo_mysql
 
 # PCOV for code coverage
 RUN apk add --no-cache $PHPIZE_DEPS \

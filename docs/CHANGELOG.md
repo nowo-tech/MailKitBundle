@@ -5,6 +5,40 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- Formula injection through an embedded list separator (CA delta 1.1.0 D1, Low): `nowo-tech/controller-kit-bundle`
+  raised to `^2.3.1`, whose `CsvSafeWriter` also puts a space before a formula trigger that follows `;`, `,`, tab,
+  `|` or a line break inside a cell (Excel in `;` list-separator locales split `Hi;=cmd|…` into an evaluated cell).
+  The CSV and JSON responses also send `X-Content-Type-Options: nosniff`. Regression test reads the export with `;`.
+- Memory of the export with bodies (CA delta 1.1.0 D2, Low, opt-in): bodies were loaded 100 rows per query, up to
+  ~200 MiB with 1 MiB text and HTML parts. They are now loaded in chunks of about `web_ui.export.body_batch_bytes`
+  (new, default 8 MiB, 1 MiB … 64 MiB), sized first with a `LENGTH()` query (`SentMailRepository::bodySizes()`); a
+  single row over the budget is fetched alone. New `SentMailCsvExporter::chunkBySize()` / `BODY_BATCH_BYTES`.
+- `web_ui.export.max_rows` is capped at 100 000 (was 1 000 000; `SentMailCsvExporter::MAX_ROWS_LIMIT`): `pdo_mysql`
+  buffers the whole result in the client, so memory grows with the row cap (CA delta 1.1.0 I-D2).
+- `docs/SECURITY.md` no longer overstates the CSV guarantee (best effort for common spreadsheets), and documents the
+  MySQL buffered-result cost and the partial file on a mid-stream error.
+
+### Changed
+
+- `nowo-tech/ui-kit-bundle` raised to `^2.21` (bundle and demo).
+- Root `docker-compose.yml`: optional MySQL 8.4 `db` service (`db` profile, tmpfs data); the root image gets
+  `pdo_mysql`. `make test-with-db` runs the Integration suite on SQLite, then `tests/Integration/Log` on that service
+  with `MAIL_KIT_TEST_DATABASE_URL` exported, like the "Log on …" CI jobs; `make test-coverage-with-db` does the same
+  with coverage (REQ-TEST-005).
+- `specs/001-baseline`: `SentMailCsvExporter` mapped to the new FR-LOG-006 (70 files, REQ-SPECKIT-003).
+- Docs: README coverage figures refreshed; the duplicate "To 1.0.0" UPGRADING section and the repeated 1.0.0 intro
+  line of this changelog removed.
+
+### Fixed
+
+- Demo `make up` (`demo/symfony8/Makefile`) waits until the entrypoint's first `composer install` has finished (the
+  server answers) before it runs its own install. The two installs raced on the shared `vendor/` and corrupted the
+  downloaded archives, which turned the Playwright e2e job of the v1.1.0 tag red (REQ-DEMO-013).
+- Demo lock: the bundle is pinned as `dev-main` (path repository `versions` option) instead of the feature branch
+  it was last refreshed from.
+
 ## [1.1.0] - 2026-11-01
 
 Sent-mail log CSV export (formula-injection safe, filters applied, row cap) and server-side sortable columns (UiKit 2.20 SortRequest). See [UPGRADING](UPGRADING.md#to-110).
@@ -31,10 +65,7 @@ Sent-mail log CSV export (formula-injection safe, filters applied, row cap) and 
 
 ## [1.0.0] - 2026-10-31
 
-First release: runtime-configured mailer on InstanceSettings (encrypted DSN), DSN/sender validation with SSRF-guarded provider endpoints, test e-mail, Resend check, privacy-first sent-mail log with retention and right-to-erasure, AuthKit readiness adapter. See [UPGRADING](UPGRADING.md#to-100).
-
-First release (1.0.0): the runtime mailer of Symfony Beacon (kit #2, phase 1) as a reusable bundle on top of
-`nowo-tech/instance-settings-bundle`.
+First release: runtime-configured mailer on InstanceSettings (encrypted DSN), DSN/sender validation with SSRF-guarded provider endpoints, test e-mail, Resend check, privacy-first sent-mail log with retention and right-to-erasure, AuthKit readiness adapter. See [UPGRADING](UPGRADING.md#to-100-initial-release).
 
 ### Added
 

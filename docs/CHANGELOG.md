@@ -13,22 +13,6 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-### Added
-
-- Provider-dependent rows in the `resend` settings section (InstanceSettings 1.3 `visible_when`): `api_key` and
-  `from` are shown only while "Send with Resend" (`enabled`) is checked. A save with the switch off neither validates
-  nor writes them, so their stored values survive switching Resend off and on. The `mailer` section has no provider
-  choice (the provider is part of the DSN) and is unchanged.
-- Demo: Resend section enabled, UiKit `visible-when` peer loaded, Playwright e2e (switch, save, switch back; axe in
-  both states).
-
-### Changed
-
-- Requires `nowo-tech/instance-settings-bundle` ^1.3 and `nowo-tech/ui-kit-bundle` ^2.23.
-- To store or replace a Resend key from the admin page, the switch must be checked when saving (the key row is hidden
-  and ignored while it is off). See [UPGRADING](UPGRADING.md#unreleased).
-- `composer test` / `test-coverage` run PHPUnit with `-d memory_limit=512M`.
-
 ## [1.2.0] - 2026-11-02
 
 DB-only mail settings: bootstrap.mailer_dsn / bootstrap.resend_api_key feed nowo:instance-settings:seed-from-fallbacks (same DSN checks as an admin save), missing-field notices. Requires InstanceSettings ^1.2. See [UPGRADING](https://github.com/nowo-tech/MailKitBundle/blob/v1.2.0/docs/UPGRADING.md#to-120).

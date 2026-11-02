@@ -8,8 +8,6 @@ nowo_mail_kit:
     dsn:
         # Mailpit is a private Docker host: allow it explicitly (the SSRF guard refuses private hosts otherwise).
         allowed_hosts: [mailpit]
-    resend:
-        enabled: true               # demo: shows the Resend section (its key / sender rows follow the switch)
     test_email:
         rate_limit: 20
     log:

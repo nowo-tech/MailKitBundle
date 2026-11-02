@@ -116,9 +116,6 @@ Validation (query options and the built transport's endpoint included) runs on s
 | `enabled` | `false` | Registers the `resend` section, its routes (`/actions/resend/*`) and `ResendApiChecker`. Sending needs `symfony/resend-mailer`. |
 | `api_timeout` | `10.0` | Connect + total deadline of the key check (`timeout` and `max_duration` of HttpClient). |
 
-The section's `api_key` and `from` rows depend on its `enabled` switch (1.3, InstanceSettings `visible_when`): hidden
-and not saved while it is off, stored values kept. See [USAGE](USAGE.md#resend).
-
 ## bootstrap
 
 | Key | Default | Description |

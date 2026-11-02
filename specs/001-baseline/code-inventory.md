@@ -23,7 +23,7 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 | Source file | Spec section | Requirement IDs |
 | --- | --- | --- |
 | `src/Settings/MailerSettingsSection.php` | Settings | FR-SET-001, FR-DBO-002 ([002](../002-db-only-seed/spec.md)) |
-| `src/Settings/ResendSettingsSection.php` | Settings | FR-SET-002, FR-DBO-002 ([002](../002-db-only-seed/spec.md)), FR-MAILVIS-001 ([003](../003-provider-dependent-fields/spec.md)) |
+| `src/Settings/ResendSettingsSection.php` | Settings | FR-SET-002, FR-DBO-002 ([002](../002-db-only-seed/spec.md)) |
 | `src/Settings/MailSettings.php` | Settings | FR-SET-003, FR-DBO-003 ([002](../002-db-only-seed/spec.md)) |
 
 ## DSN and sender

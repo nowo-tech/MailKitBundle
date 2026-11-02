@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "ae7eadc502672764ac5accc5381556de",
+    "content-hash": "d1907cfcbb10f6d8b4ffd59c0e17aa26",
     "packages": [
         {
             "name": "doctrine/collections",
@@ -1204,7 +1204,8 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-10-31T21:17:02+00:00"
+            "time": "2026-10-31T21:17:02+00:00",
+            "published-time": "2026-10-31T21:18:15+00:00"
         },
         {
             "name": "nowo-tech/form-kit-bundle",
@@ -1325,16 +1326,16 @@
         },
         {
             "name": "nowo-tech/instance-settings-bundle",
-            "version": "v1.1.0",
+            "version": "dev-feat/seed-from-fallbacks",
             "source": {
                 "type": "git",
-                "url": "https://github.com/nowo-tech/InstanceSettingsBundle.git",
-                "reference": "1e714d909b05e448b73bd4653caf05d2de559a6d"
+                "url": "https://github.com/nowo-tech/InstanceSettingsBundle",
+                "reference": "f7454a4f397c6b4a5990b614aad3cbab6a0ecdfc"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/InstanceSettingsBundle/zipball/1e714d909b05e448b73bd4653caf05d2de559a6d",
-                "reference": "1e714d909b05e448b73bd4653caf05d2de559a6d",
+                "url": "https://api.github.com/repos/nowo-tech/InstanceSettingsBundle/zipball/f7454a4f397c6b4a5990b614aad3cbab6a0ecdfc",
+                "reference": "f7454a4f397c6b4a5990b614aad3cbab6a0ecdfc",
                 "shasum": ""
             },
             "require": {
@@ -1343,7 +1344,7 @@
                 "doctrine/persistence": "^3.1 || ^4.0",
                 "nowo-tech/doctrine-encrypt-bundle": "^2.10",
                 "nowo-tech/form-kit-bundle": "^2.17",
-                "nowo-tech/ui-kit-bundle": "^2.17.3",
+                "nowo-tech/ui-kit-bundle": "^2.21",
                 "php": ">=8.2 <8.6",
                 "psr/clock": "^1.0",
                 "psr/event-dispatcher": "^1.0",
@@ -1405,7 +1406,60 @@
                     "Nowo\\InstanceSettingsBundle\\": "src/"
                 }
             },
-            "notification-url": "https://packagist.org/downloads/",
+            "autoload-dev": {
+                "psr-4": {
+                    "Nowo\\InstanceSettingsBundle\\Tests\\": "tests/"
+                }
+            },
+            "archive": {
+                "exclude": [
+                    "/demo",
+                    "/.cursor"
+                ]
+            },
+            "scripts": {
+                "test": [
+                    "phpunit --color=always"
+                ],
+                "test-coverage": [
+                    "phpunit --color=always --coverage-html coverage --coverage-clover coverage.xml --coverage-text"
+                ],
+                "test-coverage-100": [
+                    "@test-coverage",
+                    "php .scripts/check-coverage.php coverage.xml --min-percent=100"
+                ],
+                "validate-phpdoc": [
+                    "php .scripts/complete-public-phpdoc.php"
+                ],
+                "cs-check": [
+                    "php-cs-fixer fix --dry-run --diff"
+                ],
+                "cs-fix": [
+                    "php-cs-fixer fix"
+                ],
+                "rector": [
+                    "rector process"
+                ],
+                "rector-dry": [
+                    "rector process --dry-run --no-progress-bar"
+                ],
+                "phpstan": [
+                    "phpstan analyse --memory-limit=512M"
+                ],
+                "update": [
+                    "composer update --no-interaction"
+                ],
+                "validate": [
+                    "composer validate --strict"
+                ],
+                "qa": [
+                    "@cs-check",
+                    "@test"
+                ],
+                "igor": [
+                    "igor-php --no-agent ."
+                ]
+            },
             "license": [
                 "MIT"
             ],
@@ -1424,7 +1478,6 @@
             "description": "Runtime instance settings for Symfony apps: one settings store split into tagged sections, encrypted secret fields, admin forms and import / export (portability).",
             "homepage": "https://github.com/nowo-tech/InstanceSettingsBundle",
             "keywords": [
-                "Settings",
                 "admin",
                 "configuration",
                 "doctrine",
@@ -1434,22 +1487,17 @@
                 "instance-settings",
                 "php",
                 "runtime",
+                "settings",
                 "symfony",
                 "symfony-bundle"
             ],
             "support": {
-                "changelog": "https://github.com/nowo-tech/InstanceSettingsBundle/blob/main/docs/CHANGELOG.md",
-                "docs": "https://github.com/nowo-tech/InstanceSettingsBundle/tree/main/docs",
                 "issues": "https://github.com/nowo-tech/InstanceSettingsBundle/issues",
-                "source": "https://github.com/nowo-tech/InstanceSettingsBundle"
+                "source": "https://github.com/nowo-tech/InstanceSettingsBundle",
+                "docs": "https://github.com/nowo-tech/InstanceSettingsBundle/tree/main/docs",
+                "changelog": "https://github.com/nowo-tech/InstanceSettingsBundle/blob/main/docs/CHANGELOG.md"
             },
-            "funding": [
-                {
-                    "url": "https://github.com/HecFranco",
-                    "type": "github"
-                }
-            ],
-            "time": "2026-10-31T21:09:50+00:00"
+            "time": "2026-11-02T10:10:58+00:00"
         },
         {
             "name": "nowo-tech/outbound-url-guard-bundle",
@@ -1704,7 +1752,8 @@
                 "issues": "https://github.com/paragonie/constant_time_encoding/issues",
                 "source": "https://github.com/paragonie/constant_time_encoding"
             },
-            "time": "2025-09-24T15:06:41+00:00"
+            "time": "2025-09-24T15:06:41+00:00",
+            "published-time": "2025-09-24T15:07:11+00:00"
         },
         {
             "name": "paragonie/halite",
@@ -1776,7 +1825,8 @@
                 "issues": "https://github.com/paragonie/halite/issues",
                 "source": "https://github.com/paragonie/halite/tree/v5.1.4"
             },
-            "time": "2025-09-19T03:39:32+00:00"
+            "time": "2025-09-19T03:39:32+00:00",
+            "published-time": "2025-09-19T03:40:44+00:00"
         },
         {
             "name": "paragonie/hidden-string",
@@ -1828,7 +1878,8 @@
                 "issues": "https://github.com/paragonie/hidden-string/issues",
                 "source": "https://github.com/paragonie/hidden-string/tree/v2.2.0"
             },
-            "time": "2024-05-08T12:45:06+00:00"
+            "time": "2024-05-08T12:45:06+00:00",
+            "published-time": "2024-05-08T12:47:14+00:00"
         },
         {
             "name": "paragonie/sodium_compat",
@@ -1924,7 +1975,8 @@
                 "issues": "https://github.com/paragonie/sodium_compat/issues",
                 "source": "https://github.com/paragonie/sodium_compat/tree/v2.5.2"
             },
-            "time": "2026-08-18T23:46:48+00:00"
+            "time": "2026-08-18T23:46:48+00:00",
+            "published-time": "2026-08-18T23:47:50+00:00"
         },
         {
             "name": "psr/cache",
@@ -2074,7 +2126,8 @@
                 "issues": "https://github.com/php-fig/container/issues",
                 "source": "https://github.com/php-fig/container/tree/2.0.2"
             },
-            "time": "2021-11-05T16:47:00+00:00"
+            "time": "2021-11-05T16:47:00+00:00",
+            "published-time": "2021-11-05T16:53:27+00:00"
         },
         {
             "name": "psr/event-dispatcher",
@@ -2124,7 +2177,8 @@
                 "issues": "https://github.com/php-fig/event-dispatcher/issues",
                 "source": "https://github.com/php-fig/event-dispatcher/tree/1.0.0"
             },
-            "time": "2019-01-08T18:20:26+00:00"
+            "time": "2019-01-08T18:20:26+00:00",
+            "published-time": "2019-03-25T15:31:44+00:00"
         },
         {
             "name": "psr/log",
@@ -2840,7 +2894,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-06-05T06:23:12+00:00"
+            "time": "2026-06-05T06:23:12+00:00",
+            "published-time": "2026-06-27T21:46:34+00:00"
         },
         {
             "name": "symfony/doctrine-bridge",
@@ -3270,7 +3325,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-10-06T20:05:19+00:00"
+            "time": "2026-10-06T20:05:19+00:00",
+            "published-time": "2026-10-14T06:45:33+00:00"
         },
         {
             "name": "symfony/finder",
@@ -4385,7 +4441,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-04-10T16:19:22+00:00"
+            "time": "2026-04-10T16:19:22+00:00",
+            "published-time": "2026-04-26T14:44:50+00:00"
         },
         {
             "name": "symfony/polyfill-intl-grapheme",
@@ -4467,7 +4524,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-10-15T09:18:53+00:00"
+            "time": "2026-10-15T09:18:53+00:00",
+            "published-time": "2026-10-28T10:07:44+00:00"
         },
         {
             "name": "symfony/polyfill-intl-icu",
@@ -4812,7 +4870,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-10-28T09:35:49+00:00"
+            "time": "2026-10-28T09:35:49+00:00",
+            "published-time": "2026-10-28T10:07:45+00:00"
         },
         {
             "name": "symfony/polyfill-php83",
@@ -5280,7 +5339,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-10-25T14:40:16+00:00"
+            "time": "2026-10-25T14:40:16+00:00",
+            "published-time": "2026-10-28T18:21:18+00:00"
         },
         {
             "name": "symfony/property-access",
@@ -5361,7 +5421,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-10-26T21:52:50+00:00"
+            "time": "2026-10-26T21:52:50+00:00",
+            "published-time": "2026-10-28T18:19:56+00:00"
         },
         {
             "name": "symfony/property-info",
@@ -5451,7 +5512,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-10-25T14:40:16+00:00"
+            "time": "2026-10-25T14:40:16+00:00",
+            "published-time": "2026-10-28T18:21:31+00:00"
         },
         {
             "name": "symfony/rate-limiter",
@@ -5954,7 +6016,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-10-23T16:51:52+00:00"
+            "time": "2026-10-23T16:51:52+00:00",
+            "published-time": "2026-10-28T18:21:18+00:00"
         },
         {
             "name": "symfony/translation",
@@ -6424,7 +6487,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-10-24T08:22:23+00:00"
+            "time": "2026-10-24T08:22:23+00:00",
+            "published-time": "2026-10-28T18:20:01+00:00"
         },
         {
             "name": "symfony/uid",
@@ -6774,7 +6838,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-10-22T14:50:44+00:00"
+            "time": "2026-10-22T14:50:44+00:00",
+            "published-time": "2026-10-28T18:20:27+00:00"
         },
         {
             "name": "symfony/yaml",
@@ -11262,7 +11327,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-09-25T15:50:05+00:00"
+            "time": "2026-09-25T15:50:05+00:00",
+            "published-time": "2026-09-30T10:23:35+00:00"
         },
         {
             "name": "symfony/polyfill-php81",
@@ -11811,9 +11877,18 @@
             "time": "2025-11-17T20:03:58+00:00"
         }
     ],
-    "aliases": [],
+    "aliases": [
+        {
+            "package": "nowo-tech/instance-settings-bundle",
+            "version": "dev-feat/seed-from-fallbacks",
+            "alias": "1.2.0",
+            "alias_normalized": "1.2.0.0"
+        }
+    ],
     "minimum-stability": "stable",
-    "stability-flags": {},
+    "stability-flags": {
+        "nowo-tech/instance-settings-bundle": 20
+    },
     "prefer-stable": true,
     "prefer-lowest": false,
     "platform": {

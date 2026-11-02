@@ -6,12 +6,17 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[1.3.0] - 2026-11-02](#130---2026-11-02)
 - [[1.2.0] - 2026-11-02](#120---2026-11-02)
 - [[1.1.1] - 2026-11-01](#111---2026-11-01)
 - [[1.1.0] - 2026-11-01](#110---2026-11-01)
 - [[1.0.0] - 2026-10-31](#100---2026-10-31)
 
 ## [Unreleased]
+
+## [1.3.0] - 2026-11-02
+
+provider choice (DSN / Resend) with provider-dependent fields, key check on save, legacy purge
 
 Provider choice in the mailer settings: with `resend.enabled`, the `mailer` section offers `dsn` / `resend` and shows only the selected provider's fields (InstanceSettings 1.3 `visible_when`); a Resend key is checked before it goes live. Requires InstanceSettings ^1.3.1 and UiKit ^2.23. See [UPGRADING](UPGRADING.md#to-130).
 

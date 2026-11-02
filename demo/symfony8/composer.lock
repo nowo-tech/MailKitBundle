@@ -1327,12 +1327,12 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/InstanceSettingsBundle",
-                "reference": "f7454a4f397c6b4a5990b614aad3cbab6a0ecdfc"
+                "reference": "ab076e35509c6dbfd1c0fee8a7a1c7b4d0ab99e0"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/InstanceSettingsBundle/zipball/f7454a4f397c6b4a5990b614aad3cbab6a0ecdfc",
-                "reference": "f7454a4f397c6b4a5990b614aad3cbab6a0ecdfc",
+                "url": "https://api.github.com/repos/nowo-tech/InstanceSettingsBundle/zipball/ab076e35509c6dbfd1c0fee8a7a1c7b4d0ab99e0",
+                "reference": "ab076e35509c6dbfd1c0fee8a7a1c7b4d0ab99e0",
                 "shasum": ""
             },
             "require": {
@@ -1494,7 +1494,7 @@
                 "docs": "https://github.com/nowo-tech/InstanceSettingsBundle/tree/main/docs",
                 "changelog": "https://github.com/nowo-tech/InstanceSettingsBundle/blob/main/docs/CHANGELOG.md"
             },
-            "time": "2026-11-02T10:10:58+00:00"
+            "time": "2026-11-02T10:50:32+00:00"
         },
         {
             "name": "nowo-tech/mail-kit-bundle",
@@ -1502,7 +1502,7 @@
             "dist": {
                 "type": "path",
                 "url": "/var/mail-kit-bundle",
-                "reference": "b9b7633d28a40092adffce3226c95b11f57fc494"
+                "reference": "bfb28ea502db9447065c61d04f0f3f4d40658b9a"
             },
             "require": {
                 "doctrine/dbal": "^3.8 || ^4.0",

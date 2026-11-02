@@ -152,7 +152,7 @@ final class Configuration implements ConfigurationInterface
                     ->addDefaultsIfNotSet()
                     ->children()
                         ->scalarNode('mailer_dsn')
-                            ->info('Copied into the mailer.dsn secret when none is stored (e.g. "%env(MAILER_DSN)%"); skipped when it fails the DSN validation.')
+                            ->info('Copied into the mailer.dsn secret when none is stored (e.g. "%env(default::MAILER_DSN)%"); skipped when it fails the DSN validation.')
                             ->defaultNull()
                         ->end()
                         ->scalarNode('resend_api_key')

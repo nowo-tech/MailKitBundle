@@ -18,6 +18,7 @@ use Nowo\MailKitBundle\Tests\Support\StaticDsnProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\Request;
 
+use function array_map;
 use function bin2hex;
 use function iterator_to_array;
 use function random_bytes;
@@ -33,12 +34,12 @@ final class DbOnlySeedTest extends TestCase
         $key = 're_' . bin2hex(random_bytes(12));
 
         $mailer = iterator_to_array((new MailerSettingsSection(bootstrapDsn: $dsn))->getFallbacks(), false);
-        self::assertEquals([SettingFallback::secret('dsn', $dsn)], $mailer);
+        self::assertSame([['dsn', $dsn, true]], array_map(static fn (SettingFallback $f): array => [$f->field, $f->value(), $f->secret], $mailer));
         $resend = iterator_to_array((new ResendSettingsSection(bootstrapApiKey: $key))->getFallbacks(), false);
-        self::assertEquals([SettingFallback::secret('api_key', $key)], $resend);
+        self::assertSame([['api_key', $key, true]], array_map(static fn (SettingFallback $f): array => [$f->field, $f->value(), $f->secret], $resend));
 
         $empty = iterator_to_array((new MailerSettingsSection())->getFallbacks(), false);
-        self::assertNull($empty[0]->value, 'no bootstrap value: nothing to seed');
+        self::assertNull($empty[0]->value(), 'no bootstrap value: nothing to seed');
     }
 
     public function testMissingFields(): void

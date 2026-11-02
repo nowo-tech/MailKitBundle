@@ -30,7 +30,7 @@ No BC break; new, optional:
 - Settings page warnings and `MailStatus::$missingFields` / `OutboundMailReadiness::missingFields()` for health pages.
   `MailStatus` and `OutboundMailReadiness` got an optional trailing constructor argument (named arguments unaffected).
 
-To go DB-only, **in this order**: (1) upgrade and map `bootstrap.mailer_dsn: '%env(MAILER_DSN)%'` (and
+To go DB-only, **in this order**: (1) upgrade and map `bootstrap.mailer_dsn: '%env(default::MAILER_DSN)%'` (and
 `bootstrap.resend_api_key`) while the env vars still exist; (2) run
 `php bin/console nowo:instance-settings:seed-from-fallbacks --section=mailer --section=resend` (try `--dry-run`
 first); (3) only then remove the `bootstrap` keys and the env vars, and set `framework.mailer.dsn` to a literal such as

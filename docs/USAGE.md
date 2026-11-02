@@ -195,9 +195,13 @@ MailKit cannot read `framework.mailer.dsn`, so the one-time bootstrap goes throu
 # config/packages/nowo_mail_kit.yaml — temporary, while migrating
 nowo_mail_kit:
     bootstrap:
-        mailer_dsn: '%env(MAILER_DSN)%'
+        mailer_dsn: '%env(default::MAILER_DSN)%'
         resend_api_key: '%env(default::RESEND_API_KEY)%'   # with resend.enabled: true
 ```
+
+Always use `default::` (the sections are built on every settings read, so a plain `%env(MAILER_DSN)%` would break those
+reads once the env var is removed), and never put a literal secret under `bootstrap` (it would be compiled into the
+container and shown by `debug:config`).
 
 Order:
 
@@ -207,7 +211,8 @@ Order:
    the output lists field names only. A DSN that fails the settings validation (`null://`, `sendmail`, a private host
    not in `dsn.allowed_hosts`…) is skipped with reason `invalid`. The Resend **switch** is not seeded: turn it on in
    Settings → Resend.
-3. Remove the `bootstrap` keys and the env vars, and set the framework DSN to a literal (`null://null`).
+3. Remove the `bootstrap` keys and the env vars right away, and set the framework DSN to a literal (`null://null`).
+   Seed **once**: a secret an admin clears later would be seeded again while `bootstrap.*` is still mapped.
 
 **Missing settings warning.** The `mailer` page warns when no DSN is stored (unless
 `mailer.fallback_counts_as_ready: true`), the `resend` page when Resend is switched on without a key. Health / status

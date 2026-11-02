@@ -138,8 +138,8 @@
     "minimum-stability": "stable",
     "prefer-stable": true,
     "scripts": {
-        "test": "phpunit --color=always",
-        "test-coverage": "phpunit --color=always --coverage-html coverage --coverage-clover coverage.xml --coverage-text",
+        "test": "@php -d memory_limit=512M vendor/bin/phpunit --color=always",
+        "test-coverage": "@php -d memory_limit=512M vendor/bin/phpunit --color=always --coverage-html coverage --coverage-clover coverage.xml --coverage-text",
         "test-coverage-100": [
             "@test-coverage",
             "php .scripts/check-coverage.php coverage.xml --min-percent=100"

@@ -13,6 +13,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `composer test` / `test-coverage` run PHPUnit with `-d memory_limit=512M`.
+
+### Notes
+
+- InstanceSettings 1.3 provider-dependent fields (`visible_when`) are deliberately **not** used: the Resend API key and
+  sender stay visible whatever the "Send with Resend" switch says, so a key can be stored and checked ("Check the API
+  key") before switching Resend on. The `mailer` section has no provider choice (the provider is inside the DSN).
+
 ## [1.2.0] - 2026-11-02
 
 DB-only mail settings: bootstrap.mailer_dsn / bootstrap.resend_api_key feed nowo:instance-settings:seed-from-fallbacks (same DSN checks as an admin save), missing-field notices. Requires InstanceSettings ^1.2. See [UPGRADING](https://github.com/nowo-tech/MailKitBundle/blob/v1.2.0/docs/UPGRADING.md#to-120).

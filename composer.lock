@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "d1907cfcbb10f6d8b4ffd59c0e17aa26",
+    "content-hash": "d22b9bc830ad0315bc079b21bedd92d1",
     "packages": [
         {
             "name": "doctrine/collections",
@@ -1326,16 +1326,16 @@
         },
         {
             "name": "nowo-tech/instance-settings-bundle",
-            "version": "dev-feat/seed-from-fallbacks",
+            "version": "v1.2.0",
             "source": {
                 "type": "git",
-                "url": "https://github.com/nowo-tech/InstanceSettingsBundle",
-                "reference": "ab076e35509c6dbfd1c0fee8a7a1c7b4d0ab99e0"
+                "url": "https://github.com/nowo-tech/InstanceSettingsBundle.git",
+                "reference": "89c4fb60d441f5893b1c12ff1c7439a131b3fecc"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/InstanceSettingsBundle/zipball/ab076e35509c6dbfd1c0fee8a7a1c7b4d0ab99e0",
-                "reference": "ab076e35509c6dbfd1c0fee8a7a1c7b4d0ab99e0",
+                "url": "https://api.github.com/repos/nowo-tech/InstanceSettingsBundle/zipball/89c4fb60d441f5893b1c12ff1c7439a131b3fecc",
+                "reference": "89c4fb60d441f5893b1c12ff1c7439a131b3fecc",
                 "shasum": ""
             },
             "require": {
@@ -1406,60 +1406,7 @@
                     "Nowo\\InstanceSettingsBundle\\": "src/"
                 }
             },
-            "autoload-dev": {
-                "psr-4": {
-                    "Nowo\\InstanceSettingsBundle\\Tests\\": "tests/"
-                }
-            },
-            "archive": {
-                "exclude": [
-                    "/demo",
-                    "/.cursor"
-                ]
-            },
-            "scripts": {
-                "test": [
-                    "phpunit --color=always"
-                ],
-                "test-coverage": [
-                    "phpunit --color=always --coverage-html coverage --coverage-clover coverage.xml --coverage-text"
-                ],
-                "test-coverage-100": [
-                    "@test-coverage",
-                    "php .scripts/check-coverage.php coverage.xml --min-percent=100"
-                ],
-                "validate-phpdoc": [
-                    "php .scripts/complete-public-phpdoc.php"
-                ],
-                "cs-check": [
-                    "php-cs-fixer fix --dry-run --diff"
-                ],
-                "cs-fix": [
-                    "php-cs-fixer fix"
-                ],
-                "rector": [
-                    "rector process"
-                ],
-                "rector-dry": [
-                    "rector process --dry-run --no-progress-bar"
-                ],
-                "phpstan": [
-                    "phpstan analyse --memory-limit=512M"
-                ],
-                "update": [
-                    "composer update --no-interaction"
-                ],
-                "validate": [
-                    "composer validate --strict"
-                ],
-                "qa": [
-                    "@cs-check",
-                    "@test"
-                ],
-                "igor": [
-                    "igor-php --no-agent ."
-                ]
-            },
+            "notification-url": "https://packagist.org/downloads/",
             "license": [
                 "MIT"
             ],
@@ -1478,6 +1425,7 @@
             "description": "Runtime instance settings for Symfony apps: one settings store split into tagged sections, encrypted secret fields, admin forms and import / export (portability).",
             "homepage": "https://github.com/nowo-tech/InstanceSettingsBundle",
             "keywords": [
+                "Settings",
                 "admin",
                 "configuration",
                 "doctrine",
@@ -1487,17 +1435,23 @@
                 "instance-settings",
                 "php",
                 "runtime",
-                "settings",
                 "symfony",
                 "symfony-bundle"
             ],
             "support": {
-                "issues": "https://github.com/nowo-tech/InstanceSettingsBundle/issues",
-                "source": "https://github.com/nowo-tech/InstanceSettingsBundle",
+                "changelog": "https://github.com/nowo-tech/InstanceSettingsBundle/blob/main/docs/CHANGELOG.md",
                 "docs": "https://github.com/nowo-tech/InstanceSettingsBundle/tree/main/docs",
-                "changelog": "https://github.com/nowo-tech/InstanceSettingsBundle/blob/main/docs/CHANGELOG.md"
+                "issues": "https://github.com/nowo-tech/InstanceSettingsBundle/issues",
+                "source": "https://github.com/nowo-tech/InstanceSettingsBundle"
             },
-            "time": "2026-11-02T10:50:32+00:00"
+            "funding": [
+                {
+                    "url": "https://github.com/HecFranco",
+                    "type": "github"
+                }
+            ],
+            "time": "2026-11-02T11:05:37+00:00",
+            "published-time": "2026-11-02T11:34:19+00:00"
         },
         {
             "name": "nowo-tech/outbound-url-guard-bundle",
@@ -11877,18 +11831,9 @@
             "time": "2025-11-17T20:03:58+00:00"
         }
     ],
-    "aliases": [
-        {
-            "package": "nowo-tech/instance-settings-bundle",
-            "version": "dev-feat/seed-from-fallbacks",
-            "alias": "1.2.0",
-            "alias_normalized": "1.2.0.0"
-        }
-    ],
+    "aliases": [],
     "minimum-stability": "stable",
-    "stability-flags": {
-        "nowo-tech/instance-settings-bundle": 20
-    },
+    "stability-flags": {},
     "prefer-stable": true,
     "prefer-lowest": false,
     "platform": {

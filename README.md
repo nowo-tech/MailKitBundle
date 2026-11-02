@@ -30,6 +30,7 @@ The transport built from the stored DSN is cached per DSN and dropped on `kernel
 ## Features
 
 - **Runtime DSN** — `RuntimeTransport` decorates `mailer.transports` (used by the framework mailer **and** the Messenger `SendEmailMessage` handler): the DSN comes from the `mailer.dsn` setting (or the Resend key) on every send, the framework transport (`MAILER_DSN`) is the fallback, a message with an `X-Transport` header keeps its named transport. The built transport is cached per DSN and reset on `kernel.reset` / `SettingsChangedEvent` (worker safe). Replace the source with your own `MailerDsnProviderInterface`.
+- **DB-only mode** — map `bootstrap.mailer_dsn` / `bootstrap.resend_api_key` to `%env()%` once, run `nowo:instance-settings:seed-from-fallbacks` (InstanceSettings 1.2) and drop the env vars; the settings pages and `OutboundMailReadiness::missingFields()` warn when a required setting is empty.
 - **`MailerInterface` decorator** — fills the runtime **From** (`mailer.from` / `mailer.from_name`) and **Reply-To** when a message has none, before the framework mailer builds the envelope or queues it.
 - **Settings sections** — `mailer`: DSN (encrypted secret), sender address and name, Reply-To, test recipient; optional `resend`: switch, API key (encrypted), sender. Validated on save and import; never rendered back.
 - **DSN validation** — allow-listed schemes (SMTP + common provider bridges; `sendmail`, `native` and `null` always refused), parse and build check (missing bridge detected), host SSRF guard: private / loopback / link-local / reserved / cloud-metadata addresses and `localhost` / `*.local` / `*.internal` names refused, host names resolved with a bounded lookup; `allowed_hosts` for an internal relay. A refused DSN fails the send (no silent fallback).
@@ -159,7 +160,7 @@ make release-check
 ## Tests and coverage
 
 - Tests: PHPUnit (PHP) — unit tests plus kernel integration tests (decorated mailer end to end with Messenger, settings-stored DSN, fallback, refused DSNs, sent-mail log on SQLite and, with `make test-with-db`, on the root-compose MySQL 8.4, admin UI with SecurityBundle and CSRF, Resend check with a mocked API, rate limit, CLI, opt-in routes, invalid configuration) and the UiKit page contract test; Playwright e2e on the demo
-- PHP: 100% (1724/1724 statements, 1973/1973 elements, 224 tests; gate enforced in CI by `composer test-coverage-100`, no exclusions)
+- PHP: 100% (1769/1769 statements, 2025/2025 elements, 230 tests; gate enforced in CI by `composer test-coverage-100`, no exclusions)
 - TS/JS: N/A
 - Python: N/A
 

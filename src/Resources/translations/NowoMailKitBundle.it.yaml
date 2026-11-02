@@ -1,4 +1,5 @@
 settings:
+    notice_missing: 'Impostazioni obbligatorie vuote: %fields%. La posta in uscita non è pronta finché non vengono compilate.'
     mailer:
         label: Posta in uscita
         intro: "Posta in uscita di questa istanza. Un DSN salvato qui sostituisce MAILER_DSN dal messaggio successivo, senza deploy; lascialo vuoto per usare MAILER_DSN."

@@ -15,6 +15,7 @@
 - [Tags and redaction](#tags-and-redaction)
 - [Test e-mail](#test-e-mail)
 - [Resend](#resend)
+- [DB-only mode](#db-only-mode)
 - [Readiness and AuthKit](#readiness-and-authkit)
 - [Sent-mail log](#sent-mail-log)
   - [Admin pages](#admin-pages)
@@ -181,11 +182,48 @@ nowo_mail_kit:
 
 The section shows "Check the API key" (`GET https://api.resend.com/domains`, bounded by `api_timeout`, no redirects; lists the domains and their status, recognises sending-only keys) and "Send a test e-mail with Resend" (uses the stored key even while the switch is off). Programmatic check: `Nowo\MailKitBundle\Resend\ResendApiChecker::check($key)`.
 
+## DB-only mode
+
+Since 1.2 (with `nowo-tech/instance-settings-bundle` ^1.2) the mailer DSN and the Resend key can live **only in the
+database** (the `mailer` / `resend` sections, encrypted): the framework transport then needs no secret, e.g.
+`framework.mailer.dsn: 'null://null'` as a literal, and no `MAILER_DSN` / `RESEND_API_KEY` env var.
+
+MailKit cannot read `framework.mailer.dsn`, so the one-time bootstrap goes through two config keys that are read
+**only** by the seed (never to send):
+
+```yaml
+# config/packages/nowo_mail_kit.yaml — temporary, while migrating
+nowo_mail_kit:
+    bootstrap:
+        mailer_dsn: '%env(default::MAILER_DSN)%'
+        resend_api_key: '%env(default::RESEND_API_KEY)%'   # with resend.enabled: true
+```
+
+Always use `default::` (the sections are built on every settings read, so a plain `%env(MAILER_DSN)%` would break those
+reads once the env var is removed), and never put a literal secret under `bootstrap` (it would be compiled into the
+container and shown by `debug:config`).
+
+Order:
+
+1. Upgrade to MailKit 1.2 / InstanceSettings 1.2 and add the `bootstrap` keys while the env vars still exist.
+2. `php bin/console nowo:instance-settings:seed-from-fallbacks --section=mailer --section=resend --dry-run`, then
+   without `--dry-run` (add `--strict` to fail on a refused value). Each value is stored only when the secret is empty;
+   the output lists field names only. A DSN that fails the settings validation (`null://`, `sendmail`, a private host
+   not in `dsn.allowed_hosts`…) is skipped with reason `invalid`. The Resend **switch** is not seeded: turn it on in
+   Settings → Resend.
+3. Remove the `bootstrap` keys and the env vars right away, and set the framework DSN to a literal (`null://null`).
+   Seed **once**: a secret an admin clears later would be seeded again while `bootstrap.*` is still mapped.
+
+**Missing settings warning.** The `mailer` page warns when no DSN is stored (unless
+`mailer.fallback_counts_as_ready: true`), the `resend` page when Resend is switched on without a key. Health / status
+pages read the same report from `OutboundMailReadiness::status()->missingFields` (`['resend.api_key', 'mailer.dsn']`,
+names only) or `OutboundMailReadiness::missingFields()`. With a custom `mailer.dsn_provider` nothing is reported.
+
 ## Readiness and AuthKit
 
 ```php
 $readiness->isOutboundMailReady();   // bool
-$status = $readiness->status();      // MailStatus: source (settings|resend|custom|fallback), label (scheme://host), ready, error
+$status = $readiness->status();      // MailStatus: source (settings|resend|custom|fallback), label (scheme://host), ready, error, missingFields (1.2)
 ```
 
 ```twig

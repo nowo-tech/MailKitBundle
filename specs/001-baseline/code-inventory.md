@@ -2,7 +2,7 @@
 
 **Baseline spec**: [`spec.md`](spec.md)  
 **Package**: `nowo-tech/mail-kit-bundle`  
-**Last audited**: 2026-11-01
+**Last audited**: 2026-11-02
 
 Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **70**.
 
@@ -11,7 +11,7 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 | Source file | Spec section | Requirement IDs |
 | --- | --- | --- |
 | `src/NowoMailKitBundle.php` | Bundle and dependency injection | FR-BUNDLE-001 |
-| `src/DependencyInjection/Configuration.php` | Bundle and dependency injection | FR-CFG-001 |
+| `src/DependencyInjection/Configuration.php` | Bundle and dependency injection | FR-CFG-001, FR-DBO-001 ([002](../002-db-only-seed/spec.md)) |
 | `src/DependencyInjection/NowoMailKitExtension.php` | Bundle and dependency injection | FR-CFG-002 |
 | `src/DependencyInjection/Compiler/MailerIntegrationPass.php` | Bundle and dependency injection | FR-CFG-003 |
 | `src/DependencyInjection/Compiler/CsrfProtectionPass.php` | Bundle and dependency injection | FR-CFG-004 |
@@ -22,9 +22,9 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 
 | Source file | Spec section | Requirement IDs |
 | --- | --- | --- |
-| `src/Settings/MailerSettingsSection.php` | Settings | FR-SET-001 |
-| `src/Settings/ResendSettingsSection.php` | Settings | FR-SET-002 |
-| `src/Settings/MailSettings.php` | Settings | FR-SET-003 |
+| `src/Settings/MailerSettingsSection.php` | Settings | FR-SET-001, FR-DBO-002 ([002](../002-db-only-seed/spec.md)) |
+| `src/Settings/ResendSettingsSection.php` | Settings | FR-SET-002, FR-DBO-002 ([002](../002-db-only-seed/spec.md)) |
+| `src/Settings/MailSettings.php` | Settings | FR-SET-003, FR-DBO-003 ([002](../002-db-only-seed/spec.md)) |
 
 ## DSN and sender
 
@@ -85,8 +85,8 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 
 | Source file | Spec section | Requirement IDs |
 | --- | --- | --- |
-| `src/Readiness/OutboundMailReadiness.php` | Readiness | FR-RDY-001 |
-| `src/Readiness/MailStatus.php` | Readiness | FR-RDY-001 |
+| `src/Readiness/OutboundMailReadiness.php` | Readiness | FR-RDY-001, FR-DBO-003 ([002](../002-db-only-seed/spec.md)) |
+| `src/Readiness/MailStatus.php` | Readiness | FR-RDY-001, FR-DBO-003 ([002](../002-db-only-seed/spec.md)) |
 | `src/Twig/MailKitTwigExtension.php` | Readiness | FR-RDY-001 |
 | `src/Integration/AuthKit/MailKitOutboundMailReadyChecker.php` | Readiness | FR-RDY-001 |
 | `src/EventListener/SettingsChangedListener.php` | Readiness | FR-RDY-002 |

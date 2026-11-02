@@ -5,6 +5,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- DB-only mode: config keys `bootstrap.mailer_dsn` and `bootstrap.resend_api_key` (default null, read only by the
+  seed); the `mailer` and `resend` sections implement InstanceSettings 1.2 `SectionFallbackProviderInterface` over
+  them, so `nowo:instance-settings:seed-from-fallbacks` copies them once into the encrypted secrets. See
+  [UPGRADING](UPGRADING.md#to-120).
+- Missing settings report: `MailSettings::missingFields()`, `OutboundMailReadiness::missingFields()` /
+  `missingFieldsOf()`, `MailStatus::$missingFields`; the `mailer` / `resend` settings pages show a warning naming the
+  empty required fields (`settings.notice_missing`, 7 locales).
+
+### Changed
+
+- Requires `nowo-tech/instance-settings-bundle` ^1.2 (was ^1.1).
+
 ### Fixed
 
 - Release notes link UPGRADING with an absolute URL: `release.yml` rewrites relative `UPGRADING.md` links to the

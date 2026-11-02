@@ -4,15 +4,24 @@ declare(strict_types=1);
 
 namespace Nowo\MailKitBundle\Settings;
 
+use Closure;
 use Nowo\InstanceSettingsBundle\Section\AbstractSettingsSection;
 use Nowo\InstanceSettingsBundle\Section\SectionActionContext;
+use Nowo\InstanceSettingsBundle\Section\SectionFallbackProviderInterface;
+use Nowo\InstanceSettingsBundle\Section\SettingFallback;
 use Nowo\InstanceSettingsBundle\Section\SettingField;
 use Nowo\InstanceSettingsBundle\Section\SettingsSectionActionsInterface;
+use Nowo\InstanceSettingsBundle\Section\SettingsSectionNoticesInterface;
 use Nowo\MailKitBundle\NowoMailKitBundle;
+use Nowo\MailKitBundle\Readiness\OutboundMailReadiness;
 use Nowo\MailKitBundle\Ui\SettingsActions;
 use Nowo\MailKitBundle\Validator\DeliverableSender;
 use Nowo\MailKitBundle\Validator\MailerDsn;
+use SensitiveParameter;
+use Symfony\Component\Translation\TranslatableMessage;
 use Symfony\Component\Validator\Constraints\Length;
+
+use function implode;
 
 /**
  * The `mailer` settings section contributed to Instance Settings: DSN (encrypted secret, validated), sender address
@@ -21,7 +30,7 @@ use Symfony\Component\Validator\Constraints\Length;
  * Keys: `mailer.dsn` (secret), `mailer.from`, `mailer.from_name`, `mailer.reply_to`, `mailer.test_recipient`.
  * Never rename them: stored rows are keyed by name.
  */
-final class MailerSettingsSection extends AbstractSettingsSection implements SettingsSectionActionsInterface
+final class MailerSettingsSection extends AbstractSettingsSection implements SettingsSectionActionsInterface, SectionFallbackProviderInterface, SettingsSectionNoticesInterface
 {
     /** Section name (key prefix, URL segment, export key). */
     public const NAME = 'mailer';
@@ -31,12 +40,18 @@ final class MailerSettingsSection extends AbstractSettingsSection implements Set
      * @param string|null $defaultFromName `sender.default_from_name`
      * @param bool $requirePublicDomain `sender.require_public_domain`
      * @param SettingsActions|null $actions null when the admin UI is off (no action endpoints)
+     * @param string|null $bootstrapDsn `bootstrap.mailer_dsn`: copied once into `mailer.dsn` by the seed (since 1.2)
+     * @param (Closure(): OutboundMailReadiness)|null $readiness lazy readiness (page notice); lazy because it reads the
+     *                                                           settings store this section belongs to
      */
     public function __construct(
         private readonly ?string $defaultFrom = null,
         private readonly ?string $defaultFromName = null,
         private readonly bool $requirePublicDomain = true,
         private readonly ?SettingsActions $actions = null,
+        #[SensitiveParameter]
+        private readonly ?string $bootstrapDsn = null,
+        private readonly ?Closure $readiness = null,
     ) {
     }
 
@@ -84,5 +99,30 @@ final class MailerSettingsSection extends AbstractSettingsSection implements Set
     public function getActions(SectionActionContext $context): iterable
     {
         return $this->actions?->mailer() ?? [];
+    }
+
+    /**
+     * `bootstrap.mailer_dsn` as the `dsn` fallback (secret); the seed stores it only when it passes the DSN validation.
+     *
+     * @return iterable<SettingFallback>
+     */
+    public function getFallbacks(): iterable
+    {
+        return [SettingFallback::secret('dsn', $this->bootstrapDsn)];
+    }
+
+    /**
+     * Warning naming the required fields of this section that are empty ({@see OutboundMailReadiness::missingFields()}).
+     *
+     * @param SectionActionContext $context page being rendered (unused)
+     *
+     * @return iterable<TranslatableMessage>
+     */
+    public function getNotices(SectionActionContext $context): iterable
+    {
+        $readiness = $this->readiness instanceof Closure ? ($this->readiness)() : null;
+        $missing   = $readiness instanceof OutboundMailReadiness ? $readiness->missingFieldsOf(self::NAME) : [];
+
+        return $missing === [] ? [] : [new TranslatableMessage('settings.notice_missing', ['%fields%' => implode(', ', $missing)], NowoMailKitBundle::TRANSLATION_DOMAIN)];
     }
 }

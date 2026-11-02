@@ -7,6 +7,7 @@
 - [dsn](#dsn)
 - [sender](#sender)
 - [resend](#resend)
+- [bootstrap](#bootstrap)
 - [test_email](#test_email)
 - [log](#log)
 - [doctrine](#doctrine)
@@ -43,6 +44,9 @@ nowo_mail_kit:
     resend:
         enabled: false                 # adds the "resend" section (needs symfony/resend-mailer to send)
         api_timeout: 10.0              # seconds, key check (1 … 60)
+    bootstrap:                         # 1.2: read only by nowo:instance-settings:seed-from-fallbacks
+        mailer_dsn: null               # e.g. '%env(default::MAILER_DSN)%' while migrating to DB-only mode
+        resend_api_key: null           # e.g. '%env(default::RESEND_API_KEY)%'
     test_email:
         rate_limit: 5                  # per user and window (1 … 100)
         rate_interval: '10 minutes'
@@ -111,6 +115,16 @@ Validation (query options and the built transport's endpoint included) runs on s
 | --- | --- | --- |
 | `enabled` | `false` | Registers the `resend` section, its routes (`/actions/resend/*`) and `ResendApiChecker`. Sending needs `symfony/resend-mailer`. |
 | `api_timeout` | `10.0` | Connect + total deadline of the key check (`timeout` and `max_duration` of HttpClient). |
+
+## bootstrap
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `mailer_dsn` | `null` | Copied once into the `mailer.dsn` secret by `nowo:instance-settings:seed-from-fallbacks` when none is stored; skipped when it fails the DSN validation. Never used to send. |
+| `resend_api_key` | `null` | Copied once into the `resend.api_key` secret (with `resend.enabled: true`). The Resend switch is not seeded. |
+
+Map them to `%env(default::…)%` only while migrating to DB-only mode, then remove them; never put a literal secret
+here (it would be compiled into the container). See [USAGE](USAGE.md#db-only-mode).
 
 ## test_email
 

@@ -4,14 +4,23 @@ declare(strict_types=1);
 
 namespace Nowo\MailKitBundle\Settings;
 
+use Closure;
 use Nowo\InstanceSettingsBundle\Section\AbstractSettingsSection;
 use Nowo\InstanceSettingsBundle\Section\SectionActionContext;
+use Nowo\InstanceSettingsBundle\Section\SectionFallbackProviderInterface;
+use Nowo\InstanceSettingsBundle\Section\SettingFallback;
 use Nowo\InstanceSettingsBundle\Section\SettingField;
 use Nowo\InstanceSettingsBundle\Section\SettingsSectionActionsInterface;
+use Nowo\InstanceSettingsBundle\Section\SettingsSectionNoticesInterface;
 use Nowo\MailKitBundle\NowoMailKitBundle;
+use Nowo\MailKitBundle\Readiness\OutboundMailReadiness;
 use Nowo\MailKitBundle\Ui\SettingsActions;
 use Nowo\MailKitBundle\Validator\DeliverableSender;
+use SensitiveParameter;
+use Symfony\Component\Translation\TranslatableMessage;
 use Symfony\Component\Validator\Constraints\Length;
+
+use function implode;
 
 /**
  * The optional `resend` settings section (`nowo_mail_kit.resend.enabled: true`): switch, API key (encrypted secret)
@@ -20,7 +29,7 @@ use Symfony\Component\Validator\Constraints\Length;
  *
  * Keys: `resend.enabled`, `resend.api_key` (secret), `resend.from`.
  */
-final class ResendSettingsSection extends AbstractSettingsSection implements SettingsSectionActionsInterface
+final class ResendSettingsSection extends AbstractSettingsSection implements SettingsSectionActionsInterface, SectionFallbackProviderInterface, SettingsSectionNoticesInterface
 {
     /** Section name. */
     public const NAME = 'resend';
@@ -28,10 +37,15 @@ final class ResendSettingsSection extends AbstractSettingsSection implements Set
     /**
      * @param bool $requirePublicDomain `sender.require_public_domain`
      * @param SettingsActions|null $actions null when the admin UI is off
+     * @param string|null $bootstrapApiKey `bootstrap.resend_api_key`: copied once into `resend.api_key` by the seed (since 1.2)
+     * @param (Closure(): OutboundMailReadiness)|null $readiness lazy readiness (page notice)
      */
     public function __construct(
         private readonly bool $requirePublicDomain = true,
         private readonly ?SettingsActions $actions = null,
+        #[SensitiveParameter]
+        private readonly ?string $bootstrapApiKey = null,
+        private readonly ?Closure $readiness = null,
     ) {
     }
 
@@ -75,5 +89,31 @@ final class ResendSettingsSection extends AbstractSettingsSection implements Set
     public function getActions(SectionActionContext $context): iterable
     {
         return $this->actions?->resend() ?? [];
+    }
+
+    /**
+     * `bootstrap.resend_api_key` as the `api_key` fallback (secret). The `enabled` switch is not seeded: switching
+     * the delivery to Resend stays an explicit admin decision.
+     *
+     * @return iterable<SettingFallback>
+     */
+    public function getFallbacks(): iterable
+    {
+        return [SettingFallback::secret('api_key', $this->bootstrapApiKey)];
+    }
+
+    /**
+     * Warning naming the required fields of this section that are empty ({@see OutboundMailReadiness::missingFields()}).
+     *
+     * @param SectionActionContext $context page being rendered (unused)
+     *
+     * @return iterable<TranslatableMessage>
+     */
+    public function getNotices(SectionActionContext $context): iterable
+    {
+        $readiness = $this->readiness instanceof Closure ? ($this->readiness)() : null;
+        $missing   = $readiness instanceof OutboundMailReadiness ? $readiness->missingFieldsOf(self::NAME) : [];
+
+        return $missing === [] ? [] : [new TranslatableMessage('settings.notice_missing', ['%fields%' => implode(', ', $missing)], NowoMailKitBundle::TRANSLATION_DOMAIN)];
     }
 }

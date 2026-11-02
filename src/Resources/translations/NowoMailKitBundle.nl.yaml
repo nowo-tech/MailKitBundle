@@ -1,4 +1,5 @@
 settings:
+    notice_missing: 'Verplichte instellingen zijn leeg: %fields%. Uitgaande e-mail is pas klaar als ze zijn ingevuld.'
     mailer:
         label: Uitgaande e-mail
         intro: 'Uitgaande e-mail van deze instantie. Een hier opgeslagen DSN vervangt MAILER_DSN vanaf het volgende bericht, zonder deploy; laat het leeg om MAILER_DSN te gebruiken.'

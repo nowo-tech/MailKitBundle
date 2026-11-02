@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+  - [To 1.2.0](#to-120)
 - [To 1.1.1](#to-111)
 - [To 1.1.0](#to-110)
 - [To 1.0.0 (initial release)](#to-100-initial-release)
@@ -13,6 +14,29 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+### To 1.2.0
+
+From **1.1.x**. The bundle now requires `nowo-tech/instance-settings-bundle` ^1.2:
+
+```bash
+composer update nowo-tech/mail-kit-bundle nowo-tech/instance-settings-bundle --with-dependencies
+```
+
+No BC break; new, optional:
+
+- `bootstrap.mailer_dsn` / `bootstrap.resend_api_key` (default null): one-time bootstrap values for
+  `nowo:instance-settings:seed-from-fallbacks` (DB-only mode).
+- Settings page warnings and `MailStatus::$missingFields` / `OutboundMailReadiness::missingFields()` for health pages.
+  `MailStatus` and `OutboundMailReadiness` got an optional trailing constructor argument (named arguments unaffected).
+
+To go DB-only, **in this order**: (1) upgrade and map `bootstrap.mailer_dsn: '%env(MAILER_DSN)%'` (and
+`bootstrap.resend_api_key`) while the env vars still exist; (2) run
+`php bin/console nowo:instance-settings:seed-from-fallbacks --section=mailer --section=resend` (try `--dry-run`
+first); (3) only then remove the `bootstrap` keys and the env vars, and set `framework.mailer.dsn` to a literal such as
+`null://null`. Removing them first would seed nothing. From a Doctrine migration, call the seeder from a
+non-transactional migration (see InstanceSettings
+[USAGE](https://github.com/nowo-tech/InstanceSettingsBundle/blob/main/docs/USAGE.md#calling-the-seeder-from-a-migration)).
 
 ## To 1.1.1
 

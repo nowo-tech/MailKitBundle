@@ -1,4 +1,5 @@
 settings:
+    notice_missing: 'Há definições obrigatórias vazias: %fields%. O e-mail de saída não está pronto até serem preenchidas.'
     mailer:
         label: Correio de saída
         intro: 'Correio de saída desta instância. Um DSN guardado aqui substitui MAILER_DSN na mensagem seguinte, sem deploy; deixe-o vazio para usar MAILER_DSN.'

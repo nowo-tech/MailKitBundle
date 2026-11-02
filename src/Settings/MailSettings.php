@@ -52,6 +52,26 @@ final readonly class MailSettings
     }
 
     /**
+     * Required settings that are empty for the selected delivery (`<section>.<field>` names, never values):
+     * `resend.api_key` when the Resend section is switched on without a key, `mailer.dsn` when no runtime DSN is
+     * stored (mail then goes through the framework transport). Since 1.2.
+     *
+     * @return list<string>
+     */
+    public function missingFields(): array
+    {
+        $missing = [];
+        if ($this->resendEnabled && $this->settings->getBool(ResendSettingsSection::NAME . '.enabled') && $this->resendApiKey() === null) {
+            $missing[] = ResendSettingsSection::NAME . '.api_key';
+        }
+        if (!$this->dsn() instanceof RuntimeDsn) {
+            $missing[] = MailerSettingsSection::NAME . '.dsn';
+        }
+
+        return $missing;
+    }
+
+    /**
      * Stored Resend API key (whether or not the section is switched on), null without the Resend section.
      */
     public function resendApiKey(): ?string

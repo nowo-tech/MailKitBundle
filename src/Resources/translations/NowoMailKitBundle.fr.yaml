@@ -1,4 +1,5 @@
 settings:
+    notice_missing: 'Des paramètres obligatoires sont vides : %fields%. L''envoi d''e-mails n''est pas prêt tant qu''ils ne sont pas renseignés.'
     mailer:
         label: E-mail sortant
         intro: "E-mail sortant de cette instance. Un DSN enregistré ici remplace MAILER_DSN dès le message suivant, sans déploiement ; laissez-le vide pour utiliser MAILER_DSN."

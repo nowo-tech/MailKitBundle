@@ -1,4 +1,5 @@
 settings:
+    notice_missing: 'Pflichteinstellungen sind leer: %fields%. Ausgehende E-Mails sind erst bereit, wenn sie ausgefüllt sind.'
     mailer:
         label: Ausgehende E-Mail
         intro: 'Ausgehende E-Mail dieser Instanz. Ein hier gespeicherter DSN ersetzt MAILER_DSN ab der nächsten Nachricht, ohne Deployment; leer lassen, um MAILER_DSN zu verwenden.'

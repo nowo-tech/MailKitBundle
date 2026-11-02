@@ -52,6 +52,7 @@ use Nowo\MailKitBundle\Validator\DeliverableSenderValidator;
 use Nowo\MailKitBundle\Validator\MailerDsnConstraintValidator;
 use Nowo\OutboundUrlGuardBundle\Dns\HostnameDnsLookup;
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
+use Symfony\Component\DependencyInjection\Argument\ServiceClosureArgument;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\DependencyInjection\Definition;
@@ -126,7 +127,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $config = $this->processConfiguration(new Configuration(), $configs);
         $this->assertLiteralBooleans($config);
 
-        /** @var array{mailer: array{decorate: bool, dsn_provider: string|null, fallback_counts_as_ready: bool}, dsn: array{allowed_schemes: list<string>, allowed_hosts: list<string>, allow_private_hosts: bool, allow_insecure_tls: bool, resolve_dns: bool, dns_timeout: float}, sender: array{default_from: string|null, default_from_name: string|null, require_public_domain: bool}, resend: array{enabled: bool, api_timeout: float}, test_email: array{rate_limit: int, rate_interval: string}, log: array{enabled: bool, store_bodies: bool, retention_days: int, purge_batch_size: int}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>, page_size: int, export: array{enabled: bool, max_rows: int, access_roles: list<string>, include_bodies: bool, body_batch_bytes: int}}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}} $config */
+        /** @var array{mailer: array{decorate: bool, dsn_provider: string|null, fallback_counts_as_ready: bool}, dsn: array{allowed_schemes: list<string>, allowed_hosts: list<string>, allow_private_hosts: bool, allow_insecure_tls: bool, resolve_dns: bool, dns_timeout: float}, sender: array{default_from: string|null, default_from_name: string|null, require_public_domain: bool}, resend: array{enabled: bool, api_timeout: float}, bootstrap: array{mailer_dsn: string|null, resend_api_key: string|null}, test_email: array{rate_limit: int, rate_interval: string}, log: array{enabled: bool, store_bodies: bool, retention_days: int, purge_batch_size: int}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>, page_size: int, export: array{enabled: bool, max_rows: int, access_roles: list<string>, include_bodies: bool, body_batch_bytes: int}}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}} $config */
         $webUi = $config['web_ui'];
 
         if (!$this->hasBundle($container, 'NowoInstanceSettingsBundle') && !$container->hasExtension('nowo_instance_settings')) {
@@ -175,8 +176,9 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
      */
     private function registerSettings(ContainerBuilder $container, array $config): void
     {
-        /** @var array{resend: array{enabled: bool}, sender: array{default_from: string|null, default_from_name: string|null, require_public_domain: bool}, web_ui: array{enabled: bool}} $config */
-        $actions = $config['web_ui']['enabled'] ? new Reference(SettingsActions::class) : null;
+        /** @var array{resend: array{enabled: bool}, bootstrap: array{mailer_dsn: string|null, resend_api_key: string|null}, sender: array{default_from: string|null, default_from_name: string|null, require_public_domain: bool}, web_ui: array{enabled: bool}} $config */
+        $actions   = $config['web_ui']['enabled'] ? new Reference(SettingsActions::class) : null;
+        $readiness = new ServiceClosureArgument(new Reference(OutboundMailReadiness::class));
 
         $container->setDefinition(MailSettings::class, new Definition(MailSettings::class, [
             new Reference(InstanceSettingsInterface::class),
@@ -188,12 +190,16 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             $config['sender']['default_from_name'],
             $config['sender']['require_public_domain'],
             $actions,
+            $config['bootstrap']['mailer_dsn'],
+            $readiness,
         ]))->addTag(NowoInstanceSettingsBundle::SECTION_TAG, ['priority' => 50]));
 
         if ($config['resend']['enabled']) {
             $container->setDefinition(ResendSettingsSection::class, (new Definition(ResendSettingsSection::class, [
                 $config['sender']['require_public_domain'],
                 $actions,
+                $config['bootstrap']['resend_api_key'],
+                $readiness,
             ]))->addTag(NowoInstanceSettingsBundle::SECTION_TAG, ['priority' => 49]));
         }
     }
@@ -304,6 +310,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             new Reference(MailerDsnProviderInterface::class),
             new Reference(MailerDsnValidator::class),
             $mailer['fallback_counts_as_ready'],
+            is_string($provider) && $provider !== '' ? null : new Reference(MailSettings::class),
         ]))->setPublic(true));
         $container->setDefinition(MailKitTwigExtension::class, (new Definition(MailKitTwigExtension::class, [new Reference(OutboundMailReadiness::class)]))
             ->addTag('twig.extension'));

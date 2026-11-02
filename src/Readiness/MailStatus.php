@@ -15,12 +15,14 @@ final readonly class MailStatus
     /**
      * @param string $label redacted `scheme://host[:port]`, or "default" for the framework transport
      * @param string|null $error validation error translation key (`NowoMailKitBundle` domain), or null
+     * @param list<string> $missingFields required settings that are empty (`<section>.<field>`, names only; since 1.2)
      */
     public function __construct(
         public DsnSource $source,
         public string $label,
         public bool $ready,
         public ?string $error = null,
+        public array $missingFields = [],
     ) {
     }
 }

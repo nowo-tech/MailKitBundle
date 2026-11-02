@@ -1,4 +1,5 @@
 settings:
+    notice_missing: 'Faltan ajustes obligatorios: %fields%. El correo saliente no estará listo hasta completarlos.'
     mailer:
         label: Correo saliente
         intro: 'Correo saliente de esta instancia. Un DSN guardado aquí sustituye a MAILER_DSN en el siguiente mensaje, sin despliegue; déjalo vacío para usar MAILER_DSN.'

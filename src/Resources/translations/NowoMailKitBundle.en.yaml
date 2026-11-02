@@ -1,4 +1,5 @@
 settings:
+    notice_missing: 'Required settings are empty: %fields%. Outgoing e-mail is not ready until they are filled in.'
     mailer:
         label: Mailer
         intro: 'Outgoing e-mail of this instance. A DSN stored here replaces MAILER_DSN on the next message, without a deploy; leave it empty to use MAILER_DSN.'

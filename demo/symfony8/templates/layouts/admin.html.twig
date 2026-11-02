@@ -22,4 +22,6 @@
 {% block javascripts %}
     {{ include(nowo_ui_partial('scripts', nowo_ui_bundle|default(null))) }}
     {{ block('nowo_ui_bridge_end') }}
+    {# UiKit visible-when peer (provider-dependent mailer fields, InstanceSettings 1.3): demo Stimulus app. #}
+    <script src="{{ asset('js/nowo-ui-demo-peers.js') }}" defer></script>
 {% endblock %}

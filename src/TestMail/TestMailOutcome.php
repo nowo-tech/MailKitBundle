@@ -15,7 +15,7 @@ enum TestMailOutcome: string
     /** No valid recipient (argument, `mailer.test_recipient` or the user's e-mail). */
     case NoRecipient = 'no_recipient';
 
-    /** No sender configured (`mailer.from` / `resend.from`). */
+    /** No sender configured (`mailer.from` / `mailer.resend_from`). */
     case NoSender = 'no_sender';
 
     /** The sender is not on a public domain. */

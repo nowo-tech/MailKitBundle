@@ -21,7 +21,7 @@ Bundle-specific security analysis. The short GitHub reporting policy lives in [`
 
 ## Scope
 
-Covers the `mailer` / `resend` settings sections, DSN and sender validation (`MailerDsnValidator`, `DsnHostGuard`,
+Covers the `mailer` settings section (with its Resend provider fields since 1.3), DSN and sender validation (`MailerDsnValidator`, `DsnHostGuard`,
 constraints), the runtime transport and mailer decorators, the test e-mail and Resend key check, the sent-mail log
 (recorder, repository, entities, purge / forget commands), the admin UI (controller, filter form, access listener /
 checker, route loader), readiness (Twig, AuthKit adapter) and the configuration tree. It does **not** cover the host
@@ -37,7 +37,7 @@ transports and provider bridges, or the content of the messages your application
 | Admin HTTP `GET` (session) | `…/log/export` | Same access as the list plus optional `web_ui.export.access_roles`; formula-injection guard on every cell (`CsvSafeWriter`, best effort for common spreadsheets); `no-store`; capped at `web_ui.export.max_rows`; bodies only with `log.store_bodies` + `web_ui.export.include_bodies` + `?bodies=1`. |
 | Admin HTTP `POST` (session) | `…/actions/test`, `…/actions/resend/check`, `…/actions/resend/test` | CSRF-only Form, MailKit access **and** Instance Settings section access, per-user rate limit for test e-mails. |
 | Outbound SMTP / provider API | `RuntimeTransport` | Only to validated DSNs (scheme allow-list, host guard); framework `MAILER_DSN` fallback trusted. |
-| Outbound HTTPS | `ResendApiChecker` → `https://api.resend.com/domains` | Fixed URL, deadline, no redirects. |
+| Outbound HTTPS | `ResendApiChecker` → `https://api.resend.com/domains` | Fixed URL, deadline, no redirects. Called by "Check the API key" and, since 1.3, by a mailer save that would put a Resend key live (`ResendApiKeyAccepted`); both rate limited per user. |
 | DNS | `DsnHostGuard` | Bounded child-process lookup (`dns_timeout`). |
 | Message content | `SentMailRecorder` | Envelope always, bodies only with `log.store_bodies`; internal headers stripped before delivery. |
 | CLI | `nowo:mail-kit:log:purge`, `…:log:forget`, `…:send-test` | Operator input (no session). |
@@ -54,6 +54,7 @@ transports and provider bridges, or the content of the messages your application
 | **Credential disclosure** | Transport failures are rethrown as `DeliveryFailedException`: a short message with a reference; API bridges answer "The mail provider answered HTTP <code>" — provider response bodies are never stored, flashed, printed or kept in the Messenger failure transport (no `previous`); the scrubbed detail is logged under the reference only. The scrubber masks the credentials of the DSN in use (user, password; raw, URL-encoded, base64), `username "…"`, `user:pass@`, `re_…`, `SG.…`, `xkeysib-…`, `key-…`, `Bearer …` and UUID tokens. DSN and API key are Instance Settings secrets (encrypted, never rendered back, sealed in exports); MailKit never logs or renders them: `MailerDsnAudit` labels (`scheme://host[:port]`), `[redacted]` invalid values in violations, `#[SensitiveParameter]` on DSN / key parameters, transport errors scrubbed (`user:pass@`, `re_…` keys, `Bearer …`) before they are stored, flashed or printed. |
 | **Unauthorized access** | UI private by default (`ROLE_ADMIN`); empty role lists refused at compile time (pattern P1); a listener guards every request under the prefix and every bundle controller wherever it is mounted; actions also require the Instance Settings access of their section (its public `AccessGuard`); the token is trusted only when a firewall matched the main request. |
 | **CSRF** | Every POST is a FormKit CSRF-only form (`csrf_only[_token]`, one token id per action); not submitted or invalid → 403. The container refuses to compile the UI without form CSRF or a token manager (pattern P2). |
+| **Wrong Resend key taking every mail down** (MK-L1: with provider-dependent fields a new or rotated key, or a stored key never checked, could go live in the same save; password resets and magic links stop) | Since 1.3 a mailer save with `provider = resend` that would put a key live (typed key, or the stored key when switching from `dsn`) checks it with Resend first and is refused when Resend rejects it, the call fails or no key is stored; the current delivery keeps working. Admin form only: code, imports and the seed are trusted operator paths. The key is never echoed (violation invalid value `[redacted]`, messages carry the scrubbed Resend error only). |
 | **Mail bombing / quota burn through the test action** | Per-user sliding-window rate limit, shared with the Resend key check (each check is an outbound call) (`test_email.rate_limit` per `rate_interval`, client address for anonymous demo access); recipient is the configured test recipient or the user's own address (no free-form recipient in the UI). |
 | **Stored XSS through logged content** | Subjects, addresses, tags and errors are escaped by Twig; the text body is escaped in a `<pre>`; the HTML body is never inlined in the admin page — it is served alone with `Content-Security-Policy: default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'; sandbox`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `no-store`. |
 | **Injection** | ORM QueryBuilder / DBAL with bound parameters; LIKE patterns escaped (`!` escape); table names come from the configured prefix (validated `[A-Za-z0-9_]*`); the list / export sort is a key whitelist mapped to fixed DQL columns (`SentMailRepository::SORT_FIELDS`, unknown keys refused), never request text in `ORDER BY`. |
@@ -69,13 +70,17 @@ transports and provider bridges, or the content of the messages your application
 The log shows who received what: keep `web_ui.path_prefix` behind the firewall (`access_control`) **and** the bundle
 checker. `security.allow_unauthenticated: true` is a demo / local switch only; the container refuses it without
 `kernel.debug`, but never set it in a shared or staging environment either. Restrict the mail sections in Instance
-Settings (`nowo_instance_settings.security.area_roles: { mailer: [ROLE_SUPER_ADMIN], resend: [ROLE_SUPER_ADMIN] }`)
+Settings (`nowo_instance_settings.security.area_roles: { mailer: [ROLE_SUPER_ADMIN] }`; since 1.3 the Resend fields and actions are part of `mailer`, and with `resend.enabled` an `area_roles.resend` entry fails the build so it cannot be silently ignored)
 when not every admin may change the transport.
 
 ## Secrets and cryptography
 
-- `mailer.dsn` and `resend.api_key` are Instance Settings secret fields: encrypted at rest with DoctrineEncryptBundle,
+- `mailer.dsn` and `mailer.resend_api_key` (`resend.api_key` before 1.3) are Instance Settings secret fields: encrypted at rest with DoctrineEncryptBundle,
   never sent back to the browser, exported only sealed. MailKit adds no cryptography of its own.
+- A hidden provider row (1.3 `visible_when`) keeps its stored secret; only an explicit "clear" removes it. After the
+  1.3 migration the 1.2 `resend` rows (the old encrypted key included) stay in the table unread until
+  `nowo:mail-kit:purge-legacy-resend` deletes them (only once copied; [UPGRADING](UPGRADING.md#to-130)). While they
+  are pending, the old key is never sent to the browser: the page only marks it as stored.
 - The decrypted DSN lives in memory only while a transport is built and in the cached transport object.
 - Fixtures and the demo use obvious placeholders (`REDACTED-TEST`, `REDACTED-DEMO`); the demo key is generated at
   start and ignored by git.
@@ -113,7 +118,8 @@ when not every admin may change the transport.
 - DNS lookup per DSN host: `dsn.dns_timeout` (2 s), on save / import and when the transport for a DSN is built
   (once per DSN per worker until `kernel.reset` / a settings change). The readiness check (`isOutboundMailReady()`,
   AuthKit login page) never resolves DNS: syntax and configuration only.
-- Resend key check: `resend.api_timeout` (10 s connect + total), `max_redirects: 0`.
+- Resend key check: `resend.api_timeout` (10 s connect + total), `max_redirects: 0` — also during a mailer save that
+  switches to / rotates the Resend key (the save waits for it).
 - SMTP / provider sends: Symfony transport timeouts (DSN `timeout` option); keep them below PHP `max_execution_time`
   ([CONFIGURATION — Timeouts](CONFIGURATION.md#timeouts-req-runtime-001)).
 - Stored bodies capped at 1 MiB each, errors at 2 000 characters, search at 120 characters, list pages at

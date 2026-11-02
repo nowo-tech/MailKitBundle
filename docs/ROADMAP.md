@@ -9,7 +9,7 @@
 
 ## 1.0 (this release)
 
-Runtime mailer on top of Instance Settings: `mailer` / `resend` sections, runtime DSN with fallback (also for
+Runtime mailer on top of Instance Settings: `mailer` section (Resend provider fields since 1.3), runtime DSN with fallback (also for
 Messenger), DSN / sender validation with an SSRF host guard, redacted audit, test e-mail and Resend key check, sent-mail
 log with retention and erasure, readiness (Twig, AuthKit adapter). Extracted from Symfony Beacon (kit #2, phase 1).
 

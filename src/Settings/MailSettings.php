@@ -14,22 +14,57 @@ use function rawurlencode;
 use function trim;
 
 /**
- * Typed view of the `mailer` (and optional `resend`) Instance Settings sections. Every getter reads the store on
- * call (memoized per request by Instance Settings), so a change applies on the next send without a deploy.
+ * Typed view of the `mailer` Instance Settings section. Every getter reads the store on call (memoized per request
+ * by Instance Settings), so a change applies on the next send without a deploy.
+ *
+ * Since 1.3 the delivery is chosen explicitly with `mailer.provider` (`dsn` or `resend`, only with
+ * `nowo_mail_kit.resend.enabled`); the Resend key and sender are `mailer.resend_api_key` / `mailer.resend_from`.
+ * Until the 1.2 `resend` rows are migrated ({@see LegacyResendSettings}), an instance without a stored
+ * `mailer.provider` keeps the 1.2 behaviour: `resend.enabled` selects Resend, `resend.api_key` / `resend.from` apply.
  */
 final readonly class MailSettings
 {
     /**
-     * @param bool $resendEnabled `nowo_mail_kit.resend.enabled` (the `resend` section exists)
+     * @param bool $resendEnabled `nowo_mail_kit.resend.enabled` (the `mailer` section offers the Resend provider)
+     * @param LegacyResendSettings|null $legacy rows of the 1.2 `resend` section (read until they are migrated)
      */
     public function __construct(
         private InstanceSettingsInterface $settings,
         private bool $resendEnabled = false,
+        private ?LegacyResendSettings $legacy = null,
     ) {
     }
 
     /**
-     * Effective runtime DSN: the Resend key when the Resend section is active, else `mailer.dsn`, else null.
+     * Selected delivery: {@see MailerSettingsSection::PROVIDER_RESEND} or {@see MailerSettingsSection::PROVIDER_DSN}
+     * (always `dsn` without the Resend provider). Since 1.3.
+     */
+    public function provider(): string
+    {
+        if (!$this->resendEnabled) {
+            return MailerSettingsSection::PROVIDER_DSN;
+        }
+        if ($this->settings->isOverridden(MailerSettingsSection::NAME . '.provider')) {
+            return $this->settings->getString(MailerSettingsSection::NAME . '.provider') === MailerSettingsSection::PROVIDER_RESEND
+                ? MailerSettingsSection::PROVIDER_RESEND
+                : MailerSettingsSection::PROVIDER_DSN;
+        }
+
+        return ($this->legacyValues()['enabled'] ?? false) ? MailerSettingsSection::PROVIDER_RESEND : MailerSettingsSection::PROVIDER_DSN;
+    }
+
+    /**
+     * Whether 1.2 `resend` rows are still read because `mailer.provider` is not stored yet (run
+     * `nowo:instance-settings:seed-from-fallbacks --section=mailer`). Since 1.3.
+     */
+    public function legacyResendPending(): bool
+    {
+        return $this->legacyValues() !== null;
+    }
+
+    /**
+     * Effective runtime DSN: the Resend key when Resend is the selected provider and holds a key, else `mailer.dsn`,
+     * else null.
      */
     public function dsn(): ?RuntimeDsn
     {
@@ -42,41 +77,39 @@ final readonly class MailSettings
     }
 
     /**
-     * The Resend section exists, is switched on and holds an API key.
+     * Resend is the selected provider and holds an API key.
      */
     public function resendActive(): bool
     {
-        return $this->resendEnabled
-            && $this->settings->getBool(ResendSettingsSection::NAME . '.enabled')
-            && $this->resendApiKey() !== null;
+        return $this->provider() === MailerSettingsSection::PROVIDER_RESEND && $this->resendApiKey() !== null;
     }
 
     /**
-     * Required settings that are empty for the selected delivery (`<section>.<field>` names, never values):
-     * `resend.api_key` when the Resend section is switched on without a key, `mailer.dsn` when no runtime DSN is
-     * stored (mail then goes through the framework transport). Since 1.2.
+     * Required settings that are empty for the selected provider (`<section>.<field>` names, never values):
+     * `mailer.resend_api_key` when Resend is selected without a key, `mailer.dsn` when the DSN provider is selected
+     * and no runtime DSN is stored (mail then goes through the framework transport). Since 1.2.
      *
      * @return list<string>
      */
     public function missingFields(): array
     {
-        $missing = [];
-        if ($this->resendEnabled && $this->settings->getBool(ResendSettingsSection::NAME . '.enabled') && $this->resendApiKey() === null) {
-            $missing[] = ResendSettingsSection::NAME . '.api_key';
-        }
-        if (!$this->dsn() instanceof RuntimeDsn) {
-            $missing[] = MailerSettingsSection::NAME . '.dsn';
+        if ($this->provider() === MailerSettingsSection::PROVIDER_RESEND) {
+            return $this->resendApiKey() === null ? [MailerSettingsSection::NAME . '.resend_api_key'] : [];
         }
 
-        return $missing;
+        return $this->dsn() instanceof RuntimeDsn ? [] : [MailerSettingsSection::NAME . '.dsn'];
     }
 
     /**
-     * Stored Resend API key (whether or not the section is switched on), null without the Resend section.
+     * Stored Resend API key (whichever provider is selected), null without the Resend provider.
      */
     public function resendApiKey(): ?string
     {
-        return $this->resendEnabled ? $this->settings->getSecret(ResendSettingsSection::NAME . '.api_key') : null;
+        if (!$this->resendEnabled) {
+            return null;
+        }
+
+        return $this->settings->getSecret(MailerSettingsSection::NAME . '.resend_api_key') ?? $this->legacyValues()['api_key'] ?? null;
     }
 
     /**
@@ -90,8 +123,8 @@ final readonly class MailSettings
     }
 
     /**
-     * Default From of outgoing messages: `resend.from` when Resend is active and has one, else `mailer.from`
-     * (with `mailer.from_name`); null when nothing is configured.
+     * Default From of outgoing messages: the Resend sender when Resend is active, else `mailer.from` (with
+     * `mailer.from_name`); null when nothing is configured.
      */
     public function from(): ?Address
     {
@@ -99,11 +132,13 @@ final readonly class MailSettings
     }
 
     /**
-     * Sender of the Resend test: `resend.from`, else `mailer.from`.
+     * Sender of the Resend delivery and test: `mailer.resend_from`, else `mailer.from`.
      */
     public function resendFrom(): ?Address
     {
-        $from = $this->resendEnabled ? $this->settings->getString(ResendSettingsSection::NAME . '.from') : null;
+        $from = $this->resendEnabled
+            ? $this->settings->getString(MailerSettingsSection::NAME . '.resend_from') ?? $this->legacyValues()['from'] ?? null
+            : null;
 
         return $from === null ? $this->mailerFrom() : $this->address($from, $this->settings->getString(MailerSettingsSection::NAME . '.from_name'));
     }
@@ -134,6 +169,21 @@ final readonly class MailSettings
     public function testRecipient(): ?string
     {
         return $this->settings->getString(MailerSettingsSection::NAME . '.test_recipient');
+    }
+
+    /**
+     * The 1.2 `resend` values while they still apply: Resend provider on, `mailer.provider` not stored, legacy rows
+     * present.
+     *
+     * @return array{enabled: bool, api_key: string|null, from: string|null}|null
+     */
+    private function legacyValues(): ?array
+    {
+        if (!$this->resendEnabled || !$this->legacy instanceof LegacyResendSettings || $this->settings->isOverridden(MailerSettingsSection::NAME . '.provider')) {
+            return null;
+        }
+
+        return $this->legacy->values();
     }
 
     private function address(string $email, ?string $name = null): ?Address

@@ -3,6 +3,16 @@ settings:
     mailer:
         label: Correo saliente
         intro: 'Correo saliente de esta instancia. Un DSN guardado aquí sustituye a MAILER_DSN en el siguiente mensaje, sin despliegue; déjalo vacío para usar MAILER_DSN.'
+        intro_providers: 'Correo saliente de esta instancia. Elige el proveedor: solo se muestran y guardan sus campos; el otro proveedor conserva sus valores guardados. Con el proveedor DSN y sin DSN guardado se usa MAILER_DSN.'
+        provider: Proveedor
+        provider_help: 'Resend requiere symfony/resend-mailer. Al cambiar a Resend, la clave de API se comprueba con Resend antes de guardar.'
+        provider_dsn: 'SMTP u otro DSN del mailer'
+        provider_resend: 'API de Resend'
+        resend_api_key: Clave de API de Resend
+        resend_api_key_help: 'Se guarda cifrada. Basta con una clave solo de envío. Se comprueba con Resend antes de guardarla; déjala vacía para conservar la guardada.'
+        resend_from: Remitente de Resend
+        resend_from_help: 'Un dominio verificado en Resend (por defecto: el remitente).'
+        notice_legacy_resend: 'Los ajustes de Resend de MailKit 1.2 se siguen leyendo de la antigua sección resend. Ejecuta bin/console nowo:instance-settings:seed-from-fallbacks --section=mailer para moverlos aquí antes de guardar esta página.'
         dsn: DSN del mailer
         dsn_help: 'Por ejemplo smtp://usuario:contraseña@smtp.example.com:587 o resend+api://CLAVE@default. Se guarda cifrado; se rechazan sendmail, native y null, y también los hosts privados salvo que estén permitidos.'
         from: Dirección del remitente
@@ -15,14 +25,6 @@ settings:
         action:
             send_test: Enviar un correo de prueba
     resend:
-        label: Resend
-        intro: 'Envía mediante la API de Resend en lugar del DSN mientras esta sección esté activada y tenga una clave (requiere symfony/resend-mailer).'
-        enabled: Enviar con Resend
-        enabled_help: 'Solo tiene efecto con una clave de API guardada.'
-        api_key: Clave de API
-        api_key_help: 'Se guarda cifrada. Basta con una clave solo de envío.'
-        from: Remitente de Resend
-        from_help: 'Un dominio verificado en Resend (por defecto: el remitente del mailer).'
         action:
             check: Comprobar la clave de API
             send_test: Enviar un correo de prueba con Resend
@@ -49,6 +51,10 @@ test_email:
         rate_limited: 'Demasiados correos de prueba; inténtalo de nuevo en unos minutos.'
         failed: 'El correo de prueba a %to% ha fallado: %error%'
 resend:
+    save:
+        key_required: 'Introduce la clave de API de Resend: no se puede elegir Resend sin ella.'
+        rejected: 'Resend ha rechazado esta clave de API; no se ha guardado nada: %error%'
+        rate_limited: 'Demasiadas comprobaciones de la clave de Resend; no se ha guardado nada. Inténtalo de nuevo en unos minutos.'
     check:
         rate_limited: 'Demasiadas comprobaciones; inténtalo de nuevo en unos minutos.'
         no_key: 'Guarda primero una clave de API de Resend.'

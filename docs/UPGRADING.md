@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+  - [To 1.3.0](#to-130)
 - [To 1.2.0](#to-120)
   - [To 1.2.0](#to-120-1)
 - [To 1.1.1](#to-111)
@@ -15,6 +16,99 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+### To 1.3.0
+
+From **1.2.x**. The bundle now requires `nowo-tech/instance-settings-bundle` ^1.3.1 and `nowo-tech/ui-kit-bundle`
+^2.23:
+
+```bash
+composer update nowo-tech/mail-kit-bundle nowo-tech/instance-settings-bundle nowo-tech/ui-kit-bundle --with-dependencies
+```
+
+**Only installs with `resend.enabled: true` are affected.** Without it the `mailer` page, its keys and the behaviour
+are unchanged.
+
+> **Security — access to the Resend settings changes.** The Resend API key, sender and the "Check the API key" /
+> "Send a test e-mail with Resend" actions are now governed by the Instance Settings access of the **`mailer`**
+> section. A `nowo_instance_settings.security.area_roles.resend` entry would no longer protect anything (with
+> `mailer: [ROLE_ADMIN]`, `resend: [ROLE_SUPER_ADMIN]`, any `ROLE_ADMIN` could replace the Resend key), so with
+> `resend.enabled: true` the container build **fails** while that entry exists. Merge its roles into
+> `area_roles.mailer` (whoever may change the Resend key may now change the DSN too, and the other way round) or
+> remove it:
+>
+> ```yaml
+> nowo_instance_settings:
+>     security:
+>         area_roles:
+>             mailer: [ROLE_SUPER_ADMIN]   # was mailer: [ROLE_ADMIN] + resend: [ROLE_SUPER_ADMIN]
+> ```
+
+What changed with `resend.enabled: true`:
+
+- The `resend` settings section is gone. Its fields moved into the `mailer` section, which gets an explicit provider
+  choice and shows only the selected provider's rows (InstanceSettings 1.3 `visible_when`):
+
+  | 1.2 key | 1.3 key |
+  | --- | --- |
+  | `resend.enabled` (bool) | `mailer.provider` (`resend` when it was on, else `dsn`) |
+  | `resend.api_key` (secret) | `mailer.resend_api_key` (secret) |
+  | `resend.from` | `mailer.resend_from` |
+
+  `mailer.dsn`, `mailer.from`, `mailer.from_name`, `mailer.reply_to`, `mailer.test_recipient` keep their keys.
+- `bootstrap.resend_api_key` now seeds `mailer.resend_api_key`.
+- "Check the API key" / "Send a test e-mail with Resend" are on the mailer page; their routes, names and CSRF token ids
+  are unchanged. They now require the Instance Settings access of the `mailer` section (was `resend`).
+- Saving the mailer page with `provider = resend` checks the key that would go live against the Resend API and refuses
+  the save when Resend rejects it (audit MK-L1). The check makes one outbound HTTPS call per such save and shares
+  `test_email.rate_limit`.
+- `MailSettings::missingFields()` reports the selected provider only (`mailer.dsn` or `mailer.resend_api_key`); the
+  1.2 names `resend.api_key` are no longer reported.
+
+**Migrate the stored rows** (once, after deploying 1.3):
+
+```bash
+php bin/console nowo:instance-settings:seed-from-fallbacks --section=mailer --dry-run
+php bin/console nowo:instance-settings:seed-from-fallbacks --section=mailer --strict
+```
+
+The mailer section exposes the old `resend` rows as its fallbacks, so the existing InstanceSettings seeder copies them
+(insert-only: a value already stored in the mailer section wins; field names only in the output; also callable from a
+non-transactional Doctrine migration, as in [To 1.2.0](#to-120)). Until then nothing breaks: with no
+`mailer.provider` stored, `MailSettings` reads the old rows (Resend stays live when it was) and the mailer page shows
+what is live — Resend pre-selected when `resend.enabled` was on, the old key shown as stored, the old sender in the
+Resend sender — plus a notice. Saving the page unchanged migrates too: it stores `mailer.provider = resend`, the key
+and the sender, without a new Resend check (the old key is the live one).
+
+After the migration the old `resend` rows are no longer read, but they stay in the Instance Settings table (the
+encrypted 1.2 key included). Delete them with the opt-in purge:
+
+```bash
+php bin/console nowo:mail-kit:purge-legacy-resend --dry-run
+php bin/console nowo:mail-kit:purge-legacy-resend
+```
+
+It deletes only the `resend` section rows, only once `mailer.provider` is stored and the old key / sender equal
+`mailer.resend_api_key` / `mailer.resend_from`; otherwise it lists the rows that were not copied and deletes nothing
+(exit 1). `--force` deletes anyway. Idempotent. (A purge option cannot live on the InstanceSettings seeder, which knows
+nothing about MailKit's old section, hence the MailKit command.)
+
+Host code:
+
+- `MailSettings` keeps every public method (`dsn()`, `resendActive()`, `resendApiKey()`, `resendDsn()`, `from()`,
+  `resendFrom()`, `mailerFrom()`, `replyTo()`, `testRecipient()`, `missingFields()`), now backed by the new keys;
+  `provider()` and `legacyResendPending()` are new. Its constructor got an optional trailing argument.
+- Code reading `resend.*` keys through `InstanceSettingsInterface` must switch to the `mailer.*` keys above (reading an
+  unregistered section throws `UnknownSettingException`).
+- `ResendSettingsSection` is now a deprecated holder of the `NAME` constant (`'resend'`), no longer a section service.
+- Instance Settings `security.area_roles.resend` is refused at build time with `resend.enabled` (see the security note
+  above); the `mailer` roles cover Resend.
+- An application section of its own named `resend` is never read, migrated or purged as MailKit 1.2 rows (the purge
+  command refuses).
+- Scripts calling `seed-from-fallbacks --section=resend` must drop that option (unknown section).
+- Register the UiKit `visible-when` Stimulus peer so the provider rows hide in the browser (InstanceSettings 1.3
+  [UPGRADING](https://github.com/nowo-tech/InstanceSettingsBundle/blob/main/docs/UPGRADING.md)); without it every row
+  stays visible and the server rules still apply.
 
 ## To 1.2.0
 
@@ -41,7 +135,7 @@ No BC break; new, optional:
 
 To go DB-only, **in this order**: (1) upgrade and map `bootstrap.mailer_dsn: '%env(default::MAILER_DSN)%'` (and
 `bootstrap.resend_api_key`) while the env vars still exist; (2) run
-`php bin/console nowo:instance-settings:seed-from-fallbacks --section=mailer --section=resend` (try `--dry-run`
+`php bin/console nowo:instance-settings:seed-from-fallbacks --section=mailer --section=resend` (1.2; since 1.3 `--section=mailer` only) (try `--dry-run`
 first); (3) only then remove the `bootstrap` keys and the env vars, and set `framework.mailer.dsn` to a literal such as
 `null://null`. Removing them first would seed nothing. From a Doctrine migration, call the seeder from a
 non-transactional migration (see InstanceSettings

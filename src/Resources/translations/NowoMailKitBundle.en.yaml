@@ -3,6 +3,16 @@ settings:
     mailer:
         label: Mailer
         intro: 'Outgoing e-mail of this instance. A DSN stored here replaces MAILER_DSN on the next message, without a deploy; leave it empty to use MAILER_DSN.'
+        intro_providers: 'Outgoing e-mail of this instance. Choose the provider: only its fields are shown and saved, the other provider keeps its stored values. With the DSN provider and no DSN stored, MAILER_DSN is used.'
+        provider: Provider
+        provider_help: 'Resend needs symfony/resend-mailer. Switching to Resend checks the API key with Resend before saving.'
+        provider_dsn: 'SMTP or another mailer DSN'
+        provider_resend: 'Resend API'
+        resend_api_key: Resend API key
+        resend_api_key_help: 'Stored encrypted. A sending-only key is enough. Checked with Resend before it is saved; leave blank to keep the stored key.'
+        resend_from: Resend sender address
+        resend_from_help: 'A verified domain in Resend (default: the sender address).'
+        notice_legacy_resend: 'Resend settings from MailKit 1.2 are still read from the old resend section. Run bin/console nowo:instance-settings:seed-from-fallbacks --section=mailer to move them here before saving this page.'
         dsn: Mailer DSN
         dsn_help: 'For example smtp://user:password@smtp.example.com:587 or resend+api://KEY@default. Stored encrypted; sendmail, native and null are refused, private hosts too unless allowed.'
         from: Sender address
@@ -15,14 +25,6 @@ settings:
         action:
             send_test: Send a test e-mail
     resend:
-        label: Resend
-        intro: 'Send through the Resend API instead of the mailer DSN while this section is switched on and holds a key (needs symfony/resend-mailer).'
-        enabled: Send with Resend
-        enabled_help: 'Takes effect only with a stored API key.'
-        api_key: API key
-        api_key_help: 'Stored encrypted. A sending-only key is enough.'
-        from: Resend sender address
-        from_help: 'A verified domain in Resend (default: the mailer sender address).'
         action:
             check: Check the API key
             send_test: Send a test e-mail with Resend
@@ -49,6 +51,10 @@ test_email:
         rate_limited: 'Too many test e-mails; try again in a few minutes.'
         failed: 'The test e-mail to %to% failed: %error%'
 resend:
+    save:
+        key_required: 'Enter the Resend API key: Resend cannot be selected without one.'
+        rejected: 'Resend rejected this API key, so nothing was saved: %error%'
+        rate_limited: 'Too many Resend key checks; nothing was saved. Try again in a few minutes.'
     check:
         rate_limited: 'Too many checks; try again in a few minutes.'
         no_key: 'Store a Resend API key first.'

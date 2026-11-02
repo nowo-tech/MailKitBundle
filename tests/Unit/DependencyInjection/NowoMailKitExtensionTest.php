@@ -12,6 +12,9 @@ use Nowo\MailKitBundle\Dsn\MailerDsnProviderInterface;
 use Nowo\MailKitBundle\NowoMailKitBundle;
 use Nowo\MailKitBundle\Resend\ResendApiChecker;
 use Nowo\MailKitBundle\Security\MailKitAccessCheckerInterface;
+use Nowo\MailKitBundle\Settings\LegacyResendSettings;
+use Nowo\MailKitBundle\Settings\MailerSettingsSection;
+use Nowo\MailKitBundle\Validator\ResendApiKeyAcceptedValidator;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Definition;
@@ -42,6 +45,33 @@ final class NowoMailKitExtensionTest extends TestCase
         self::assertSame([], $none->getExtensionConfig('nowo_form_kit'));
     }
 
+    public function testALegacyResendAreaIsRefusedWithTheResendProvider(): void
+    {
+        $refused = $this->container(['nowo_instance_settings']);
+        $refused->prependExtensionConfig('nowo_mail_kit', ['resend' => ['enabled' => true]]);
+        $refused->prependExtensionConfig('nowo_instance_settings', ['security' => ['area_roles' => ['mailer' => ['ROLE_ADMIN'], 'resend' => ['ROLE_SUPER_ADMIN']]]]);
+        try {
+            (new NowoMailKitExtension())->prepend($refused);
+            self::fail('area_roles.resend must be refused.');
+        } catch (LogicException $e) {
+            self::assertStringContainsString('area_roles.resend is no longer used', $e->getMessage());
+            self::assertStringContainsString('area_roles.mailer', $e->getMessage());
+        }
+
+        $off = $this->container(['nowo_instance_settings']);
+        $off->prependExtensionConfig('nowo_mail_kit', ['resend' => ['enabled' => false]]);
+        $off->prependExtensionConfig('nowo_instance_settings', ['security' => ['area_roles' => ['resend' => ['ROLE_SUPER_ADMIN']]]]);
+        (new NowoMailKitExtension())->prepend($off);
+
+        $merged = $this->container(['nowo_instance_settings']);
+        $merged->prependExtensionConfig('nowo_mail_kit', ['resend' => ['enabled' => true]]);
+        $merged->prependExtensionConfig('nowo_mail_kit', ['log' => ['enabled' => true]]);
+        $merged->prependExtensionConfig('nowo_instance_settings', ['security' => ['area_roles' => ['mailer' => ['ROLE_SUPER_ADMIN']]]]);
+        $merged->prependExtensionConfig('nowo_instance_settings', ['web_ui' => ['path_prefix' => '/settings']]);
+        (new NowoMailKitExtension())->prepend($merged);
+        $this->addToAssertionCount(1);
+    }
+
     public function testCustomServicesAndSwitches(): void
     {
         $container = $this->container([]);
@@ -56,6 +86,9 @@ final class NowoMailKitExtensionTest extends TestCase
         self::assertSame('app.mail_checker', (string) $container->getAlias(MailKitAccessCheckerInterface::class));
         self::assertFalse($container->hasDefinition(MailerIntegrationPass::MAILER_ID));
         self::assertTrue($container->hasDefinition(ResendApiChecker::class));
+        self::assertTrue($container->getDefinition(ResendApiKeyAcceptedValidator::class)->hasTag('validator.constraint_validator'));
+        self::assertTrue($container->getDefinition(LegacyResendSettings::class)->hasTag('kernel.reset'));
+        self::assertTrue($container->getDefinition(MailerSettingsSection::class)->getArgument(6));
         self::assertSame('nowo_mail_kit', (new NowoMailKitExtension())->getAlias());
     }
 

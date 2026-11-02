@@ -8,10 +8,14 @@ use LogicException;
 use Nowo\AuthKitBundle\Mailer\OutboundMailReadyCheckerInterface;
 use Nowo\FormKitBundle\Form\CsrfOnlyFormFactory;
 use Nowo\InstanceSettingsBundle\Event\SettingsChangedEvent;
+use Nowo\InstanceSettingsBundle\Form\SettingsSectionType;
 use Nowo\InstanceSettingsBundle\NowoInstanceSettingsBundle;
+use Nowo\InstanceSettingsBundle\Repository\SettingValueRepositoryInterface;
+use Nowo\InstanceSettingsBundle\Section\SettingsSectionRegistry;
 use Nowo\InstanceSettingsBundle\Security\AccessGuard as InstanceSettingsAccessGuard;
 use Nowo\InstanceSettingsBundle\Settings\InstanceSettingsInterface;
 use Nowo\MailKitBundle\Command\ForgetRecipientCommand;
+use Nowo\MailKitBundle\Command\PurgeLegacyResendCommand;
 use Nowo\MailKitBundle\Command\PurgeSentMailLogCommand;
 use Nowo\MailKitBundle\Command\SendTestMailCommand;
 use Nowo\MailKitBundle\Controller\MailKitController;
@@ -23,6 +27,7 @@ use Nowo\MailKitBundle\Dsn\MailerDsnValidator;
 use Nowo\MailKitBundle\Dsn\SettingsMailerDsnProvider;
 use Nowo\MailKitBundle\EventListener\MailKitAccessListener;
 use Nowo\MailKitBundle\EventListener\SettingsChangedListener;
+use Nowo\MailKitBundle\Form\LegacyResendSettingsTypeExtension;
 use Nowo\MailKitBundle\Form\SentMailFilterType;
 use Nowo\MailKitBundle\Integration\AuthKit\MailKitOutboundMailReadyChecker;
 use Nowo\MailKitBundle\Log\SentMailCsvExporter;
@@ -39,9 +44,9 @@ use Nowo\MailKitBundle\Security\AllowAllMailKitAccessChecker;
 use Nowo\MailKitBundle\Security\ConfigurableMailKitAccessChecker;
 use Nowo\MailKitBundle\Security\MailKitAccessCheckerInterface;
 use Nowo\MailKitBundle\Sender\SenderPolicy;
+use Nowo\MailKitBundle\Settings\LegacyResendSettings;
 use Nowo\MailKitBundle\Settings\MailerSettingsSection;
 use Nowo\MailKitBundle\Settings\MailSettings;
-use Nowo\MailKitBundle\Settings\ResendSettingsSection;
 use Nowo\MailKitBundle\TestMail\TestMailGuard;
 use Nowo\MailKitBundle\TestMail\TestMailSender;
 use Nowo\MailKitBundle\Twig\MailKitTwigExtension;
@@ -50,6 +55,7 @@ use Nowo\MailKitBundle\Ui\MailKitPages;
 use Nowo\MailKitBundle\Ui\SettingsActions;
 use Nowo\MailKitBundle\Validator\DeliverableSenderValidator;
 use Nowo\MailKitBundle\Validator\MailerDsnConstraintValidator;
+use Nowo\MailKitBundle\Validator\ResendApiKeyAcceptedValidator;
 use Nowo\OutboundUrlGuardBundle\Dns\HostnameDnsLookup;
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\DependencyInjection\Argument\ServiceClosureArgument;
@@ -112,10 +118,35 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         }
 
         $this->prependFormKitProfile($container);
+        $this->assertNoLegacyResendArea($container);
 
         if ($container->hasExtension('nowo_auth_kit') && interface_exists(OutboundMailReadyCheckerInterface::class)) {
             // A host value of nowo_auth_kit.outbound_mail_ready_checker (loaded after the prepend) wins.
             $container->prependExtensionConfig('nowo_auth_kit', ['outbound_mail_ready_checker' => self::AUTH_KIT_CHECKER_ID]);
+        }
+    }
+
+    /**
+     * Since 1.3 the Resend fields and actions belong to the `mailer` area: an Instance Settings
+     * `security.area_roles.resend` entry would be silently ignored (audit CU-L1), so with `resend.enabled` the build
+     * fails until the host merges it into `mailer` (or removes it).
+     */
+    private function assertNoLegacyResendArea(ContainerBuilder $container): void
+    {
+        $resend = false;
+        foreach ($container->getExtensionConfig(Configuration::ALIAS) as $config) {
+            if (is_array($config['resend'] ?? null) && array_key_exists('enabled', $config['resend'])) {
+                $resend = $config['resend']['enabled'] === true;
+            }
+        }
+        if (!$resend) {
+            return;
+        }
+        foreach ($container->getExtensionConfig('nowo_instance_settings') as $config) {
+            $areas = is_array($config['security'] ?? null) && is_array($config['security']['area_roles'] ?? null) ? $config['security']['area_roles'] : [];
+            if (array_key_exists(LegacyResendSettings::SECTION, $areas)) {
+                throw new LogicException('NowoMailKitBundle 1.3: nowo_instance_settings.security.area_roles.resend is no longer used — the Resend API key, sender and actions are part of the "mailer" section since 1.3. Merge those roles into area_roles.mailer (or remove the "resend" entry) so they keep protecting the Resend settings; see UPGRADING "To 1.3.0".');
+            }
         }
     }
 
@@ -180,9 +211,31 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $actions   = $config['web_ui']['enabled'] ? new Reference(SettingsActions::class) : null;
         $readiness = new ServiceClosureArgument(new Reference(OutboundMailReadiness::class));
 
+        $resend = $config['resend']['enabled'];
+        // 1.3: the 1.2 `resend` rows, read until they are seeded into the mailer section (kernel.reset clears the memo).
+        if ($resend) {
+            $container->setDefinition(LegacyResendSettings::class, (new Definition(LegacyResendSettings::class, [
+                new Reference(SettingValueRepositoryInterface::class),
+                new ServiceClosureArgument(new Reference(SettingsSectionRegistry::class)),
+            ]))
+                ->addTag('kernel.reset', ['method' => 'reset']));
+            // The mailer page shows the live 1.2 Resend values until they are migrated (pre-selected provider, kept key).
+            $container->setDefinition(LegacyResendSettingsTypeExtension::class, (new Definition(LegacyResendSettingsTypeExtension::class, [
+                new Reference(MailSettings::class),
+                new Reference(LegacyResendSettings::class),
+            ]))->addTag('form.type_extension', ['extended_type' => SettingsSectionType::class]));
+            $container->setDefinition(PurgeLegacyResendCommand::class, (new Definition(PurgeLegacyResendCommand::class, [
+                new Reference(SettingValueRepositoryInterface::class),
+                new Reference(InstanceSettingsInterface::class),
+                new Reference(LegacyResendSettings::class),
+                new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            ]))->addTag('console.command', ['command' => PurgeLegacyResendCommand::NAME]));
+        }
+
         $container->setDefinition(MailSettings::class, new Definition(MailSettings::class, [
             new Reference(InstanceSettingsInterface::class),
-            $config['resend']['enabled'],
+            $resend,
+            $resend ? new Reference(LegacyResendSettings::class) : null,
         ]));
 
         $container->setDefinition(MailerSettingsSection::class, (new Definition(MailerSettingsSection::class, [
@@ -192,16 +245,11 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             $actions,
             $config['bootstrap']['mailer_dsn'],
             $readiness,
+            $resend,
+            $resend ? $config['bootstrap']['resend_api_key'] : null,
+            $resend ? new Reference(LegacyResendSettings::class) : null,
+            $resend ? new ServiceClosureArgument(new Reference(MailSettings::class)) : null,
         ]))->addTag(NowoInstanceSettingsBundle::SECTION_TAG, ['priority' => 50]));
-
-        if ($config['resend']['enabled']) {
-            $container->setDefinition(ResendSettingsSection::class, (new Definition(ResendSettingsSection::class, [
-                $config['sender']['require_public_domain'],
-                $actions,
-                $config['bootstrap']['resend_api_key'],
-                $readiness,
-            ]))->addTag(NowoInstanceSettingsBundle::SECTION_TAG, ['priority' => 49]));
-        }
     }
 
     /**
@@ -357,6 +405,14 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
                 $config['resend']['api_timeout'],
                 new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE),
             ]))->setPublic(true));
+            // 1.3 (MK-L1): the admin save checks a Resend key before it goes live.
+            $container->setDefinition(ResendApiKeyAcceptedValidator::class, (new Definition(ResendApiKeyAcceptedValidator::class, [
+                new Reference(ResendApiChecker::class),
+                new Reference(MailSettings::class),
+                new Reference(TestMailGuard::class),
+                new Reference('security.token_storage', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+                new Reference('request_stack', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            ]))->addTag('validator.constraint_validator'));
         }
     }
 

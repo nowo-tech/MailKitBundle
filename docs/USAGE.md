@@ -15,6 +15,7 @@
 - [Tags and redaction](#tags-and-redaction)
 - [Test e-mail](#test-e-mail)
 - [Resend](#resend)
+  - [Migrating the 1.2 `resend` section](#migrating-the-12-resend-section)
 - [DB-only mode](#db-only-mode)
 - [Readiness and AuthKit](#readiness-and-authkit)
 - [Sent-mail log](#sent-mail-log)
@@ -49,7 +50,7 @@ Nothing changes in your code: keep injecting `Symfony\Component\Mailer\MailerInt
 
 ## The mailer settings section
 
-MailKit contributes the section **`mailer`** to [Instance Settings](https://github.com/nowo-tech/InstanceSettingsBundle) (`/admin/settings/sections/mailer` by default) and, with `resend.enabled: true`, the section **`resend`**.
+MailKit contributes the section **`mailer`** to [Instance Settings](https://github.com/nowo-tech/InstanceSettingsBundle) (`/admin/settings/sections/mailer` by default). With `resend.enabled: true` (since 1.3) the same section offers a **provider** choice — `dsn` (SMTP or any Symfony mailer DSN) or `resend` (Resend API) — and shows only the selected provider's fields (InstanceSettings 1.3 `visible_when`, UiKit `visible-when` peer). Before 1.3 Resend had its own `resend` section: see [Migrating the 1.2 `resend` section](#migrating-the-12-resend-section).
 
 ### Fields
 
@@ -60,13 +61,20 @@ MailKit contributes the section **`mailer`** to [Instance Settings](https://gith
 | `mailer.from_name` | string (≤ 120) | `sender.default_from_name` | Display name of the From. |
 | `mailer.reply_to` | e-mail | — | Default Reply-To. |
 | `mailer.test_recipient` | e-mail | — | Recipient of the test e-mails (else the signed-in user's address). |
-| `resend.enabled` | bool | `false` | Send through Resend while a key is stored. |
-| `resend.api_key` | secret (encrypted) | — | Resend API key (`re_…`). |
-| `resend.from` | e-mail | — | Sender while Resend is active (else `mailer.from`). |
+| `mailer.provider` | choice `dsn` / `resend` | `dsn` | Only with `resend.enabled: true` (1.3). Selects the delivery; the other provider's rows are hidden and keep their stored values. |
+| `mailer.resend_api_key` | secret (encrypted) | — | Only with `resend.enabled: true`, shown for `resend` (1.3; was `resend.api_key`). Checked with Resend before it goes live ([Resend](#resend)). |
+| `mailer.resend_from` | e-mail | — | Only with `resend.enabled: true`, shown for `resend` (1.3; was `resend.from`). Sender while Resend is active (else `mailer.from`). |
+
+With the provider choice, `mailer.dsn` is shown only for `dsn`; `from`, `from_name`, `reply_to` and `test_recipient` are
+shown for both. A hidden row is neither validated nor written by a form save (Instance Settings 1.3), so switching back
+restores the previous provider exactly as it was. Without `resend.enabled` the page is the 1.2 page (no provider row).
+The host must register the UiKit `visible-when` Stimulus peer (see the
+[InstanceSettings USAGE](https://github.com/nowo-tech/InstanceSettingsBundle/blob/main/docs/USAGE.md)); without
+JavaScript every row stays visible and the server rules still apply.
 
 The section actions receive Instance Settings' `SectionActionContext` (section, request, user).
 
-Read them like any setting (`InstanceSettingsInterface::getString('mailer.from')`), or through the typed `Nowo\MailKitBundle\Settings\MailSettings` service (`from()`, `replyTo()`, `dsn()`, `resendActive()`…). The section names and keys are a public contract: they are never renamed.
+Read them like any setting (`InstanceSettingsInterface::getString('mailer.from')`), or through the typed `Nowo\MailKitBundle\Settings\MailSettings` service (`provider()`, `from()`, `replyTo()`, `dsn()`, `resendActive()`…). The section names and keys are a public contract: they are never renamed.
 
 ### DSN validation
 
@@ -101,8 +109,8 @@ nowo_mail_kit:
 
 The DSN of every send is, in order:
 
-1. the Resend key (`resend+api://<key>@default`) when the `resend` section exists, is switched on and holds a key;
-2. the `mailer.dsn` secret;
+1. the Resend key (`resend+api://<key>@default`) when `mailer.provider` is `resend` and a key is stored;
+2. the `mailer.dsn` secret (also while `resend` is selected without a key);
 3. nothing → the **framework transport** (`framework.mailer.dsn`, usually `MAILER_DSN`) — keep it as the bootstrap value (`null://null` is fine until a DSN is stored).
 
 A stored DSN that no longer passes validation (for example after tightening `allowed_schemes`) makes the send **fail** with a `TransportException` naming the error key — MailKit never falls back silently to another transport.
@@ -143,7 +151,7 @@ With `framework.messenger` routing `Symfony\Component\Mailer\Messenger\SendEmail
 
 ## Sender and Reply-To
 
-`MailKitMailer` and `RuntimeTransport` add `From` (`mailer.from` with `mailer.from_name`, or `resend.from` while Resend is active) and `Reply-To` (`mailer.reply_to`) **only when the message has none**:
+`MailKitMailer` and `RuntimeTransport` add `From` (`mailer.from` with `mailer.from_name`, or `mailer.resend_from` while Resend is active) and `Reply-To` (`mailer.reply_to`) **only when the message has none**:
 
 ```php
 $mailer->send((new Email())->to('alice@example.com')->subject('Hi')->text('…'));        // From from the settings
@@ -176,16 +184,57 @@ Recipient: the argument, else `mailer.test_recipient`, else the user's `getEmail
 ```yaml
 nowo_mail_kit:
     resend:
-        enabled: true      # adds the "resend" section; composer require symfony/resend-mailer
+        enabled: true      # adds the provider choice to the mailer section; composer require symfony/resend-mailer
         api_timeout: 10
 ```
 
-The section shows "Check the API key" (`GET https://api.resend.com/domains`, bounded by `api_timeout`, no redirects; lists the domains and their status, recognises sending-only keys) and "Send a test e-mail with Resend" (uses the stored key even while the switch is off). Programmatic check: `Nowo\MailKitBundle\Resend\ResendApiChecker::check($key)`.
+Select **Resend API** as the provider, enter the key and save. **The key is checked before it goes live** (since 1.3):
+a save with `provider = resend` that would put a key live — a newly typed key, or the stored key when switching from
+the DSN provider — first calls `GET https://api.resend.com/domains` with that key; when Resend rejects it (or the
+call fails) the save is refused with *"Resend rejected this API key, so nothing was saved: …"* and the current
+delivery keeps working. Selecting Resend with no key at all is refused too. Saving while Resend is already live with
+the key unchanged makes no call. The checks share the per-user limit of the test e-mails (`test_email.rate_limit`).
+This applies to the admin form only (`InstanceSettingsInterface::save()`, imports and the seed are not checked).
+
+The mailer page also shows "Check the API key" (checks the **stored** key whichever provider is selected; lists the
+domains and their status, recognises sending-only keys) and "Send a test e-mail with Resend" (uses the stored key even
+while the DSN provider is selected). The key is never echoed back. Programmatic check:
+`Nowo\MailKitBundle\Resend\ResendApiChecker::check($key)`.
+
+### Migrating the 1.2 `resend` section
+
+MailKit 1.0–1.2 stored Resend in its own section (`resend.enabled`, `resend.api_key`, `resend.from`). Since 1.3 that
+section is no longer registered. Until the rows are copied, `MailSettings` keeps reading them (no stored
+`mailer.provider` + `resend.enabled = true` → Resend stays live) and the mailer page shows what is live: Resend is
+pre-selected when the old switch was on, the old key counts as stored ("leave blank to keep") and the old sender
+pre-fills the Resend sender. Saving the page as it is stores `mailer.provider = resend`, the key and the sender, so
+Resend stays live (the old key is the live key: it is not checked again). A notice names the migration meanwhile.
+To migrate without opening the page, copy the rows once:
+
+```bash
+php bin/console nowo:instance-settings:seed-from-fallbacks --section=mailer --dry-run
+php bin/console nowo:instance-settings:seed-from-fallbacks --section=mailer --strict
+```
+
+The seed stores `mailer.provider` (`resend` when `resend.enabled` was on, else `dsn`), `mailer.resend_api_key` and
+`mailer.resend_from` from the old rows, only where nothing is stored yet (idempotent, field names only in the output).
+The old `resend` rows stay in the table, unread once `mailer.provider` is stored. Delete them (the encrypted 1.2 key
+included) once copied:
+
+```bash
+php bin/console nowo:mail-kit:purge-legacy-resend --dry-run
+php bin/console nowo:mail-kit:purge-legacy-resend
+```
+
+The purge refuses (exit 1, nothing deleted) while `mailer.provider` is not stored, and when an old key or sender differs
+from `mailer.resend_api_key` / `mailer.resend_from` (not copied, e.g. a mailer value stored before the seed); it lists
+the row names, never a value. `--force` deletes anyway (the mailer values win). Running it again is a no-op. See
+[UPGRADING](UPGRADING.md#to-130).
 
 ## DB-only mode
 
 Since 1.2 (with `nowo-tech/instance-settings-bundle` ^1.2) the mailer DSN and the Resend key can live **only in the
-database** (the `mailer` / `resend` sections, encrypted): the framework transport then needs no secret, e.g.
+database** (the `mailer` section, encrypted): the framework transport then needs no secret, e.g.
 `framework.mailer.dsn: 'null://null'` as a literal, and no `MAILER_DSN` / `RESEND_API_KEY` env var.
 
 MailKit cannot read `framework.mailer.dsn`, so the one-time bootstrap goes through two config keys that are read
@@ -206,17 +255,18 @@ container and shown by `debug:config`).
 Order:
 
 1. Upgrade to MailKit 1.2 / InstanceSettings 1.2 and add the `bootstrap` keys while the env vars still exist.
-2. `php bin/console nowo:instance-settings:seed-from-fallbacks --section=mailer --section=resend --dry-run`, then
+2. `php bin/console nowo:instance-settings:seed-from-fallbacks --section=mailer --dry-run`, then
    without `--dry-run` (add `--strict` to fail on a refused value). Each value is stored only when the secret is empty;
    the output lists field names only. A DSN that fails the settings validation (`null://`, `sendmail`, a private host
-   not in `dsn.allowed_hosts`…) is skipped with reason `invalid`. The Resend **switch** is not seeded: turn it on in
-   Settings → Resend.
+   not in `dsn.allowed_hosts`…) is skipped with reason `invalid`. `bootstrap.resend_api_key` is seeded into
+   `mailer.resend_api_key`; the **provider** is not seeded from it: select Resend on the mailer page (the key is then
+   checked before it goes live).
 3. Remove the `bootstrap` keys and the env vars right away, and set the framework DSN to a literal (`null://null`).
    Seed **once**: a secret an admin clears later would be seeded again while `bootstrap.*` is still mapped.
 
-**Missing settings warning.** The `mailer` page warns when no DSN is stored (unless
-`mailer.fallback_counts_as_ready: true`), the `resend` page when Resend is switched on without a key. Health / status
-pages read the same report from `OutboundMailReadiness::status()->missingFields` (`['resend.api_key', 'mailer.dsn']`,
+**Missing settings warning.** The `mailer` page warns about the selected provider only: no DSN stored for `dsn`
+(unless `mailer.fallback_counts_as_ready: true`), no key for `resend`. Health / status pages read the same report from
+`OutboundMailReadiness::status()->missingFields` (`['mailer.dsn']` or `['mailer.resend_api_key']`,
 names only) or `OutboundMailReadiness::missingFields()`. With a custom `mailer.dsn_provider` nothing is reported.
 
 ## Readiness and AuthKit
@@ -313,7 +363,7 @@ Schedule the purge (cron or Symfony Scheduler). `SentMailRecorder::forgetAddress
 
 ## Reacting to changes and auditing
 
-A save of the `mailer` / `resend` section dispatches Instance Settings' `SettingsChangedEvent`; MailKit's listener resets the runtime transport and logs `Mail settings changed.` (notice) with the section, field names, origin and the redacted new transport — never a value. `Nowo\MailKitBundle\Dsn\MailerDsnAudit::redact($dsn)` / `label($dsn)` give you the same redacted view for your own audit trail.
+A save of the `mailer` section dispatches Instance Settings' `SettingsChangedEvent`; MailKit's listener resets the runtime transport and logs `Mail settings changed.` (notice) with the section, field names, origin and the redacted new transport — never a value. `Nowo\MailKitBundle\Dsn\MailerDsnAudit::redact($dsn)` / `label($dsn)` give you the same redacted view for your own audit trail.
 
 ## Admin UI
 

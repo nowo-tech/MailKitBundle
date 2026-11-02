@@ -11,8 +11,8 @@ test.describe('Mail Kit demo', () => {
 
   test('the mailer section never renders the stored DSN and refuses a private host', async ({ page }) => {
     await page.goto('/admin/settings/sections/mailer');
-    await expect(sectionForm(page).locator('input[type="password"]')).toHaveValue('');
-    await sectionForm(page).locator('input[type="password"]').fill('smtp://10.0.0.5:25');
+    await expect(sectionForm(page).locator('input[name="settings_section[dsn][value]"]')).toHaveValue('');
+    await sectionForm(page).locator('input[name="settings_section[dsn][value]"]').fill('smtp://10.0.0.5:25');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page).toHaveURL(/sections\/mailer/);
     await page.goto('/');

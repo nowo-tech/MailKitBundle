@@ -7,7 +7,7 @@ namespace Nowo\MailKitBundle\Dsn;
 use Nowo\MailKitBundle\Settings\MailSettings;
 
 /**
- * Default {@see MailerDsnProviderInterface}: the Resend key when the Resend section is active, else the stored
+ * Default {@see MailerDsnProviderInterface}: the Resend key when the Resend provider is active, else the stored
  * `mailer.dsn` secret, else null (framework transport).
  */
 final readonly class SettingsMailerDsnProvider implements MailerDsnProviderInterface

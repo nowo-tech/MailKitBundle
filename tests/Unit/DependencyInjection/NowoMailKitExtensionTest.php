@@ -12,6 +12,9 @@ use Nowo\MailKitBundle\Dsn\MailerDsnProviderInterface;
 use Nowo\MailKitBundle\NowoMailKitBundle;
 use Nowo\MailKitBundle\Resend\ResendApiChecker;
 use Nowo\MailKitBundle\Security\MailKitAccessCheckerInterface;
+use Nowo\MailKitBundle\Settings\LegacyResendSettings;
+use Nowo\MailKitBundle\Settings\MailerSettingsSection;
+use Nowo\MailKitBundle\Validator\ResendApiKeyAcceptedValidator;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Definition;
@@ -56,6 +59,9 @@ final class NowoMailKitExtensionTest extends TestCase
         self::assertSame('app.mail_checker', (string) $container->getAlias(MailKitAccessCheckerInterface::class));
         self::assertFalse($container->hasDefinition(MailerIntegrationPass::MAILER_ID));
         self::assertTrue($container->hasDefinition(ResendApiChecker::class));
+        self::assertTrue($container->getDefinition(ResendApiKeyAcceptedValidator::class)->hasTag('validator.constraint_validator'));
+        self::assertTrue($container->getDefinition(LegacyResendSettings::class)->hasTag('kernel.reset'));
+        self::assertTrue($container->getDefinition(MailerSettingsSection::class)->getArgument(6));
         self::assertSame('nowo_mail_kit', (new NowoMailKitExtension())->getAlias());
     }
 

@@ -3,6 +3,16 @@ settings:
     mailer:
         label: Uitgaande e-mail
         intro: 'Uitgaande e-mail van deze instantie. Een hier opgeslagen DSN vervangt MAILER_DSN vanaf het volgende bericht, zonder deploy; laat het leeg om MAILER_DSN te gebruiken.'
+        intro_providers: 'Uitgaande e-mail van deze instantie. Kies de provider: alleen de velden daarvan worden getoond en opgeslagen, de andere provider houdt zijn opgeslagen waarden. Met de DSN-provider zonder opgeslagen DSN wordt MAILER_DSN gebruikt.'
+        provider: Provider
+        provider_help: 'Resend vereist symfony/resend-mailer. Bij overschakelen naar Resend wordt de API-sleutel vóór het opslaan bij Resend gecontroleerd.'
+        provider_dsn: 'SMTP of een andere mailer-DSN'
+        provider_resend: 'Resend-API'
+        resend_api_key: Resend-API-sleutel
+        resend_api_key_help: 'Versleuteld opgeslagen. Een sleutel die alleen mag verzenden is genoeg. Wordt vóór het opslaan bij Resend gecontroleerd; laat leeg om de opgeslagen sleutel te houden.'
+        resend_from: Resend-afzenderadres
+        resend_from_help: 'Een geverifieerd domein in Resend (standaard: het afzenderadres).'
+        notice_legacy_resend: 'De Resend-instellingen van MailKit 1.2 worden nog uit de oude sectie resend gelezen. Voer bin/console nowo:instance-settings:seed-from-fallbacks --section=mailer uit om ze hierheen te verplaatsen voordat je deze pagina opslaat.'
         dsn: Mailer-DSN
         dsn_help: 'Bijvoorbeeld smtp://gebruiker:wachtwoord@smtp.example.com:587 of resend+api://SLEUTEL@default. Versleuteld opgeslagen; sendmail, native en null worden geweigerd, privé-hosts ook tenzij toegestaan.'
         from: Afzenderadres
@@ -15,14 +25,6 @@ settings:
         action:
             send_test: Een test-e-mail versturen
     resend:
-        label: Resend
-        intro: 'Verstuurt via de Resend-API in plaats van de DSN zolang deze sectie aan staat en een sleutel bevat (vereist symfony/resend-mailer).'
-        enabled: Versturen met Resend
-        enabled_help: 'Werkt alleen met een opgeslagen API-sleutel.'
-        api_key: API-sleutel
-        api_key_help: 'Versleuteld opgeslagen. Een sleutel die alleen mag versturen volstaat.'
-        from: Resend-afzender
-        from_help: 'Een in Resend geverifieerd domein (standaard: het afzenderadres van de mailer).'
         action:
             check: API-sleutel controleren
             send_test: Een test-e-mail versturen met Resend
@@ -49,6 +51,10 @@ test_email:
         rate_limited: 'Te veel test-e-mails; probeer het over een paar minuten opnieuw.'
         failed: 'De test-e-mail naar %to% is mislukt: %error%'
 resend:
+    save:
+        key_required: 'Vul de Resend-API-sleutel in: zonder sleutel kan Resend niet gekozen worden.'
+        rejected: 'Resend heeft deze API-sleutel geweigerd, er is niets opgeslagen: %error%'
+        rate_limited: 'Te veel controles van de Resend-sleutel; er is niets opgeslagen. Probeer het over een paar minuten opnieuw.'
     check:
         rate_limited: 'Te veel controles; probeer het over een paar minuten opnieuw.'
         no_key: 'Sla eerst een Resend-API-sleutel op.'

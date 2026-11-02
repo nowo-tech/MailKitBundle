@@ -20,3 +20,7 @@ nowo_mail_kit:
     security:
         access_roles: [ROLE_ADMIN]
         allow_unauthenticated: true
+    # 1.3: provider choice in the mailer section (SMTP DSN or Resend). The demo checks Resend keys against an offline
+    # stand-in (src/Http/ResendDemoApi.php): keys starting with re_demo_ are accepted, others are refused.
+    resend:
+        enabled: true

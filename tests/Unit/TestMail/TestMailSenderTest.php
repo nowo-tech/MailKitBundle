@@ -82,7 +82,7 @@ final class TestMailSenderTest extends TestCase
     public function testResendChannel(): void
     {
         self::assertSame(TestMailOutcome::NotConfigured, $this->sender(new FakeSettings(), resend: true)->sendResend('qa@example.com')->outcome);
-        $result = $this->sender(new FakeSettings(['mailer.from' => 'noreply@example.com'], ['resend.api_key' => 're_REDACTED-TEST']), resend: true)->sendResend('qa@example.com');
+        $result = $this->sender(new FakeSettings(['mailer.from' => 'noreply@example.com'], ['mailer.resend_api_key' => 're_REDACTED-TEST']), resend: true)->sendResend('qa@example.com');
         self::assertSame(TestMailOutcome::Failed, $result->outcome);
         self::assertStringContainsString('dsn.scheme_not_allowed', (string) $result->error);
     }

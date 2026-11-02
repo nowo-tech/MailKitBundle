@@ -63,7 +63,7 @@ final readonly class TestMailSender
     }
 
     /**
-     * Test of the stored Resend key (also while the Resend section is switched off).
+     * Test of the stored Resend key (also while another provider is selected).
      */
     public function sendResend(?string $to = null, ?object $user = null): TestMailResult
     {

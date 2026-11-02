@@ -19,7 +19,6 @@ use Nowo\MailKitBundle\Resend\ResendApiChecker;
 use Nowo\MailKitBundle\Security\AccessGuard;
 use Nowo\MailKitBundle\Settings\MailerSettingsSection;
 use Nowo\MailKitBundle\Settings\MailSettings;
-use Nowo\MailKitBundle\Settings\ResendSettingsSection;
 use Nowo\MailKitBundle\TestMail\TestMailGuard;
 use Nowo\MailKitBundle\TestMail\TestMailOutcome;
 use Nowo\MailKitBundle\TestMail\TestMailResult;
@@ -27,6 +26,7 @@ use Nowo\MailKitBundle\TestMail\TestMailSender;
 use Nowo\MailKitBundle\Ui\AdminPages;
 use Nowo\MailKitBundle\Ui\MailKitPages;
 use Nowo\MailKitBundle\Ui\SettingsActions;
+use Nowo\MailKitBundle\Validator\ResendApiKeyAccepted;
 use Nowo\UiKitBundle\View\Pagination;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -189,23 +189,24 @@ final class MailKitController extends AbstractController
     }
 
     /**
-     * "Check the API key" of the Resend section.
+     * "Check the API key" of the mailer section (Resend provider): checks the stored key, whichever provider is
+     * selected. A key typed in the form is checked on save instead ({@see ResendApiKeyAccepted}).
      */
     #[Route(path: '/actions/resend/check', name: SettingsActions::RESEND_CHECK, methods: ['POST'])]
     public function resendCheck(Request $request): Response
     {
-        $this->guardAction($request, SettingsActions::RESEND_CHECK, ResendSettingsSection::NAME);
+        $this->guardAction($request, SettingsActions::RESEND_CHECK, MailerSettingsSection::NAME);
         if ($this->rateLimited($request)) {
             // Each check is an outbound HTTPS call of up to resend.api_timeout (CA I1): same per-user limit as the tests.
             $this->addFlash('error', $this->trans('resend.check.rate_limited'));
 
-            return $this->backTo(ResendSettingsSection::NAME);
+            return $this->backTo(MailerSettingsSection::NAME);
         }
         $key = $this->settings->resendApiKey();
         if ($key === null || !$this->resendChecker instanceof ResendApiChecker) {
             $this->addFlash('error', $this->trans('resend.check.no_key'));
 
-            return $this->backTo(ResendSettingsSection::NAME);
+            return $this->backTo(MailerSettingsSection::NAME);
         }
 
         $result = $this->resendChecker->check($key);
@@ -221,20 +222,20 @@ final class MailKitController extends AbstractController
             $this->addFlash('success', $this->trans('resend.check.ok', ['%domains%' => $domains === [] ? '—' : implode(', ', $domains)]));
         }
 
-        return $this->backTo(ResendSettingsSection::NAME);
+        return $this->backTo(MailerSettingsSection::NAME);
     }
 
     /**
-     * "Send a test e-mail with Resend" of the Resend section.
+     * "Send a test e-mail with Resend" of the mailer section (Resend provider), with the stored key.
      */
     #[Route(path: '/actions/resend/test', name: SettingsActions::RESEND_TEST, methods: ['POST'])]
     public function resendTest(Request $request): Response
     {
-        $this->guardAction($request, SettingsActions::RESEND_TEST, ResendSettingsSection::NAME);
+        $this->guardAction($request, SettingsActions::RESEND_TEST, MailerSettingsSection::NAME);
         $result = $this->rateLimited($request) ? new TestMailResult(TestMailOutcome::RateLimited) : $this->testMail->sendResend(null, $this->guard->user());
         $this->flashResult($result);
 
-        return $this->backTo(ResendSettingsSection::NAME);
+        return $this->backTo(MailerSettingsSection::NAME);
     }
 
     /**

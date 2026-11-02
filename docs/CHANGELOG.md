@@ -13,6 +13,43 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+Provider choice in the mailer settings: with `resend.enabled`, the `mailer` section offers `dsn` / `resend` and shows only the selected provider's fields (InstanceSettings 1.3 `visible_when`); a Resend key is checked before it goes live. Requires InstanceSettings ^1.3.1 and UiKit ^2.23. See [UPGRADING](UPGRADING.md#to-130).
+
+### Added
+
+- `mailer.provider` choice (`dsn` / `resend`, only with `resend.enabled: true`): `mailer.dsn` is shown for `dsn`,
+  `mailer.resend_api_key` / `mailer.resend_from` for `resend`; sender, Reply-To and test recipient for both. Hidden
+  rows are neither validated nor written by a save, so switching back keeps the other provider's values.
+- `ResendApiKeyAccepted` constraint (admin form, audit MK-L1): a save with `provider = resend` that would put a key live
+  (a typed key, or the stored key when switching from `dsn`) checks it with `GET https://api.resend.com/domains` first
+  and is refused when Resend rejects it or no key is stored; rate limited with the test e-mails. Messages
+  `resend.save.*` (7 locales).
+- `LegacyResendSettings`: reads the 1.2 `resend` rows; `MailSettings` uses them until `mailer.provider` is stored, and
+  the mailer section exposes them as seed fallbacks, so `nowo:instance-settings:seed-from-fallbacks --section=mailer`
+  migrates them. The mailer page shows a notice meanwhile (`settings.mailer.notice_legacy_resend`).
+- `MailSettings::provider()` and `MailSettings::legacyResendPending()`.
+- Demo: Resend provider enabled with an offline Resend stand-in (`re_demo_…` keys are valid), UiKit `visible-when`
+  peer, Playwright e2e of the provider switch and the check-before-save path, axe in both states.
+
+### Changed
+
+- **With `resend.enabled: true`:** the `resend` settings section is removed; `resend.enabled` / `resend.api_key` /
+  `resend.from` became `mailer.provider` / `mailer.resend_api_key` / `mailer.resend_from`, and the Resend actions moved
+  to the mailer page (same routes, now gated on the `mailer` section access). This reverses the 1.2 decision to keep
+  the Resend fields always visible. See [UPGRADING](UPGRADING.md#to-130).
+- `MailSettings::missingFields()` reports the selected provider only (`mailer.dsn` or `mailer.resend_api_key`).
+- `bootstrap.resend_api_key` seeds `mailer.resend_api_key`.
+- `ResendSettingsSection` is deprecated and only holds its `NAME` constant.
+- Requires `nowo-tech/instance-settings-bundle` ^1.3.1 (was ^1.2) and `nowo-tech/ui-kit-bundle` ^2.23 (was ^2.21);
+  `nowo-tech/doctrine-encrypt-bundle` ^2.10 is now a direct requirement (secret form data of the key check).
+- `composer test` / `test-coverage` run PHPUnit with `-d memory_limit=512M`.
+
+### Security
+
+- MK-L1 (Low, Appendix CT): with the Resend fields provider-dependent, a new or rotated Resend key could go live in the
+  same save without being checked, and a wrong key stops every mail (password resets included). The save is now
+  refused unless Resend accepts the key.
+
 ## [1.2.0] - 2026-11-02
 
 DB-only mail settings: bootstrap.mailer_dsn / bootstrap.resend_api_key feed nowo:instance-settings:seed-from-fallbacks (same DSN checks as an admin save), missing-field notices. Requires InstanceSettings ^1.2. See [UPGRADING](https://github.com/nowo-tech/MailKitBundle/blob/v1.2.0/docs/UPGRADING.md#to-120).

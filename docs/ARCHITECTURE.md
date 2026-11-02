@@ -13,7 +13,7 @@
 ## Overview
 
 ```
-Instance Settings ◄── MailerSettingsSection / ResendSettingsSection (fields, #[MailerDsn], #[DeliverableSender], actions)
+Instance Settings ◄── MailerSettingsSection (fields, provider visible_when, #[MailerDsn], #[DeliverableSender], ResendApiKeyAccepted, actions)
       │ getSecret('mailer.dsn'), getString('mailer.from') …
       ▼
 MailSettings ──► SettingsMailerDsnProvider (MailerDsnProviderInterface) ──► RuntimeTransport ◄── MailKitMailer
@@ -40,7 +40,7 @@ OutboundMailReadiness ──► Twig functions, AuthKit OutboundMailReadyChecker
 
 ## Admin flow
 
-1. Settings: Instance Settings renders the `mailer` / `resend` sections; values are validated by MailKit's constraints on
+1. Settings: Instance Settings renders the `mailer` section (provider-dependent rows with `resend.enabled`); values are validated by MailKit's constraints on
    save / import; `SettingsChangedEvent` → `SettingsChangedListener` resets the transport and audits (redacted).
 2. Actions: the section's UiKit `Action`s post a FormKit CSRF-only form to `MailKitController` (`/actions/*`), which
    checks `AccessGuard::isSectionGranted()` (MailKit checker + Instance Settings section access), the token and the rate
@@ -52,7 +52,8 @@ OutboundMailReadiness ──► Twig functions, AuthKit OutboundMailReadyChecker
 
 | Component | Role |
 | --- | --- |
-| `Settings\MailerSettingsSection`, `ResendSettingsSection`, `MailSettings` | Settings contract and typed view |
+| `Settings\MailerSettingsSection`, `MailSettings`, `LegacyResendSettings` | Settings contract, typed view, 1.2 `resend` rows until migrated |
+| `Validator\ResendApiKeyAccepted` | Save-time Resend key check (MK-L1) |
 | `Dsn\MailerDsnProviderInterface`, `SettingsMailerDsnProvider`, `RuntimeDsn`, `DsnSource` | Where the DSN comes from |
 | `Dsn\MailerDsnValidator`, `DsnHostGuard`, `MailerDsnAudit` | Validation, SSRF guard, redaction |
 | `Validator\MailerDsn`, `DeliverableSender` (+ validators) | Field constraints |
@@ -86,4 +87,4 @@ and settings changes; every other service is stateless and reads the settings pe
 - `nowo_mail_kit.security.access_checker` — your `MailKitAccessCheckerInterface`.
 - `MailHeaders::tag()` / `redact()` — log category and body masking per message.
 - `web_ui.templates.*` — page overrides (extend + one block).
-- Instance Settings `area_roles` for the `mailer` / `resend` sections.
+- Instance Settings `area_roles` for the `mailer` section.

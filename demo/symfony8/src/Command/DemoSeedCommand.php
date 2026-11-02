@@ -35,6 +35,7 @@ final class DemoSeedCommand extends Command
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $changed = $this->settings->save('mailer', [
+            'provider'       => 'dsn',
             'dsn'            => 'smtp://mailpit:1025',
             'from'           => 'noreply@example.com',
             'from_name'      => 'Acme Ops',

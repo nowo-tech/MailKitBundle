@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\MailKitBundle\Tests\Integration\Functional;
 
 use Nowo\MailKitBundle\Log\SentMailRecorder;
+use Nowo\MailKitBundle\Settings\MailSettings;
 use Nowo\MailKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\MailKitBundle\Tests\Support\ResendApiMock;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
@@ -193,6 +194,85 @@ final class AdminUiTest extends KernelTestCase
         $this->assertResponseStatus($anonymous, 401);
     }
 
+    public function testTheProviderChoiceShowsOnlyTheSelectedProviderFields(): void
+    {
+        $kernel  = $this->bootKernel(['resend' => ['enabled' => true]]);
+        $client  = $this->client($kernel);
+        $crawler = $client->request('GET', '/admin/settings/sections/mailer');
+        $this->assertResponseStatus($client, 200);
+
+        self::assertCount(1, $crawler->filter('[data-controller~="visible-when"]'));
+        self::assertSame('dsn', $crawler->filter('select[name="settings_section[provider]"] option[selected]')->attr('value'));
+        foreach (['dsn' => '["dsn"]', 'resend_api_key' => '["resend"]', 'resend_from' => '["resend"]'] as $field => $in) {
+            $row = $crawler->filter('[data-nowo-ui-visible-when-field="settings_section[provider]"]')->reduce(static fn ($node): bool => $node->filter('[name^="settings_section[' . $field . ']"]')->count() > 0);
+            self::assertCount(1, $row, $field);
+            self::assertSame($in, $row->attr('data-nowo-ui-visible-when-in'));
+        }
+        self::assertCount(0, $crawler->filter('[data-nowo-ui-visible-when-field]')->reduce(static fn ($node): bool => $node->filter('[name="settings_section[from]"]')->count() > 0));
+        foreach (['nowo_mail_kit_test', 'nowo_mail_kit_resend_check', 'nowo_mail_kit_resend_test'] as $action) {
+            self::assertCount(1, $crawler->filter('[data-testid="' . $action . '"]'), $action);
+        }
+        $client->request('GET', '/admin/settings/sections/resend');
+        $this->assertResponseStatus($client, 404);
+
+        $plain = $this->client($this->bootKernel())->request('GET', '/admin/settings/sections/mailer');
+        self::assertCount(0, $plain->filter('[data-controller~="visible-when"]'), 'without the Resend provider the page has no provider choice');
+        self::assertCount(0, $plain->filter('[name="settings_section[provider]"]'));
+    }
+
+    public function testSwitchingToResendChecksTheKeyBeforeSaving(): void
+    {
+        $kernel = $this->bootKernel(['resend' => ['enabled' => true]], extra: static function (ContainerConfigurator $container): void {
+            $container->services()->set('http_client', MockHttpClient::class)->factory([ResendApiMock::class, 'rejectThenAccept'])->public();
+        });
+        $this->settings($kernel)->save('mailer', ['dsn' => 'memory://default', 'from' => 'noreply@example.com']);
+        $client = $this->client($kernel);
+
+        // Resend without any key: refused, nothing changes.
+        $crawler                            = $client->request('GET', '/admin/settings/sections/mailer');
+        $form                               = $crawler->filter('form[name="settings_section"]')->form();
+        $form['settings_section[provider]'] = 'resend';
+        $client->submit($form);
+        $this->assertResponseStatus($client, 422);
+        self::assertStringContainsString('Resend cannot be selected without one', (string) $client->getResponse()->getContent());
+
+        // A key Resend rejects: refused, the DSN stays live, the key is never echoed.
+        $form                                            = $crawler->filter('form[name="settings_section"]')->form();
+        $form['settings_section[provider]']              = 'resend';
+        $form['settings_section[resend_api_key][value]'] = 're_REDACTED-WRONG';
+        $client->submit($form);
+        $this->assertResponseStatus($client, 422);
+        $html = (string) $client->getResponse()->getContent();
+        self::assertStringContainsString('Resend rejected this API key, so nothing was saved: API key is invalid', $html);
+        self::assertStringNotContainsString('re_REDACTED-WRONG', $html);
+        self::assertFalse($this->settings($kernel)->isOverridden('mailer.provider'));
+        self::assertFalse($this->settings($kernel)->hasSecret('mailer.resend_api_key'));
+        self::assertSame('memory://default', $this->service($kernel, MailSettings::class)->dsn()?->dsn);
+
+        // A key Resend accepts: saved and live; the hidden DSN row is kept.
+        $form                                            = $crawler->filter('form[name="settings_section"]')->form();
+        $form['settings_section[provider]']              = 'resend';
+        $form['settings_section[resend_api_key][value]'] = 're_REDACTED-GOOD';
+        $form['settings_section[resend_from]']           = 'mail@example.com';
+        $form['settings_section[dsn][value]']            = 'smtp://10.0.0.5:25';
+        $client->submit($form);
+        $this->assertResponseStatus($client, 302);
+        $settings = $this->service($kernel, MailSettings::class);
+        self::assertSame('resend', $settings->provider());
+        self::assertSame('resend+api://re_REDACTED-GOOD@default', $settings->dsn()?->dsn);
+        self::assertSame('memory://default', $this->settings($kernel)->getSecret('mailer.dsn'), 'hidden DSN neither validated nor written');
+
+        // Back to the DSN: no key check, the Resend values are kept.
+        $crawler                            = $client->request('GET', '/admin/settings/sections/mailer');
+        $form                               = $crawler->filter('form[name="settings_section"]')->form();
+        $form['settings_section[provider]'] = 'dsn';
+        $client->submit($form);
+        $this->assertResponseStatus($client, 302);
+        self::assertSame('memory://default', $settings->dsn()?->dsn);
+        self::assertSame('re_REDACTED-GOOD', $this->settings($kernel)->getSecret('mailer.resend_api_key'));
+        self::assertSame('mail@example.com', $this->settings($kernel)->getString('mailer.resend_from'));
+    }
+
     public function testTheResendActions(): void
     {
         $kernel = $this->bootKernel(['resend' => ['enabled' => true], 'test_email' => ['rate_limit' => 10]], extra: static function (ContainerConfigurator $container): void {
@@ -201,20 +281,20 @@ final class AdminUiTest extends KernelTestCase
         $client = $this->client($kernel);
         $client->followRedirects();
 
-        $crawler = $client->request('GET', '/admin/settings/sections/resend');
+        $crawler = $client->request('GET', '/admin/settings/sections/mailer');
         $client->submit($crawler->filter('[data-testid="nowo_mail_kit_resend_check"]')->closest('form')?->form() ?? self::fail('No check form.'));
         self::assertStringContainsString('Store a Resend API key first.', (string) $client->getResponse()->getContent());
 
-        $this->settings($kernel)->save('resend', ['api_key' => 're_REDACTED-TEST', 'from' => 'mail@example.com']);
-        $this->settings($kernel)->save('mailer', ['test_recipient' => 'qa@example.com']);
+        $this->settings($kernel)->save('mailer', ['resend_api_key' => 're_REDACTED-TEST', 'resend_from' => 'mail@example.com', 'test_recipient' => 'qa@example.com']);
         $expected = ['example.com (verified), x (unknown)', 'sending-only key', 'Domains: —', 'API key is invalid'];
         foreach ($expected as $text) {
-            $crawler = $client->request('GET', '/admin/settings/sections/resend');
+            $crawler = $client->request('GET', '/admin/settings/sections/mailer');
             $client->submit($crawler->filter('[data-testid="nowo_mail_kit_resend_check"]')->closest('form')?->form() ?? self::fail('No check form.'));
             self::assertStringContainsString($text, (string) $client->getResponse()->getContent());
+            self::assertStringNotContainsString('re_REDACTED-TEST', (string) $client->getResponse()->getContent());
         }
 
-        $crawler = $client->request('GET', '/admin/settings/sections/resend');
+        $crawler = $client->request('GET', '/admin/settings/sections/mailer');
         $client->submit($crawler->filter('[data-testid="nowo_mail_kit_resend_test"]')->closest('form')?->form() ?? self::fail('No test form.'));
         self::assertStringContainsString('The test e-mail to qa@example.com failed', (string) $client->getResponse()->getContent());
     }
@@ -225,7 +305,7 @@ final class AdminUiTest extends KernelTestCase
         $client = $this->client($kernel);
         $client->followRedirects();
         for ($i = 0; $i < 2; ++$i) {
-            $crawler = $client->request('GET', '/admin/settings/sections/resend');
+            $crawler = $client->request('GET', '/admin/settings/sections/mailer');
             $client->submit($crawler->filter('[data-testid="nowo_mail_kit_resend_check"]')->closest('form')?->form() ?? self::fail('No check form.'));
         }
 

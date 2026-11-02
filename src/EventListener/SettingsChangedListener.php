@@ -8,16 +8,14 @@ use Nowo\InstanceSettingsBundle\Event\SettingsChangedEvent;
 use Nowo\MailKitBundle\Mailer\RuntimeTransport;
 use Nowo\MailKitBundle\Readiness\OutboundMailReadiness;
 use Nowo\MailKitBundle\Settings\MailerSettingsSection;
-use Nowo\MailKitBundle\Settings\ResendSettingsSection;
 use Psr\Log\LoggerInterface;
 
 use function implode;
-use function in_array;
 
 /**
- * Reacts to saves of the `mailer` / `resend` sections: drops the cached transport (the next send rebuilds it from
- * the new DSN) and writes an audit log line with the field names, the origin and the redacted new transport
- * (`scheme://host`) — never a value.
+ * Reacts to saves of the `mailer` section (since 1.3 it also holds the provider choice and the Resend fields): drops
+ * the cached transport (the next send rebuilds it from the new DSN) and writes an audit log line with the field
+ * names, the origin and the redacted new transport (`scheme://host`) — never a value.
  */
 final readonly class SettingsChangedListener
 {
@@ -36,7 +34,7 @@ final readonly class SettingsChangedListener
      */
     public function __invoke(SettingsChangedEvent $event): void
     {
-        if (!in_array($event->section, [MailerSettingsSection::NAME, ResendSettingsSection::NAME], true)) {
+        if ($event->section !== MailerSettingsSection::NAME) {
             return;
         }
 

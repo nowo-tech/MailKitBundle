@@ -3,6 +3,16 @@ settings:
     mailer:
         label: Ausgehende E-Mail
         intro: 'Ausgehende E-Mail dieser Instanz. Ein hier gespeicherter DSN ersetzt MAILER_DSN ab der nächsten Nachricht, ohne Deployment; leer lassen, um MAILER_DSN zu verwenden.'
+        intro_providers: 'Ausgehende E-Mail dieser Instanz. Wählen Sie den Anbieter: Nur seine Felder werden angezeigt und gespeichert, der andere Anbieter behält seine gespeicherten Werte. Beim DSN-Anbieter ohne gespeicherten DSN wird MAILER_DSN verwendet.'
+        provider: Anbieter
+        provider_help: 'Resend benötigt symfony/resend-mailer. Beim Wechsel zu Resend wird der API-Schlüssel vor dem Speichern bei Resend geprüft.'
+        provider_dsn: 'SMTP oder ein anderer Mailer-DSN'
+        provider_resend: 'Resend-API'
+        resend_api_key: Resend-API-Schlüssel
+        resend_api_key_help: 'Wird verschlüsselt gespeichert. Ein reiner Sende-Schlüssel genügt. Wird vor dem Speichern bei Resend geprüft; leer lassen, um den gespeicherten Schlüssel zu behalten.'
+        resend_from: Resend-Absenderadresse
+        resend_from_help: 'Eine in Resend verifizierte Domain (Standard: die Absenderadresse).'
+        notice_legacy_resend: 'Die Resend-Einstellungen von MailKit 1.2 werden noch aus dem alten Abschnitt resend gelesen. Führen Sie bin/console nowo:instance-settings:seed-from-fallbacks --section=mailer aus, um sie hierher zu übernehmen, bevor Sie diese Seite speichern.'
         dsn: Mailer-DSN
         dsn_help: 'Zum Beispiel smtp://benutzer:passwort@smtp.example.com:587 oder resend+api://SCHLÜSSEL@default. Verschlüsselt gespeichert; sendmail, native und null werden abgelehnt, private Hosts ebenfalls, sofern nicht erlaubt.'
         from: Absenderadresse
@@ -15,14 +25,6 @@ settings:
         action:
             send_test: Test-E-Mail senden
     resend:
-        label: Resend
-        intro: 'Sendet über die Resend-API statt über den DSN, solange dieser Abschnitt aktiviert ist und einen Schlüssel enthält (benötigt symfony/resend-mailer).'
-        enabled: Mit Resend senden
-        enabled_help: 'Wirkt nur mit einem gespeicherten API-Schlüssel.'
-        api_key: API-Schlüssel
-        api_key_help: 'Verschlüsselt gespeichert. Ein reiner Sende-Schlüssel genügt.'
-        from: Resend-Absender
-        from_help: 'Eine in Resend verifizierte Domain (Standard: die Mailer-Absenderadresse).'
         action:
             check: API-Schlüssel prüfen
             send_test: Test-E-Mail mit Resend senden
@@ -49,6 +51,10 @@ test_email:
         rate_limited: 'Zu viele Test-E-Mails; versuchen Sie es in ein paar Minuten erneut.'
         failed: 'Die Test-E-Mail an %to% ist fehlgeschlagen: %error%'
 resend:
+    save:
+        key_required: 'Geben Sie den Resend-API-Schlüssel ein: Ohne Schlüssel kann Resend nicht gewählt werden.'
+        rejected: 'Resend hat diesen API-Schlüssel abgelehnt, es wurde nichts gespeichert: %error%'
+        rate_limited: 'Zu viele Prüfungen des Resend-Schlüssels; es wurde nichts gespeichert. Versuchen Sie es in einigen Minuten erneut.'
     check:
         rate_limited: 'Zu viele Prüfungen; versuchen Sie es in ein paar Minuten erneut.'
         no_key: 'Speichern Sie zuerst einen Resend-API-Schlüssel.'

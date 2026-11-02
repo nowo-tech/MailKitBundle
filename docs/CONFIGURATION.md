@@ -42,7 +42,7 @@ nowo_mail_kit:
         default_from_name: null        # default of mailer.from_name
         require_public_domain: true    # refuse .local / .localhost / single-label senders
     resend:
-        enabled: false                 # adds the "resend" section (needs symfony/resend-mailer to send)
+        enabled: false                 # adds the Resend provider to the mailer section (needs symfony/resend-mailer to send)
         api_timeout: 10.0              # seconds, key check (1 … 60)
     bootstrap:                         # 1.2: read only by nowo:instance-settings:seed-from-fallbacks
         mailer_dsn: null               # e.g. '%env(default::MAILER_DSN)%' while migrating to DB-only mode
@@ -83,7 +83,7 @@ Unknown keys are rejected. Switches (`mailer.decorate`, `dsn.allow_private_hosts
 | Key | Default | Description |
 | --- | --- | --- |
 | `decorate` | `true` | Registers `nowo_mail_kit.mailer` (decorates `mailer.mailer`, the `MailerInterface`) and `RuntimeTransport` as decorator of `mailer.transports`, so the framework mailer **and** the Messenger `SendEmailMessage` handler use the runtime DSN. With `false`, the framework mailer is untouched; `RuntimeTransport` (fallback = `mailer.transports`), the test e-mail, readiness and the log still work for code that uses them directly. |
-| `dsn_provider` | `null` | Service id of a `MailerDsnProviderInterface`; the default reads the `mailer` / `resend` settings. |
+| `dsn_provider` | `null` | Service id of a `MailerDsnProviderInterface`; the default reads the `mailer` settings. |
 | `fallback_counts_as_ready` | `false` | `isOutboundMailReady()` is false while nothing is stored, because `MAILER_DSN` cannot be inspected through the framework transports. Set it to `true` when your `MAILER_DSN` is a real transport. |
 
 ## dsn
@@ -107,21 +107,21 @@ Validation (query options and the built transport's endpoint included) runs on s
 | --- | --- | --- |
 | `default_from` | `null` | Default of `mailer.from` (validated as an e-mail address). |
 | `default_from_name` | `null` | Default of `mailer.from_name`. |
-| `require_public_domain` | `true` | Adds `#[DeliverableSender]` to `mailer.from` / `resend.from` and checks the test e-mail sender. |
+| `require_public_domain` | `true` | Adds `#[DeliverableSender]` to `mailer.from` / `mailer.resend_from` and checks the test e-mail sender. |
 
 ## resend
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `enabled` | `false` | Registers the `resend` section, its routes (`/actions/resend/*`) and `ResendApiChecker`. Sending needs `symfony/resend-mailer`. |
-| `api_timeout` | `10.0` | Connect + total deadline of the key check (`timeout` and `max_duration` of HttpClient). |
+| `enabled` | `false` | Adds the provider choice (`mailer.provider`: `dsn` / `resend`) and the provider-dependent Resend fields (`mailer.resend_api_key`, `mailer.resend_from`) to the `mailer` section (since 1.3; before, a separate `resend` section), the Resend actions and routes (`/actions/resend/*`), `ResendApiChecker` and the save-time key check (`ResendApiKeyAccepted`). Sending needs `symfony/resend-mailer`. |
+| `api_timeout` | `10.0` | Connect + total deadline of the key check (`timeout` and `max_duration` of HttpClient), also for the check during a save that puts a Resend key live. |
 
 ## bootstrap
 
 | Key | Default | Description |
 | --- | --- | --- |
 | `mailer_dsn` | `null` | Copied once into the `mailer.dsn` secret by `nowo:instance-settings:seed-from-fallbacks` when none is stored; skipped when it fails the DSN validation. Never used to send. |
-| `resend_api_key` | `null` | Copied once into the `resend.api_key` secret (with `resend.enabled: true`). The Resend switch is not seeded. |
+| `resend_api_key` | `null` | Copied once into the `mailer.resend_api_key` secret (with `resend.enabled: true`; `resend.api_key` before 1.3). The provider is not seeded from it (the stored 1.2 `resend` rows are: [UPGRADING](UPGRADING.md#to-130)). |
 
 Map them to `%env(default::…)%` only while migrating to DB-only mode, then remove them; never put a literal secret
 here (it would be compiled into the container). See [USAGE](USAGE.md#db-only-mode).
@@ -197,7 +197,7 @@ Bundle pages add no CSS / JS of their own.
 | `access_checker` | `null` | Service id implementing `MailKitAccessCheckerInterface` (`canAccess(?object $user): bool`). |
 | `allow_unauthenticated` | `false` | **DEV / DEMO only.** Opens the UI without login; refused unless `kernel.debug` is true. |
 
-The settings actions additionally require the Instance Settings access of their section (`Nowo\InstanceSettingsBundle\Security\AccessGuard::isGranted('mailer' | 'resend')`: its `security.access_roles` / `area_roles` / checker and `allow_unauthenticated`). Protect the prefix with a firewall **and** `access_control`:
+The settings actions additionally require the Instance Settings access of their section (`Nowo\InstanceSettingsBundle\Security\AccessGuard::isGranted('mailer')`; `'resend'` before 1.3: its `security.access_roles` / `area_roles` / checker and `allow_unauthenticated`). Protect the prefix with a firewall **and** `access_control`:
 
 ```yaml
 # config/packages/security.yaml

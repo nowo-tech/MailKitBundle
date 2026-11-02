@@ -12,7 +12,7 @@ enum DsnSource: string
     /** `mailer.dsn` secret of the Instance Settings mailer section. */
     case Settings = 'settings';
 
-    /** `resend.api_key` secret of the Resend section (resend+api://…@default). */
+    /** `mailer.resend_api_key` secret, Resend provider selected (resend+api://…@default; `resend.api_key` before 1.3). */
     case Resend = 'resend';
 
     /** A host {@see MailerDsnProviderInterface} implementation. */

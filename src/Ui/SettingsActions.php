@@ -47,7 +47,7 @@ final readonly class SettingsActions
     }
 
     /**
-     * "Check the API key" and "Send a test e-mail with Resend" of the Resend section.
+     * "Check the API key" and "Send a test e-mail with Resend" of the mailer section (Resend provider).
      *
      * @return list<Action>
      */

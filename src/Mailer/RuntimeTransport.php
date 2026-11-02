@@ -83,7 +83,7 @@ final class RuntimeTransport implements TransportInterface, ResetInterface
 
     /**
      * Sends through an explicit DSN (validated like a stored one) — the Resend test uses the stored key even while
-     * the Resend section is switched off.
+     * another provider is selected.
      */
     public function sendVia(RuntimeDsn $dsn, RawMessage $message, ?Envelope $envelope = null): ?SentMessage
     {

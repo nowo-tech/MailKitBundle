@@ -11,7 +11,7 @@ use Symfony\Component\Mime\RawMessage;
 
 /**
  * Fills the runtime sender of outgoing messages: `From` (settings `mailer.from` / `mailer.from_name`, or
- * `resend.from` when Resend is active) and `Reply-To` (`mailer.reply_to`) — only when the message has none, so
+ * `mailer.resend_from` when Resend is active) and `Reply-To` (`mailer.reply_to`) — only when the message has none, so
  * code that sets its own sender keeps it.
  */
 final readonly class SenderPolicy

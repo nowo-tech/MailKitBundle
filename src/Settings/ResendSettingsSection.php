@@ -27,7 +27,8 @@ use function implode;
  * and sender. While switched on with a key, mail goes through `resend+api://…@default` (symfony/resend-mailer).
  * Actions: "Check the API key" and "Send a test e-mail with Resend".
  *
- * Keys: `resend.enabled`, `resend.api_key` (secret), `resend.from`.
+ * Keys: `resend.enabled`, `resend.api_key` (secret), `resend.from`. Since 1.3 `api_key` and `from` are shown (and
+ * validated / saved by the admin form) only while `enabled` is checked; their stored values survive switching off.
  */
 final class ResendSettingsSection extends AbstractSettingsSection implements SettingsSectionActionsInterface, SectionFallbackProviderInterface, SettingsSectionNoticesInterface
 {
@@ -79,8 +80,10 @@ final class ResendSettingsSection extends AbstractSettingsSection implements Set
     public function getFields(): iterable
     {
         yield SettingField::bool('enabled', false, 'settings.resend.enabled', 'settings.resend.enabled_help');
-        yield SettingField::secret('api_key', 'settings.resend.api_key', 'settings.resend.api_key_help', constraints: [new Length(min: 8, max: 200)]);
-        yield SettingField::email('from', null, 'settings.resend.from', 'settings.resend.from_help', constraints: $this->requirePublicDomain ? [new DeliverableSender()] : []);
+        // Provider-dependent rows (1.3, InstanceSettings visible_when): shown while Resend is switched on; switching it
+        // off and saving keeps the stored key and sender.
+        yield SettingField::secret('api_key', 'settings.resend.api_key', 'settings.resend.api_key_help', constraints: [new Length(min: 8, max: 200)])->withVisibleWhen('enabled', [true]);
+        yield SettingField::email('from', null, 'settings.resend.from', 'settings.resend.from_help', constraints: $this->requirePublicDomain ? [new DeliverableSender()] : [])->withVisibleWhen('enabled', [true]);
     }
 
     /**

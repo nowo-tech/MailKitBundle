@@ -182,6 +182,10 @@ nowo_mail_kit:
 
 The section shows "Check the API key" (`GET https://api.resend.com/domains`, bounded by `api_timeout`, no redirects; lists the domains and their status, recognises sending-only keys) and "Send a test e-mail with Resend" (uses the stored key even while the switch is off). Programmatic check: `Nowo\MailKitBundle\Resend\ResendApiChecker::check($key)`.
 
+Since 1.3 the API key and sender rows are shown only while "Send with Resend" is checked (InstanceSettings
+`visible_when`; the host registers the UiKit `visible-when` peer). Switching off and saving keeps the stored key and
+sender; switching on shows them again. A save with the switch off ignores those two rows.
+
 ## DB-only mode
 
 Since 1.2 (with `nowo-tech/instance-settings-bundle` ^1.2) the mailer DSN and the Resend key can live **only in the

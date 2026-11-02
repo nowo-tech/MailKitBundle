@@ -16,6 +16,21 @@
 
 ## Unreleased
 
+From **1.2.x**: no configuration change. Requires `nowo-tech/instance-settings-bundle` ^1.3 and
+`nowo-tech/ui-kit-bundle` ^2.23:
+
+```bash
+composer update nowo-tech/mail-kit-bundle nowo-tech/instance-settings-bundle nowo-tech/ui-kit-bundle --with-dependencies
+```
+
+- Register the UiKit `visible-when` Stimulus peer in the host app
+  (`vendor/nowo-tech/ui-kit-bundle/src/Resources/assets/stimulus-peers/visible_when_controller.ts`, identifier
+  `visible-when`): the `resend` page then hides the API key and sender while "Send with Resend" is off. Without it every
+  row stays visible.
+- Behaviour change (admin form only): with the switch off, a save ignores `resend.api_key` / `resend.from` (they keep
+  their stored values). To store a new key, check the switch, enter the key and save (Resend is then active), or set
+  it from code / the seed (`bootstrap.resend_api_key`) and test it with "Check the API key" before switching on.
+
 ## To 1.2.0
 
 From **1.1.1**:

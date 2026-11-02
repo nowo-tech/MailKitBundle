@@ -1305,6 +1305,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *     css_framework?: "bootstrap"|"bootstrap5"|"bootstrap4"|"tailwind"|"foundation"|"custom"|"tabler"|"none"|Param, // Host CSS stack: bootstrap5|bootstrap4|tailwind|foundation|custom|none|tabler (bootstrap alias → bootstrap5). // Default: "bootstrap5"
  *     icon_set?: "bootstrap-icons"|"tabler-icons"|"ux_icon"|"svg_inline"|"none"|Param, // Icon rendering: bootstrap-icons|tabler-icons|ux_icon|svg_inline|none. // Default: "bootstrap-icons"
  *     row_actions_display?: "icon"|"text"|"icon_text"|Param, // Table/list row actions: icon (glyph only) | text (label only) | icon_text (both). // Default: "icon"
+ *     row_actions_confirm?: "inline"|"native"|"dialog"|Param, // confirm_message of 1.x row_actions POST hashes (2.22, REQ-UI-003): inline = onsubmit="return confirm(…)" (default, unchanged markup); native | dialog = no inline handler, the confirm-submit Stimulus peer asks (window.confirm or the kit <dialog>). native / dialog need the confirm-submit peer registered. // Default: "inline"
  *     panel_path_rewrites?: array<string, scalar|Param|null>,
  *     release_check?: array{ // Optional GitHub release-version checker (footer dialog + JSON endpoint). Off by default.
  *         enabled?: bool|Param, // Register the checker service + controller. Also import @NowoUiKitBundle/Resources/config/routes/release_check.yaml. // Default: false
@@ -1313,6 +1314,8 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         cache_ttl?: int|Param, // Seconds to cache the GitHub answer (cache.app). Default 12h. // Default: 43200
  *         default_branch?: scalar|Param|null, // Branch used as compare target when the installed version is already the latest. // Default: "main"
  *         user_agent?: scalar|Param|null, // User-Agent sent to api.github.com. // Default: "nowo-ui-kit-release-check"
+ *         timeout?: float|Param, // Idle timeout in seconds of the GitHub "releases/latest" request (HttpClient "timeout"). Keep it below PHP max_execution_time (REQ-RUNTIME-001). // Default: 5.0
+ *         releases_timeout?: float|Param, // Idle timeout in seconds of the GitHub "releases" listing used to count versions behind. Keep it below PHP max_execution_time (REQ-RUNTIME-001). // Default: 8.0
  *     },
  *     route_links?: array{ // Route (or route prefix) → link map read by nowo_ui_route_link(), e.g. for the page-edge "manual" tab (partials/_edge_tab.html.twig). A prefix matches the route itself or any route starting with "<prefix>_"; the longest prefix wins.
  *         base_url?: scalar|Param|null, // Prepended to every relative path (paths starting with "/", "//", "http://" or "https://" are used as is). // Default: ""
@@ -1321,6 +1324,15 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *             path?: scalar|Param|null,
  *             testid?: scalar|Param|null, // Default: null
  *         }>,
+ *     },
+ *     font_preload?: array{ // 2.21: <link rel="preload" as="font" crossorigin> tags printed in the <head> of the document and error layouts (Twig nowo_ui_font_preload()) for the fonts painted above the fold. Empty = no tags.
+ *         fonts?: list<scalar|Param|null>,
+ *         manifest?: array{ // Hashed builds: pick the fonts from a Vite manifest (.vite/manifest.json). A missing manifest (dev server) prints nothing.
+ *             path?: scalar|Param|null, // Absolute path of the manifest, e.g. "%kernel.project_dir%/public/build/.vite/manifest.json"; null = off. // Default: null
+ *             entry?: scalar|Param|null, // Manifest entry whose "assets" list holds the fonts. // Default: "assets/app.js"
+ *             prefixes?: list<scalar|Param|null>,
+ *             base?: scalar|Param|null, // Public URL prefix of the manifest assets. // Default: "/build/"
+ *         },
  *     },
  *     appearance?: array{ // Optional site appearance SPI (presets, --nowo-ui-* token emitter, Twig functions). Off by default.
  *         enabled?: bool|Param, // Default: false
@@ -1605,6 +1617,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         allowed_schemes?: list<scalar|Param|null>,
  *         allowed_hosts?: list<scalar|Param|null>,
  *         allow_private_hosts?: bool|Param, // Accept DSN hosts in private / loopback / link-local ranges (SSRF guard off). Cloud metadata hosts stay refused. // Default: false
+ *         allow_insecure_tls?: bool|Param, // DEV only: accept verify_peer=0 / verify_peer_name=0 in stored DSNs (TLS certificate checks off). // Default: false
  *         resolve_dns?: bool|Param, // Resolve DSN host names and refuse those pointing at private addresses (bounded lookup, see dns_timeout). // Default: true
  *         dns_timeout?: float|Param, // Deadline of one DNS lookup, in seconds (REQ-RUNTIME-001). // Default: 2.0
  *     },
@@ -1616,6 +1629,10 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *     resend?: array{ // Optional "resend" settings section (Resend API key, sender) with a key check; needs symfony/resend-mailer to send.
  *         enabled?: bool|Param, // Default: false
  *         api_timeout?: float|Param, // Deadline of the Resend key check (GET /domains), in seconds (REQ-RUNTIME-001). // Default: 10.0
+ *     },
+ *     bootstrap?: array{ // One-time bootstrap values (since 1.2), read only by nowo:instance-settings:seed-from-fallbacks: map them to %env()% while migrating to DB-only mode, then remove them. Never used to send.
+ *         mailer_dsn?: scalar|Param|null, // Copied into the mailer.dsn secret when none is stored (e.g. "%env(default::MAILER_DSN)%"); skipped when it fails the DSN validation. // Default: null
+ *         resend_api_key?: scalar|Param|null, // Copied into the resend.api_key secret when none is stored (needs resend.enabled: true). // Default: null
  *     },
  *     test_email?: array{ // "Send a test e-mail" actions of the settings sections and the CLI.
  *         rate_limit?: int|Param, // Test e-mails one user may send per rate_interval (sliding window over cache.app). // Default: 5
@@ -1637,6 +1654,13 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         layout_template?: scalar|Param|null, // Layout the pages extend. Null (default) = nowo_ui_kit.layouts.admin. // Default: null
  *         templates?: array<string, scalar|Param|null>,
  *         page_size?: int|Param, // Rows per page of the sent-mail log (REQ-PERF-001). // Default: 25
+ *         export?: array{ // CSV export of the sent-mail log (GET <path_prefix>/log/export, current filters and sort; streamed, formula-injection safe, no-store).
+ *             enabled?: bool|Param, // Expose the export route and the "Export CSV" action of the log list (same access as the list). // Default: true
+ *             max_rows?: int|Param, // Rows of one export at most (1 … 100 000); a longer result is truncated with a closing notice row (REQ-PERF-001). On MySQL / MariaDB (pdo_mysql buffers results) the whole result is held by the client before the first row is written. // Default: 10000
+ *             access_roles?: list<scalar|Param|null>,
+ *             include_bodies?: bool|Param, // Offer an export with the stored text / HTML bodies (personal data). Needs log.store_bodies; never on by default. // Default: false
+ *             body_batch_bytes?: int|Param, // Approximate body bytes loaded with one query by an export with bodies (1 MiB … 64 MiB); bounds the memory of that export. // Default: 8388608
+ *         },
  *     },
  *     security?: array{ // REQ-UI-002 private access of the admin UI.
  *         access_roles?: list<scalar|Param|null>,

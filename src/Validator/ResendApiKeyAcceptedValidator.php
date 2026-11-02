@@ -19,6 +19,7 @@ use Symfony\Component\Validator\Constraint;
 use Symfony\Component\Validator\ConstraintValidator;
 use Symfony\Component\Validator\Exception\UnexpectedTypeException;
 
+use function hash_equals;
 use function trim;
 
 /**
@@ -75,7 +76,8 @@ final class ResendApiKeyAcceptedValidator extends ConstraintValidator
 
             return;
         }
-        if ($this->settings->provider() === MailerSettingsSection::PROVIDER_RESEND && $key === $this->settings->resendApiKey()) {
+        $live = $this->settings->resendApiKey();
+        if ($this->settings->provider() === MailerSettingsSection::PROVIDER_RESEND && $live !== null && hash_equals($live, $key)) {
             // Resend already live with this key (also the 1.2 key while it is migrated): nothing new goes live.
             return;
         }

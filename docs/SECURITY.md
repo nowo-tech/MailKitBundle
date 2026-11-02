@@ -70,7 +70,7 @@ transports and provider bridges, or the content of the messages your application
 The log shows who received what: keep `web_ui.path_prefix` behind the firewall (`access_control`) **and** the bundle
 checker. `security.allow_unauthenticated: true` is a demo / local switch only; the container refuses it without
 `kernel.debug`, but never set it in a shared or staging environment either. Restrict the mail sections in Instance
-Settings (`nowo_instance_settings.security.area_roles: { mailer: [ROLE_SUPER_ADMIN] }`; since 1.3 the Resend fields and actions are part of `mailer`)
+Settings (`nowo_instance_settings.security.area_roles: { mailer: [ROLE_SUPER_ADMIN] }`; since 1.3 the Resend fields and actions are part of `mailer`, and with `resend.enabled` an `area_roles.resend` entry fails the build so it cannot be silently ignored)
 when not every admin may change the transport.
 
 ## Secrets and cryptography

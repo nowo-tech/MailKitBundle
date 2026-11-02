@@ -11,6 +11,7 @@ use Nowo\InstanceSettingsBundle\Event\SettingsChangedEvent;
 use Nowo\InstanceSettingsBundle\Form\SettingsSectionType;
 use Nowo\InstanceSettingsBundle\NowoInstanceSettingsBundle;
 use Nowo\InstanceSettingsBundle\Repository\SettingValueRepositoryInterface;
+use Nowo\InstanceSettingsBundle\Section\SettingsSectionRegistry;
 use Nowo\InstanceSettingsBundle\Security\AccessGuard as InstanceSettingsAccessGuard;
 use Nowo\InstanceSettingsBundle\Settings\InstanceSettingsInterface;
 use Nowo\MailKitBundle\Command\ForgetRecipientCommand;
@@ -117,10 +118,35 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         }
 
         $this->prependFormKitProfile($container);
+        $this->assertNoLegacyResendArea($container);
 
         if ($container->hasExtension('nowo_auth_kit') && interface_exists(OutboundMailReadyCheckerInterface::class)) {
             // A host value of nowo_auth_kit.outbound_mail_ready_checker (loaded after the prepend) wins.
             $container->prependExtensionConfig('nowo_auth_kit', ['outbound_mail_ready_checker' => self::AUTH_KIT_CHECKER_ID]);
+        }
+    }
+
+    /**
+     * Since 1.3 the Resend fields and actions belong to the `mailer` area: an Instance Settings
+     * `security.area_roles.resend` entry would be silently ignored (audit CU-L1), so with `resend.enabled` the build
+     * fails until the host merges it into `mailer` (or removes it).
+     */
+    private function assertNoLegacyResendArea(ContainerBuilder $container): void
+    {
+        $resend = false;
+        foreach ($container->getExtensionConfig(Configuration::ALIAS) as $config) {
+            if (is_array($config['resend'] ?? null) && array_key_exists('enabled', $config['resend'])) {
+                $resend = $config['resend']['enabled'] === true;
+            }
+        }
+        if (!$resend) {
+            return;
+        }
+        foreach ($container->getExtensionConfig('nowo_instance_settings') as $config) {
+            $areas = is_array($config['security'] ?? null) && is_array($config['security']['area_roles'] ?? null) ? $config['security']['area_roles'] : [];
+            if (array_key_exists(LegacyResendSettings::SECTION, $areas)) {
+                throw new LogicException('NowoMailKitBundle 1.3: nowo_instance_settings.security.area_roles.resend is no longer used — the Resend API key, sender and actions are part of the "mailer" section since 1.3. Merge those roles into area_roles.mailer (or remove the "resend" entry) so they keep protecting the Resend settings; see UPGRADING "To 1.3.0".');
+            }
         }
     }
 
@@ -188,7 +214,10 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $resend = $config['resend']['enabled'];
         // 1.3: the 1.2 `resend` rows, read until they are seeded into the mailer section (kernel.reset clears the memo).
         if ($resend) {
-            $container->setDefinition(LegacyResendSettings::class, (new Definition(LegacyResendSettings::class, [new Reference(SettingValueRepositoryInterface::class)]))
+            $container->setDefinition(LegacyResendSettings::class, (new Definition(LegacyResendSettings::class, [
+                new Reference(SettingValueRepositoryInterface::class),
+                new ServiceClosureArgument(new Reference(SettingsSectionRegistry::class)),
+            ]))
                 ->addTag('kernel.reset', ['method' => 'reset']));
             // The mailer page shows the live 1.2 Resend values until they are migrated (pre-selected provider, kept key).
             $container->setDefinition(LegacyResendSettingsTypeExtension::class, (new Definition(LegacyResendSettingsTypeExtension::class, [

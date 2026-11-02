@@ -1466,7 +1466,7 @@
             "dist": {
                 "type": "path",
                 "url": "/var/mail-kit-bundle",
-                "reference": "8fecc07683fecdc8d4e4910b72a05c1619f5be8a"
+                "reference": "41689c6ed041d1af363889a616d62001881e9c91"
             },
             "require": {
                 "doctrine/dbal": "^3.8 || ^4.0",

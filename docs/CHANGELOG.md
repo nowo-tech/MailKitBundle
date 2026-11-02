@@ -52,6 +52,11 @@ Provider choice in the mailer settings: with `resend.enabled`, the `mailer` sect
 
 ### Security
 
+- CU-L1 (Low): with `resend.enabled`, a `nowo_instance_settings.security.area_roles.resend` entry fails the container
+  build (it would otherwise be silently ignored and the Resend key left under the possibly weaker `mailer` roles).
+- CU-I1 / CU-I3 (Info): the "same live key" comparison uses `hash_equals()`; a host section named `resend` is never
+  treated as the 1.2 rows (`LegacyResendSettings::sectionTaken()`, the purge command refuses).
+
 - MK-L1 (Low, Appendix CT): with the Resend fields provider-dependent, a new or rotated Resend key could go live in the
   same save without being checked, and a wrong key stops every mail (password resets included). The save is now
   refused unless Resend accepts the key.

@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Nowo\MailKitBundle\Settings;
 
+use Closure;
 use Nowo\InstanceSettingsBundle\Repository\SettingValueRepositoryInterface;
+use Nowo\InstanceSettingsBundle\Section\SettingsSectionRegistry;
 use Symfony\Contracts\Service\ResetInterface;
 
 use function in_array;
@@ -18,7 +20,8 @@ use function trim;
  * has copied them, {@see MailSettings} keeps reading these rows so an upgraded instance keeps sending through Resend.
  *
  * The rows are read straight from the Instance Settings repository (the section is no longer registered), at most
- * once per request (memo cleared by `kernel.reset`). Values are never logged.
+ * once per request (memo cleared by `kernel.reset`). Values are never logged. When the application registers a section
+ * named `resend` itself, nothing is read ({@see self::sectionTaken()}).
  */
 final class LegacyResendSettings implements ResetInterface
 {
@@ -30,10 +33,24 @@ final class LegacyResendSettings implements ResetInterface
 
     /**
      * @param SettingValueRepositoryInterface $repository Instance Settings storage
+     * @param (Closure(): SettingsSectionRegistry)|null $registry lazy section registry: when the application registers
+     *                                                            its own `resend` section, its rows are not MailKit's
      */
     public function __construct(
         private readonly SettingValueRepositoryInterface $repository,
+        private readonly ?Closure $registry = null,
     ) {
+    }
+
+    /**
+     * Whether a section named `resend` is registered (by the application: MailKit no longer registers it since 1.3).
+     * Its rows then belong to that section and are never read, migrated or purged as MailKit 1.2 rows (audit CU-I3).
+     */
+    public function sectionTaken(): bool
+    {
+        $registry = $this->registry instanceof Closure ? ($this->registry)() : null;
+
+        return $registry instanceof SettingsSectionRegistry && $registry->has(self::SECTION);
     }
 
     /**
@@ -61,7 +78,7 @@ final class LegacyResendSettings implements ResetInterface
      */
     private function load(): array|false
     {
-        $rows = $this->repository->findBySection(self::SECTION);
+        $rows = $this->sectionTaken() ? [] : $this->repository->findBySection(self::SECTION);
         if ($rows === []) {
             return false;
         }

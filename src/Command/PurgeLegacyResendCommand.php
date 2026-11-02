@@ -27,7 +27,8 @@ use function sprintf;
  *
  * Refuses (exit 1, nothing deleted) while `mailer.provider` is not stored, and when a legacy value was not copied:
  * `mailer.resend_api_key` / `mailer.resend_from` hold a different value than the old row (e.g. a mailer value stored
- * before the seed, or changed since). `--force` deletes anyway (the mailer values win). Idempotent: with no legacy
+ * before the seed, or changed since), and when the application registers its own `resend` section (those rows are not
+ * MailKit's). `--force` deletes anyway (the mailer values win). Idempotent: with no legacy
  * row there is nothing to do. Prints and logs row names only, never a value.
  */
 #[AsCommand(name: self::NAME, description: 'Delete the MailKit 1.2 "resend" settings rows once they are copied into the mailer section.')]
@@ -66,6 +67,11 @@ final class PurgeLegacyResendCommand extends Command
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
+        if ($this->legacy->sectionTaken()) {
+            $io->error('A settings section named "resend" is registered by the application: its rows are not MailKit 1.2 rows. Nothing was deleted.');
+
+            return Command::FAILURE;
+        }
         $this->legacy->reset();
         $rows   = $this->repository->findBySection(LegacyResendSettings::SECTION);
         $values = $this->legacy->values();

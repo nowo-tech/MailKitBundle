@@ -9,6 +9,7 @@ use Nowo\InstanceSettingsBundle\Entity\SettingValue;
 use Nowo\MailKitBundle\Command\PurgeLegacyResendCommand;
 use Nowo\MailKitBundle\Settings\LegacyResendSettings;
 use Nowo\MailKitBundle\Tests\Support\FakeSettings;
+use Nowo\MailKitBundle\Tests\Support\HostResendSection;
 use Nowo\MailKitBundle\Tests\Support\MemorySettingValueRepository;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Console\Command\Command;
@@ -78,6 +79,16 @@ final class PurgeLegacyResendCommandTest extends TestCase
 
         self::assertSame(Command::SUCCESS, $tester->execute([]));
         self::assertSame([], $repository->rows);
+    }
+
+    public function testAHostSectionNamedResendIsNeverPurged(): void
+    {
+        $repository = new MemorySettingValueRepository($this->legacyRows());
+        $tester     = new CommandTester(new PurgeLegacyResendCommand($repository, new FakeSettings(['mailer.provider' => 'dsn']), new LegacyResendSettings($repository, HostResendSection::registry(...))));
+
+        self::assertSame(Command::FAILURE, $tester->execute(['--force' => true]));
+        self::assertStringContainsString('registered by the application', $tester->getDisplay());
+        self::assertCount(3, $repository->rows);
     }
 
     /**

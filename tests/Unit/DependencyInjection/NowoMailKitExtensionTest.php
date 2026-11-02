@@ -45,6 +45,33 @@ final class NowoMailKitExtensionTest extends TestCase
         self::assertSame([], $none->getExtensionConfig('nowo_form_kit'));
     }
 
+    public function testALegacyResendAreaIsRefusedWithTheResendProvider(): void
+    {
+        $refused = $this->container(['nowo_instance_settings']);
+        $refused->prependExtensionConfig('nowo_mail_kit', ['resend' => ['enabled' => true]]);
+        $refused->prependExtensionConfig('nowo_instance_settings', ['security' => ['area_roles' => ['mailer' => ['ROLE_ADMIN'], 'resend' => ['ROLE_SUPER_ADMIN']]]]);
+        try {
+            (new NowoMailKitExtension())->prepend($refused);
+            self::fail('area_roles.resend must be refused.');
+        } catch (LogicException $e) {
+            self::assertStringContainsString('area_roles.resend is no longer used', $e->getMessage());
+            self::assertStringContainsString('area_roles.mailer', $e->getMessage());
+        }
+
+        $off = $this->container(['nowo_instance_settings']);
+        $off->prependExtensionConfig('nowo_mail_kit', ['resend' => ['enabled' => false]]);
+        $off->prependExtensionConfig('nowo_instance_settings', ['security' => ['area_roles' => ['resend' => ['ROLE_SUPER_ADMIN']]]]);
+        (new NowoMailKitExtension())->prepend($off);
+
+        $merged = $this->container(['nowo_instance_settings']);
+        $merged->prependExtensionConfig('nowo_mail_kit', ['resend' => ['enabled' => true]]);
+        $merged->prependExtensionConfig('nowo_mail_kit', ['log' => ['enabled' => true]]);
+        $merged->prependExtensionConfig('nowo_instance_settings', ['security' => ['area_roles' => ['mailer' => ['ROLE_SUPER_ADMIN']]]]);
+        $merged->prependExtensionConfig('nowo_instance_settings', ['web_ui' => ['path_prefix' => '/settings']]);
+        (new NowoMailKitExtension())->prepend($merged);
+        $this->addToAssertionCount(1);
+    }
+
     public function testCustomServicesAndSwitches(): void
     {
         $container = $this->container([]);

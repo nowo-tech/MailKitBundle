@@ -6,7 +6,9 @@ namespace Nowo\MailKitBundle\Tests\Unit\Settings;
 
 use DateTimeImmutable;
 use Nowo\InstanceSettingsBundle\Entity\SettingValue;
+use Nowo\InstanceSettingsBundle\Section\SettingsSectionRegistry;
 use Nowo\MailKitBundle\Settings\LegacyResendSettings;
+use Nowo\MailKitBundle\Tests\Support\HostResendSection;
 use Nowo\MailKitBundle\Tests\Support\MemorySettingValueRepository;
 use PHPUnit\Framework\TestCase;
 
@@ -52,6 +54,21 @@ final class LegacyResendSettingsTest extends TestCase
 
         self::assertSame(['enabled' => false, 'api_key' => null, 'from' => null], $legacy->values());
         self::assertTrue((new LegacyResendSettings(new MemorySettingValueRepository([$this->row('resend', 'enabled', '1')])))->values()['enabled'] ?? false);
+    }
+
+    public function testAHostSectionNamedResendIsNeverReadAsLegacy(): void
+    {
+        $repository = new MemorySettingValueRepository([$this->row('resend', 'enabled', true)]);
+        $taken      = new LegacyResendSettings($repository, HostResendSection::registry(...));
+
+        self::assertTrue($taken->sectionTaken());
+        self::assertNull($taken->values());
+        self::assertSame(0, $repository->queries);
+
+        $free = new LegacyResendSettings($repository, static fn (): SettingsSectionRegistry => new SettingsSectionRegistry());
+        self::assertFalse($free->sectionTaken());
+        self::assertNotNull($free->values());
+        self::assertFalse((new LegacyResendSettings($repository))->sectionTaken());
     }
 
     private function row(string $section, string $name, bool|int|string $value): SettingValue

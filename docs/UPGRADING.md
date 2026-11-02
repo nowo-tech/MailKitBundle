@@ -29,6 +29,21 @@ composer update nowo-tech/mail-kit-bundle nowo-tech/instance-settings-bundle now
 **Only installs with `resend.enabled: true` are affected.** Without it the `mailer` page, its keys and the behaviour
 are unchanged.
 
+> **Security — access to the Resend settings changes.** The Resend API key, sender and the "Check the API key" /
+> "Send a test e-mail with Resend" actions are now governed by the Instance Settings access of the **`mailer`**
+> section. A `nowo_instance_settings.security.area_roles.resend` entry would no longer protect anything (with
+> `mailer: [ROLE_ADMIN]`, `resend: [ROLE_SUPER_ADMIN]`, any `ROLE_ADMIN` could replace the Resend key), so with
+> `resend.enabled: true` the container build **fails** while that entry exists. Merge its roles into
+> `area_roles.mailer` (whoever may change the Resend key may now change the DSN too, and the other way round) or
+> remove it:
+>
+> ```yaml
+> nowo_instance_settings:
+>     security:
+>         area_roles:
+>             mailer: [ROLE_SUPER_ADMIN]   # was mailer: [ROLE_ADMIN] + resend: [ROLE_SUPER_ADMIN]
+> ```
+
 What changed with `resend.enabled: true`:
 
 - The `resend` settings section is gone. Its fields moved into the `mailer` section, which gets an explicit provider
@@ -86,7 +101,10 @@ Host code:
 - Code reading `resend.*` keys through `InstanceSettingsInterface` must switch to the `mailer.*` keys above (reading an
   unregistered section throws `UnknownSettingException`).
 - `ResendSettingsSection` is now a deprecated holder of the `NAME` constant (`'resend'`), no longer a section service.
-- Instance Settings `security.area_roles` for `resend` no longer matter; the `mailer` roles cover Resend.
+- Instance Settings `security.area_roles.resend` is refused at build time with `resend.enabled` (see the security note
+  above); the `mailer` roles cover Resend.
+- An application section of its own named `resend` is never read, migrated or purged as MailKit 1.2 rows (the purge
+  command refuses).
 - Scripts calling `seed-from-fallbacks --section=resend` must drop that option (unknown section).
 - Register the UiKit `visible-when` Stimulus peer so the provider rows hide in the browser (InstanceSettings 1.3
   [UPGRADING](https://github.com/nowo-tech/InstanceSettingsBundle/blob/main/docs/UPGRADING.md)); without it every row

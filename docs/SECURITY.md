@@ -78,8 +78,9 @@ when not every admin may change the transport.
 - `mailer.dsn` and `mailer.resend_api_key` (`resend.api_key` before 1.3) are Instance Settings secret fields: encrypted at rest with DoctrineEncryptBundle,
   never sent back to the browser, exported only sealed. MailKit adds no cryptography of its own.
 - A hidden provider row (1.3 `visible_when`) keeps its stored secret; only an explicit "clear" removes it. After the
-  1.3 migration the 1.2 `resend` rows (the old encrypted key included) stay in the table unread until the host deletes
-  them ([UPGRADING](UPGRADING.md#to-130)).
+  1.3 migration the 1.2 `resend` rows (the old encrypted key included) stay in the table unread until
+  `nowo:mail-kit:purge-legacy-resend` deletes them (only once copied; [UPGRADING](UPGRADING.md#to-130)). While they
+  are pending, the old key is never sent to the browser: the page only marks it as stored.
 - The decrypted DSN lives in memory only while a transport is built and in the cached transport object.
 - Fixtures and the demo use obvious placeholders (`REDACTED-TEST`, `REDACTED-DEMO`); the demo key is generated at
   start and ignored by git.

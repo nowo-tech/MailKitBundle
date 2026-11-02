@@ -22,11 +22,17 @@ Provider choice in the mailer settings: with `resend.enabled`, the `mailer` sect
   rows are neither validated nor written by a save, so switching back keeps the other provider's values.
 - `ResendApiKeyAccepted` constraint (admin form, audit MK-L1): a save with `provider = resend` that would put a key live
   (a typed key, or the stored key when switching from `dsn`) checks it with `GET https://api.resend.com/domains` first
-  and is refused when Resend rejects it or no key is stored; rate limited with the test e-mails. Messages
+  and is refused when Resend rejects it or no key is stored; a key equal to the live one is not checked again; rate
+  limited with the test e-mails. Messages
   `resend.save.*` (7 locales).
 - `LegacyResendSettings`: reads the 1.2 `resend` rows; `MailSettings` uses them until `mailer.provider` is stored, and
   the mailer section exposes them as seed fallbacks, so `nowo:instance-settings:seed-from-fallbacks --section=mailer`
-  migrates them. The mailer page shows a notice meanwhile (`settings.mailer.notice_legacy_resend`).
+  migrates them. Meanwhile the mailer page shows what is live (`LegacyResendSettingsTypeExtension`: Resend
+  pre-selected when the old switch was on, old key counted as stored, old sender pre-filled) and a notice
+  (`settings.mailer.notice_legacy_resend`); saving it unchanged stores the migrated values and keeps Resend live.
+- `nowo:mail-kit:purge-legacy-resend [--dry-run] [--force]`: opt-in deletion of the 1.2 `resend` rows (encrypted key
+  included) once they are copied into the mailer section; refuses and lists the rows that were not copied;
+  idempotent.
 - `MailSettings::provider()` and `MailSettings::legacyResendPending()`.
 - Demo: Resend provider enabled with an offline Resend stand-in (`re_demo_…` keys are valid), UiKit `visible-when`
   peer, Playwright e2e of the provider switch and the check-before-save path, axe in both states.

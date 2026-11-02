@@ -81,3 +81,36 @@ test.describe('Mailer provider-dependent fields', () => {
     await expect(page.locator('body')).not.toContainText('re_demo_e2e_key_123');
   });
 });
+
+test.describe('Upgrade from MailKit 1.2', () => {
+  test('1.2 rows with Resend on: the page pre-selects Resend and saving it keeps Resend live', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('demo-legacy-resend').click();
+    await expect(page.getByText('Settings rewritten as MailKit 1.2 left them')).toBeVisible();
+    await expect(page.getByTestId('demo-status')).toContainText('resend+api://');
+
+    await page.goto('/admin/settings/sections/mailer');
+    await expect(page.getByTestId('instance-settings-notice')).toContainText('still read from the old resend section');
+    await expect(sectionForm(page).getByLabel('Provider')).toHaveValue('resend');
+    await expect(row(page, 'resend_api_key')).toBeVisible();
+    await expect(row(page, 'dsn')).toBeHidden();
+    await expect(sectionForm(page).getByLabel('Resend sender address', { exact: true })).toHaveValue('legacy@example.com');
+    await expect(page.locator('body')).not.toContainText('re_demo_legacy_12_key');
+    await expectNoAxeViolations(page);
+
+    await save(page);
+    await expect(page.getByText('Settings saved.')).toBeVisible();
+    await expect(page.getByTestId('instance-settings-notice')).toHaveCount(0);
+    await expect(sectionForm(page).getByLabel('Provider')).toHaveValue('resend');
+    await page.goto('/');
+    await expect(page.getByTestId('demo-status')).toContainText('resend+api://');
+
+    // Back to the demo DSN for the other specs.
+    await page.goto('/admin/settings/sections/mailer');
+    await sectionForm(page).getByLabel('Provider').selectOption('dsn');
+    await save(page);
+    await expect(page.getByText('Settings saved.')).toBeVisible();
+    await page.goto('/');
+    await expect(page.getByTestId('demo-status')).toContainText('smtp://mailpit:1025');
+  });
+});

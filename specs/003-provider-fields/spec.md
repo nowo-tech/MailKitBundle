@@ -44,6 +44,10 @@ keeps the live key makes no call.
 keeps going through Resend (the rows are read while `mailer.provider` is not stored) and the mailer page shows a
 notice; **When** the operator runs `nowo:instance-settings:seed-from-fallbacks --section=mailer`, **Then** the values
 are stored as `mailer.provider`, `mailer.resend_api_key`, `mailer.resend_from` and the old rows are no longer read.
+Before the seed the page shows Resend pre-selected (old key as stored, old sender pre-filled), and saving it unchanged
+stores the same values and keeps Resend live without a new key check. **When** the operator runs
+`nowo:mail-kit:purge-legacy-resend`, **Then** the old rows are deleted only if every value was copied (otherwise it
+lists them and deletes nothing).
 
 ## Functional Requirements
 
@@ -61,7 +65,12 @@ are stored as `mailer.provider`, `mailer.resend_api_key`, `mailer.resend_from` a
 - **FR-PRV-004** `LegacyResendSettings` reads the 1.2 `resend` rows from the repository (memoized, `kernel.reset`);
   `MailSettings` uses them while `mailer.provider` is not stored; `MailerSettingsSection::getFallbacks()` exposes them
   as `provider` / `resend_api_key` / `resend_from` fallbacks (before `bootstrap.resend_api_key`); notice
-  `settings.mailer.notice_legacy_resend` while pending.
+  `settings.mailer.notice_legacy_resend` while pending. `LegacyResendSettingsTypeExtension` pre-selects / pre-fills
+  the mailer form from them and submits the kept old key; `ResendApiKeyAccepted` does not re-check a key equal to the
+  live one.
+- **FR-PRV-007** `nowo:mail-kit:purge-legacy-resend [--dry-run] [--force]`: deletes the `resend` rows only once
+  `mailer.provider` is stored and the old key / sender equal the mailer values; otherwise exit 1 listing the rows;
+  idempotent; names only.
 - **FR-PRV-005** `ResendSettingsSection` is a deprecated holder of `NAME = 'resend'`; the Resend actions guard and
   redirect on the `mailer` section; `SettingsChangedListener` reacts to `mailer` only.
 - **FR-PRV-006** Docs (README, USAGE, CONFIGURATION, SECURITY, UPGRADING, CHANGELOG), 7 locales, demo with the Resend

@@ -9,6 +9,7 @@ use Nowo\InstanceSettingsBundle\Repository\SettingValueRepositoryInterface;
 
 use function array_filter;
 use function array_values;
+use function in_array;
 
 /**
  * In-memory {@see SettingValueRepositoryInterface} for unit tests; counts the section queries.
@@ -39,6 +40,10 @@ final class MemorySettingValueRepository implements SettingValueRepositoryInterf
 
     public function apply(array $save, array $remove): void
     {
+        $this->rows = array_values(array_filter($this->rows, static fn (SettingValue $row): bool => !in_array($row, $remove, true)));
+        foreach ($save as $row) {
+            $this->rows[] = $row;
+        }
     }
 
     public function transactional(callable $callback): mixed

@@ -205,7 +205,11 @@ while the DSN provider is selected). The key is never echoed back. Programmatic 
 
 MailKit 1.0–1.2 stored Resend in its own section (`resend.enabled`, `resend.api_key`, `resend.from`). Since 1.3 that
 section is no longer registered. Until the rows are copied, `MailSettings` keeps reading them (no stored
-`mailer.provider` + `resend.enabled = true` → Resend stays live) and the mailer page shows a notice. Copy them once:
+`mailer.provider` + `resend.enabled = true` → Resend stays live) and the mailer page shows what is live: Resend is
+pre-selected when the old switch was on, the old key counts as stored ("leave blank to keep") and the old sender
+pre-fills the Resend sender. Saving the page as it is stores `mailer.provider = resend`, the key and the sender, so
+Resend stays live (the old key is the live key: it is not checked again). A notice names the migration meanwhile.
+To migrate without opening the page, copy the rows once:
 
 ```bash
 php bin/console nowo:instance-settings:seed-from-fallbacks --section=mailer --dry-run
@@ -214,8 +218,18 @@ php bin/console nowo:instance-settings:seed-from-fallbacks --section=mailer --st
 
 The seed stores `mailer.provider` (`resend` when `resend.enabled` was on, else `dsn`), `mailer.resend_api_key` and
 `mailer.resend_from` from the old rows, only where nothing is stored yet (idempotent, field names only in the output).
-Do not save the mailer page before the seed: its provider row shows `dsn` (the default) until then. The old `resend`
-rows are left in the table, unread once `mailer.provider` is stored; see [UPGRADING](UPGRADING.md#to-130).
+The old `resend` rows stay in the table, unread once `mailer.provider` is stored. Delete them (the encrypted 1.2 key
+included) once copied:
+
+```bash
+php bin/console nowo:mail-kit:purge-legacy-resend --dry-run
+php bin/console nowo:mail-kit:purge-legacy-resend
+```
+
+The purge refuses (exit 1, nothing deleted) while `mailer.provider` is not stored, and when an old key or sender differs
+from `mailer.resend_api_key` / `mailer.resend_from` (not copied, e.g. a mailer value stored before the seed); it lists
+the row names, never a value. `--force` deletes anyway (the mailer values win). Running it again is a no-op. See
+[UPGRADING](UPGRADING.md#to-130).
 
 ## DB-only mode
 

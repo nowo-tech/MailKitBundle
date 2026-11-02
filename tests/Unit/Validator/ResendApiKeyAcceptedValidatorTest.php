@@ -59,6 +59,9 @@ final class ResendApiKeyAcceptedValidatorTest extends TestCase
         $this->checked = [];
         self::assertSame([], $this->errors($live, 'resend', ''));
         self::assertSame([], $this->checked);
+        // Resend live, the live key typed again: no call.
+        self::assertSame([], $this->errors($live, 'resend', 're_REDACTED-STORED'));
+        self::assertSame([], $this->checked);
         // Resend live, key rotated: the new key is checked.
         self::assertSame([], $this->errors($live, 'resend', 're_REDACTED-ROTATED'));
         self::assertSame(['re_REDACTED-ROTATED'], $this->checked);

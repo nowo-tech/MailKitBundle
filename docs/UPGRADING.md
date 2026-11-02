@@ -60,13 +60,23 @@ php bin/console nowo:instance-settings:seed-from-fallbacks --section=mailer --st
 The mailer section exposes the old `resend` rows as its fallbacks, so the existing InstanceSettings seeder copies them
 (insert-only: a value already stored in the mailer section wins; field names only in the output; also callable from a
 non-transactional Doctrine migration, as in [To 1.2.0](#to-120)). Until then nothing breaks: with no
-`mailer.provider` stored, `MailSettings` reads the old rows (Resend stays live when it was) and the mailer page shows a
-notice. **Do not save the mailer page before the seed**: its provider row shows the default `dsn` until the rows are
-copied, and saving it would store `dsn` and switch the delivery away from Resend.
+`mailer.provider` stored, `MailSettings` reads the old rows (Resend stays live when it was) and the mailer page shows
+what is live — Resend pre-selected when `resend.enabled` was on, the old key shown as stored, the old sender in the
+Resend sender — plus a notice. Saving the page unchanged migrates too: it stores `mailer.provider = resend`, the key
+and the sender, without a new Resend check (the old key is the live one).
 
-After the seed the old `resend` rows are no longer read. They stay in the Instance Settings table (the encrypted 1.2
-key included); delete them when convenient, e.g. in a Doctrine migration:
-`DELETE FROM <prefix>instance_setting_value WHERE section = 'resend'`.
+After the migration the old `resend` rows are no longer read, but they stay in the Instance Settings table (the
+encrypted 1.2 key included). Delete them with the opt-in purge:
+
+```bash
+php bin/console nowo:mail-kit:purge-legacy-resend --dry-run
+php bin/console nowo:mail-kit:purge-legacy-resend
+```
+
+It deletes only the `resend` section rows, only once `mailer.provider` is stored and the old key / sender equal
+`mailer.resend_api_key` / `mailer.resend_from`; otherwise it lists the rows that were not copied and deletes nothing
+(exit 1). `--force` deletes anyway. Idempotent. (A purge option cannot live on the InstanceSettings seeder, which knows
+nothing about MailKit's old section, hence the MailKit command.)
 
 Host code:
 

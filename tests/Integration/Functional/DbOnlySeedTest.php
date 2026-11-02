@@ -9,13 +9,17 @@ use Doctrine\DBAL\Connection;
 use Nowo\InstanceSettingsBundle\Command\SeedFromFallbacksCommand;
 use Nowo\InstanceSettingsBundle\Entity\SettingValue;
 use Nowo\InstanceSettingsBundle\Repository\SettingValueRepositoryInterface;
+use Nowo\MailKitBundle\Command\PurgeLegacyResendCommand;
 use Nowo\MailKitBundle\Readiness\OutboundMailReadiness;
 use Nowo\MailKitBundle\Settings\LegacyResendSettings;
 use Nowo\MailKitBundle\Settings\MailSettings;
 use Nowo\MailKitBundle\Tests\Integration\Kernel\KernelTestCase;
+use Nowo\MailKitBundle\Tests\Integration\Kernel\MailKitTestKernel;
+use Nowo\MailKitBundle\Tests\Support\ResendApiMock;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Component\Console\Tester\CommandTester;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
+use Symfony\Component\HttpClient\MockHttpClient;
 
 use function bin2hex;
 use function random_bytes;
@@ -122,5 +126,90 @@ final class DbOnlySeedTest extends KernelTestCase
         $crawler = $this->client($kernel)->request('GET', '/admin/settings/sections/mailer');
         self::assertCount(0, $crawler->filter('[data-testid="instance-settings-notice"]'));
         self::assertSame('resend', $crawler->filter('select[name="settings_section[provider]"] option[selected]')->attr('value'));
+
+        // Opt-in purge of the copied 1.2 rows (encrypted key included), idempotent.
+        $purge = new CommandTester((new Application($kernel))->find(PurgeLegacyResendCommand::NAME));
+        self::assertSame(0, $purge->execute([]));
+        self::assertStringContainsString('Deleted 3 legacy row(s).', $purge->getDisplay());
+        self::assertSame(0, (int) $this->connection($kernel)->fetchOne("SELECT COUNT(*) FROM instance_setting_value WHERE section = 'resend'"));
+        self::assertSame(0, $purge->execute([]));
+        self::assertStringContainsString('nothing to purge', $purge->getDisplay());
+        self::assertSame('resend+api://' . $key . '@default', $settings->dsn()?->dsn);
+    }
+
+    public function testSavingThePageBeforeTheSeedKeepsResendLive(): void
+    {
+        $key    = 're_' . bin2hex(random_bytes(12));
+        $kernel = $this->bootKernel(['resend' => ['enabled' => true]], extra: static function (ContainerConfigurator $container): void {
+            // Any Resend call fails the test: the live 1.2 key must not be checked again.
+            $container->services()->set('http_client', MockHttpClient::class)->args([[]])->public();
+        });
+        $this->settings($kernel)->save('mailer', ['dsn' => 'memory://default', 'from' => 'noreply@example.com']);
+        $this->legacyRows($kernel, true, $key);
+
+        $client  = $this->client($kernel);
+        $crawler = $client->request('GET', '/admin/settings/sections/mailer');
+        self::assertSame('resend', $crawler->filter('select[name="settings_section[provider]"] option[selected]')->attr('value'), 'the live 1.2 provider is pre-selected');
+        self::assertSame('legacy@example.com', $crawler->filter('input[name="settings_section[resend_from]"]')->attr('value'));
+        self::assertStringNotContainsString($key, (string) $client->getResponse()->getContent());
+
+        $client->submit($crawler->filter('form[name="settings_section"]')->form());
+        self::assertSame(302, $client->getResponse()->getStatusCode(), (string) $client->getResponse()->getContent());
+        $this->service($kernel, LegacyResendSettings::class)->reset();
+        self::assertSame('resend', $this->settings($kernel)->getString('mailer.provider'));
+        self::assertSame($key, $this->settings($kernel)->getSecret('mailer.resend_api_key'));
+        self::assertSame('legacy@example.com', $this->settings($kernel)->getString('mailer.resend_from'));
+        $settings = $this->service($kernel, MailSettings::class);
+        self::assertFalse($settings->legacyResendPending());
+        self::assertSame('resend+api://' . $key . '@default', $settings->dsn()?->dsn);
+    }
+
+    public function testAPending12KeyIsCheckedOnceWhenResendIsSelected(): void
+    {
+        $key    = 're_' . bin2hex(random_bytes(12));
+        $kernel = $this->bootKernel(['resend' => ['enabled' => true]], extra: static function (ContainerConfigurator $container): void {
+            $container->services()->set('http_client', MockHttpClient::class)->factory([ResendApiMock::class, 'rejectThenAccept'])->public();
+        });
+        $this->settings($kernel)->save('mailer', ['dsn' => 'memory://default', 'from' => 'noreply@example.com']);
+        $this->legacyRows($kernel, false, $key);
+        $client = $this->client($kernel);
+
+        // The 1.2 switch was off: the DSN provider stays selected; saving it keeps the DSN.
+        $crawler = $client->request('GET', '/admin/settings/sections/mailer');
+        self::assertSame('dsn', $crawler->filter('select[name="settings_section[provider]"] option[selected]')->attr('value'));
+
+        // A typed key wins over the 1.2 key (checked: rejected here).
+        $form                                            = $crawler->filter('form[name="settings_section"]')->form();
+        $form['settings_section[provider]']              = 'resend';
+        $form['settings_section[resend_api_key][value]'] = 're_REDACTED-TYPED';
+        $client->submit($form);
+        self::assertSame(422, $client->getResponse()->getStatusCode());
+
+        // Blank key: the 1.2 key is the one going live, so it is checked once (accepted) and copied.
+        $form                               = $crawler->filter('form[name="settings_section"]')->form();
+        $form['settings_section[provider]'] = 'resend';
+        $client->submit($form);
+        self::assertSame(302, $client->getResponse()->getStatusCode(), (string) $client->getResponse()->getContent());
+        self::assertSame($key, $this->settings($kernel)->getSecret('mailer.resend_api_key'));
+
+        // Saving the DSN provider while pending does not copy the hidden key.
+        $other = $this->bootKernel(['resend' => ['enabled' => true]]);
+        $this->legacyRows($other, false, $key);
+        $browser = $this->client($other);
+        $browser->submit($browser->request('GET', '/admin/settings/sections/mailer')->filter('form[name="settings_section"]')->form());
+        self::assertSame(302, $browser->getResponse()->getStatusCode());
+        self::assertSame('dsn', $this->settings($other)->getString('mailer.provider'));
+        self::assertFalse($this->settings($other)->hasSecret('mailer.resend_api_key'));
+    }
+
+    private function legacyRows(MailKitTestKernel $kernel, bool $enabled, string $key): void
+    {
+        $now = new DateTimeImmutable();
+        $this->service($kernel, SettingValueRepositoryInterface::class)->apply([
+            (new SettingValue('resend', 'enabled', $now))->storeValue($enabled, $now),
+            (new SettingValue('resend', 'api_key', $now))->storeSecret($key, $now),
+            (new SettingValue('resend', 'from', $now))->storeValue('legacy@example.com', $now),
+        ], []);
+        $this->service($kernel, LegacyResendSettings::class)->reset();
     }
 }

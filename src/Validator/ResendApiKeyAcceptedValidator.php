@@ -24,7 +24,8 @@ use function trim;
 /**
  * Validator of {@see ResendApiKeyAccepted}. Reads the submitted `provider` from the root form and the submitted
  * secret (`['value' => ?string, 'clear' => bool]`); checks the key that would go live with {@see ResendApiChecker}
- * (one bounded HTTPS call to the fixed Resend host, per-user rate limit shared with the test actions). The key is
+ * (one bounded HTTPS call to the fixed Resend host, per-user rate limit shared with the test actions); a key equal to
+ * the one Resend already sends with (the 1.2 key during the migration included) is not checked again. The key is
  * never part of a message, a log line or the violation's invalid value.
  */
 final class ResendApiKeyAcceptedValidator extends ConstraintValidator
@@ -68,14 +69,14 @@ final class ResendApiKeyAcceptedValidator extends ConstraintValidator
             }
         });
 
-        if ($typed === null && !$clear && $this->settings->provider() === MailerSettingsSection::PROVIDER_RESEND) {
-            // Resend already live with the stored key: nothing new goes live.
-            return;
-        }
         $key = $clear ? null : ($typed ?? $this->settings->resendApiKey());
         if ($key === null) {
             $this->violation('resend.save.key_required');
 
+            return;
+        }
+        if ($this->settings->provider() === MailerSettingsSection::PROVIDER_RESEND && $key === $this->settings->resendApiKey()) {
+            // Resend already live with this key (also the 1.2 key while it is migrated): nothing new goes live.
             return;
         }
         if ($this->guard instanceof TestMailGuard && !$this->guard->allows($this->limiterKey())) {

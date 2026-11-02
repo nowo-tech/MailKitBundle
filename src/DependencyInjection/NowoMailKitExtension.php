@@ -8,11 +8,13 @@ use LogicException;
 use Nowo\AuthKitBundle\Mailer\OutboundMailReadyCheckerInterface;
 use Nowo\FormKitBundle\Form\CsrfOnlyFormFactory;
 use Nowo\InstanceSettingsBundle\Event\SettingsChangedEvent;
+use Nowo\InstanceSettingsBundle\Form\SettingsSectionType;
 use Nowo\InstanceSettingsBundle\NowoInstanceSettingsBundle;
 use Nowo\InstanceSettingsBundle\Repository\SettingValueRepositoryInterface;
 use Nowo\InstanceSettingsBundle\Security\AccessGuard as InstanceSettingsAccessGuard;
 use Nowo\InstanceSettingsBundle\Settings\InstanceSettingsInterface;
 use Nowo\MailKitBundle\Command\ForgetRecipientCommand;
+use Nowo\MailKitBundle\Command\PurgeLegacyResendCommand;
 use Nowo\MailKitBundle\Command\PurgeSentMailLogCommand;
 use Nowo\MailKitBundle\Command\SendTestMailCommand;
 use Nowo\MailKitBundle\Controller\MailKitController;
@@ -24,6 +26,7 @@ use Nowo\MailKitBundle\Dsn\MailerDsnValidator;
 use Nowo\MailKitBundle\Dsn\SettingsMailerDsnProvider;
 use Nowo\MailKitBundle\EventListener\MailKitAccessListener;
 use Nowo\MailKitBundle\EventListener\SettingsChangedListener;
+use Nowo\MailKitBundle\Form\LegacyResendSettingsTypeExtension;
 use Nowo\MailKitBundle\Form\SentMailFilterType;
 use Nowo\MailKitBundle\Integration\AuthKit\MailKitOutboundMailReadyChecker;
 use Nowo\MailKitBundle\Log\SentMailCsvExporter;
@@ -187,6 +190,17 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         if ($resend) {
             $container->setDefinition(LegacyResendSettings::class, (new Definition(LegacyResendSettings::class, [new Reference(SettingValueRepositoryInterface::class)]))
                 ->addTag('kernel.reset', ['method' => 'reset']));
+            // The mailer page shows the live 1.2 Resend values until they are migrated (pre-selected provider, kept key).
+            $container->setDefinition(LegacyResendSettingsTypeExtension::class, (new Definition(LegacyResendSettingsTypeExtension::class, [
+                new Reference(MailSettings::class),
+                new Reference(LegacyResendSettings::class),
+            ]))->addTag('form.type_extension', ['extended_type' => SettingsSectionType::class]));
+            $container->setDefinition(PurgeLegacyResendCommand::class, (new Definition(PurgeLegacyResendCommand::class, [
+                new Reference(SettingValueRepositoryInterface::class),
+                new Reference(InstanceSettingsInterface::class),
+                new Reference(LegacyResendSettings::class),
+                new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            ]))->addTag('console.command', ['command' => PurgeLegacyResendCommand::NAME]));
         }
 
         $container->setDefinition(MailSettings::class, new Definition(MailSettings::class, [

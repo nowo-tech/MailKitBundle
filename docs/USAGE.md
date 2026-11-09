@@ -25,6 +25,7 @@
   - [CSV export](#csv-export)
   - [Retention and erasure](#retention-and-erasure)
 - [Reacting to changes and auditing](#reacting-to-changes-and-auditing)
+- [Using it from a DDD / hexagonal application](#using-it-from-a-ddd--hexagonal-application)
 - [Admin UI](#admin-ui)
   - [Forms (FormKit)](#forms-formkit)
   - [Overriding templates (REQ-TWIG-001)](#overriding-templates-req-twig-001)
@@ -447,6 +448,69 @@ Schedule the purge (cron or Symfony Scheduler). `SentMailRecorder::forgetAddress
 ## Reacting to changes and auditing
 
 A save of the `mailer` section dispatches Instance Settings' `SettingsChangedEvent`; MailKit's listener resets the runtime transport and logs `Mail settings changed.` (notice) with the section, field names, origin and the redacted new transport — never a value. `Nowo\MailKitBundle\Dsn\MailerDsnAudit::redact($dsn)` / `label($dsn)` give you the same redacted view for your own audit trail.
+
+## Using it from a DDD / hexagonal application
+
+MailKit is an **infrastructure adapter** for Symfony Mailer: it decorates `mailer.mailer` and `mailer.transports` so
+every send resolves the DSN and the sender at runtime. It also owns a small sent-mail log (two tables of its own, no
+relation to your entities) and an admin UI. Your domain never needs a MailKit type.
+
+**Keep the domain free of the bundle**
+
+- Declare your own outbound port in the domain (for example `InvitationNotifier`) and implement it in your
+  infrastructure layer with Symfony's `MailerInterface`. MailKit applies the runtime DSN and the From / Reply-To from
+  the settings behind that interface.
+- `MailHeaders::tag()` / `MailHeaders::redact()` take a Symfony `Message`: call them in the adapter, not in the domain.
+- The log is written with DBAL, never through your unit of work: a send cannot flush or roll back your aggregates, and
+  a log failure never breaks the delivery.
+
+```php
+// Infrastructure adapter for a domain port
+final readonly class SymfonyInvitationNotifier implements InvitationNotifier
+{
+    public function __construct(private MailerInterface $mailer) {}
+
+    public function notify(InvitationId $id, EmailAddress $to, string $link): void
+    {
+        $email = (new Email())->to((string) $to)->subject('You are invited')->text("Open: {$link}");
+        MailHeaders::tag($email, 'invitation');
+        MailHeaders::redact($email, $link);
+        $this->mailer->send($email); // throws DeliveryFailedException (a TransportException) on failure
+    }
+}
+```
+
+**Ports you can implement**
+
+| Interface | Purpose | Config |
+| --- | --- | --- |
+| `Nowo\MailKitBundle\Dsn\MailerDsnProviderInterface` | Where the DSN comes from (vault, per-tenant table…); `getDsn(): ?RuntimeDsn`, null = framework transport | `nowo_mail_kit.mailer.dsn_provider` |
+| `Nowo\MailKitBundle\Security\MailKitAccessCheckerInterface` | Who opens the admin UI; `canAccess(?object $user): bool` | `nowo_mail_kit.security.access_checker` |
+| `Nowo\Brand\Contract\BrandProviderInterface` / `BrandAssetReaderInterface` (optional) | Brand of the branded layout | `nowo_mail_kit.brand: auto` |
+
+**Services and value objects your adapters can use**
+
+- `OutboundMailReadiness::isOutboundMailReady()` / `status(): MailStatus` (scalars only: source, redacted label, ready,
+  error key, missing fields). AuthKit gets it automatically through `OutboundMailReadyCheckerInterface`.
+- `SentMailRecorder::forgetAddress($email)` (`['deleted' => n, 'redacted' => n]`) from your account-deletion use case;
+  the service exists only with `log.enabled: true`, so inject it as optional.
+- `RuntimeDsn`, `MailStatus`, `TestMailResult`, `SentMailFilters` are immutable value objects.
+
+**Persistence**
+
+`SentMail` and `SentMailBody` are bundle-owned, read-only mapped entities with no relations: no
+`resolve_target_entities`, nothing to extend. Their mapping is added to the default ORM mapping list; with several
+entity managers, add the `NowoMailKitBundle` mapping to the manager you name in `doctrine.entity_manager`.
+
+**Known limitations**
+
+- The From / Reply-To defaults come only from the Instance Settings `mailer` section; there is no sender provider port
+  yet, and Instance Settings is required even with a custom DSN provider. Set `From` on the message to override it.
+- MailKit dispatches no delivery event of its own. Symfony Mailer's `SentMessageEvent` / `FailedMessageEvent` still
+  fire, but without the MailKit log id or tag.
+- `OutboundMailReadiness`, `SentMailRecorder` and `SentMailRepository` are final classes without interfaces: wrap them
+  in your own port if your application layer must not depend on them.
+- The log tables are mapped even with `log.enabled: false`.
 
 ## Admin UI
 

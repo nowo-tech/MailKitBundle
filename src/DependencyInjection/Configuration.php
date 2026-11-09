@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Nowo\MailKitBundle\DependencyInjection;
 
+use Nowo\MailKitBundle\Brand\BrandedEmailHelper;
+use Nowo\MailKitBundle\Brand\BrandedEmailText;
 use Nowo\MailKitBundle\Dsn\MailerDsnValidator;
 use Nowo\MailKitBundle\Log\SentMailCsvExporter;
 use Nowo\MailKitBundle\Ui\MailKitPages;
@@ -39,6 +41,12 @@ final class Configuration implements ConfigurationInterface
 
     /** Default URL prefix of the admin UI (sent-mail log and the settings actions). */
     public const DEFAULT_PATH_PREFIX = '/admin/mail';
+
+    /** brand.mode: read a nowo-tech/brand-contracts provider when one exists (spec 220 S7). */
+    public const BRAND_AUTO = 'auto';
+
+    /** brand.mode: ignore any brand provider. */
+    public const BRAND_OFF = 'off';
 
     /** DSN schemes that run host processes or drop every message: never accepted from the settings. */
     public const FORBIDDEN_SCHEMES = ['sendmail', 'sendmail+smtp', 'native', 'null'];
@@ -204,6 +212,7 @@ final class Configuration implements ConfigurationInterface
                         ->end()
                     ->end()
                 ->end()
+                ->append($this->brandNode())
                 ->arrayNode('doctrine')
                     ->addDefaultsIfNotSet()
                     ->children()
@@ -328,6 +337,86 @@ final class Configuration implements ConfigurationInterface
             ->end();
 
         return $treeBuilder;
+    }
+
+    /**
+     * `brand` (spec 220 S7): the optional branded e-mail layout and its CID images.
+     */
+    private function brandNode(): ArrayNodeDefinition
+    {
+        /** @var ArrayNodeDefinition $node */
+        $node = (new TreeBuilder('brand'))->getRootNode();
+        /** @var ArrayNodeDefinition $colors */
+        $colors = (new TreeBuilder('colors'))->getRootNode();
+        $colors
+            ->info('Fallback colours of the branded layout without a brand provider: #rrggbb only (lower-cased).')
+            ->addDefaultsIfNotSet();
+        $children = $colors->children();
+        foreach (BrandedEmailHelper::DEFAULT_COLORS as $key => $default) {
+            $children
+                ->scalarNode($key)
+                    ->defaultValue($default)
+                    ->validate()
+                        ->ifTrue(static fn (mixed $v): bool => !is_string($v) || preg_match('/^#[0-9a-fA-F]{6}\z/', $v) !== 1)
+                        ->thenInvalid(sprintf('nowo_mail_kit.brand.colors.%s must be a #rrggbb colour, got %%s.', $key))
+                    ->end()
+                    ->validate()
+                        ->always(static fn (string $v): string => strtolower($v))
+                    ->end()
+                ->end();
+        }
+
+        $node
+            ->info('Spec 220: brand name, colours and logo (CID) of the optional @NowoMailKit/email/branded_layout templates, from a nowo-tech/brand-contracts BrandProviderInterface service when the app has one. "auto" or "off" is accepted as a shorthand for mode.')
+            ->addDefaultsIfNotSet()
+            ->beforeNormalization()
+                ->ifString()
+                ->then(static fn (string $v): array => ['mode' => $v])
+            ->end()
+            ->children()
+                ->enumNode('mode')
+                    ->info('auto: use the brand provider (and its asset reader) when one exists; the values below stay the fallback. off: ignore it.')
+                    ->values([self::BRAND_AUTO, self::BRAND_OFF])
+                    ->defaultValue(self::BRAND_AUTO)
+                ->end()
+                ->scalarNode('name')
+                    ->info(sprintf('Brand name printed without a provider (null: none). At most %d characters, no control or bidi characters.', BrandedEmailText::MAX_LENGTH))
+                    ->defaultNull()
+                    ->validate()
+                        ->ifTrue(static fn (mixed $v): bool => $v !== null && !BrandedEmailText::isSafeName($v))
+                        ->thenInvalid(sprintf('nowo_mail_kit.brand.name must be a non-blank string of at most %d characters without control or bidi characters, got %%s.', BrandedEmailText::MAX_LENGTH))
+                    ->end()
+                    ->validate()
+                        ->ifString()
+                        ->then(static fn (string $v): string => trim($v))
+                    ->end()
+                ->end()
+                ->append($colors)
+                ->integerNode('max_image_bytes')
+                    ->info('Largest brand image attached to one e-mail, in bytes (a larger one is left out).')
+                    ->defaultValue(BrandedEmailHelper::DEFAULT_MAX_IMAGE_BYTES)
+                    ->min(1024)
+                    ->max(2_097_152)
+                ->end()
+                ->integerNode('max_total_bytes')
+                    ->info('Largest total of the brand images of one e-mail, in bytes.')
+                    ->defaultValue(BrandedEmailHelper::DEFAULT_MAX_TOTAL_BYTES)
+                    ->min(1024)
+                    ->max(5_242_880)
+                ->end()
+                ->integerNode('max_image_side')
+                    ->info('Longest side of a brand image, in pixels, read from the image header.')
+                    ->defaultValue(BrandedEmailHelper::DEFAULT_MAX_IMAGE_SIDE)
+                    ->min(16)
+                    ->max(8192)
+                ->end()
+            ->end()
+            ->validate()
+                ->ifTrue(static fn (array $v): bool => $v['max_image_bytes'] > $v['max_total_bytes'])
+                ->thenInvalid('nowo_mail_kit.brand.max_image_bytes must not exceed nowo_mail_kit.brand.max_total_bytes.')
+            ->end();
+
+        return $node;
     }
 
     /**

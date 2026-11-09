@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "118582ef2fab8104fcf05c349e84be25",
+    "content-hash": "fac900e304aa59b69bcfcda058dd268c",
     "packages": [
         {
             "name": "doctrine/collections",
@@ -8217,6 +8217,84 @@
             "time": "2026-10-30T21:00:18+00:00"
         },
         {
+            "name": "nowo-tech/brand-contracts",
+            "version": "v1.0.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/nowo-tech/BrandContracts.git",
+                "reference": "bb90b634b66de496489c32087b0310f74c4df9eb"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/nowo-tech/BrandContracts/zipball/bb90b634b66de496489c32087b0310f74c4df9eb",
+                "reference": "bb90b634b66de496489c32087b0310f74c4df9eb",
+                "shasum": ""
+            },
+            "require": {
+                "ext-mbstring": "*",
+                "php": ">=8.2 <8.6",
+                "symfony/translation-contracts": "^3.4"
+            },
+            "require-dev": {
+                "friendsofphp/php-cs-fixer": "^3.0",
+                "igor-php/igor-php": "^0.10.1",
+                "nowo-tech/phpstan-frankenphp": "^1.0",
+                "phpstan/phpstan": "^2.0",
+                "phpunit/phpunit": "^11.5",
+                "rector/rector": "^2.0"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-main": "1.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Nowo\\Brand\\Contract\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Héctor Franco Aceituno",
+                    "email": "hectorfranco@nowo.tech",
+                    "homepage": "https://github.com/HecFranco",
+                    "role": "Maintainer"
+                },
+                {
+                    "name": "Nowo.tech",
+                    "homepage": "https://nowo.tech"
+                }
+            ],
+            "description": "Shared brand contract for PHP apps and nowo-tech bundles: brand name, colours and logo assets a host provides, plus colour math for emails and PDFs. Framework-free.",
+            "homepage": "https://github.com/nowo-tech/BrandContracts",
+            "keywords": [
+                "brand",
+                "branding",
+                "colors",
+                "contracts",
+                "frankenphp",
+                "logo",
+                "nowo",
+                "php",
+                "theme",
+                "wcag",
+                "white-label"
+            ],
+            "support": {
+                "changelog": "https://github.com/nowo-tech/BrandContracts/blob/main/docs/CHANGELOG.md",
+                "docs": "https://github.com/nowo-tech/BrandContracts/tree/main/docs",
+                "issues": "https://github.com/nowo-tech/BrandContracts/issues",
+                "source": "https://github.com/nowo-tech/BrandContracts"
+            },
+            "time": "2026-11-08T21:18:05+00:00",
+            "published-time": "2026-11-08T21:18:57+00:00"
+        },
+        {
             "name": "nowo-tech/phpstan-frankenphp",
             "version": "v1.3.2",
             "source": {
@@ -8531,7 +8609,8 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-10-28T22:38:53+00:00"
+            "time": "2026-10-28T22:38:53+00:00",
+            "published-time": "2026-10-28T22:39:06+00:00"
         },
         {
             "name": "phpstan/phpstan-phpunit",

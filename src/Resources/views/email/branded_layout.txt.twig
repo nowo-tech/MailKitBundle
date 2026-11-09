@@ -1,0 +1,24 @@
+{#-
+    Plain-text part of the branded e-mail layout (spec 220 S7). Extend it from the text template of a TemplatedEmail:
+
+        {% extends '@NowoMailKit/email/branded_layout.txt.twig' %}
+        {% block content %}Hello {{ user_name }}{% endblock %}
+
+    The brand name goes through nowo_mail_kit_plain_text (no control, bidi or separator characters) and is never
+    HTML-escaped here, whatever the host's autoescape setting. No image is referenced in the plain-text part.
+-#}
+{%- set mail_brand = nowo_mail_kit_brand(nowo_mail_brand ?? null) -%}
+{%- autoescape false -%}
+{%- block header %}{% if mail_brand.name %}{{ mail_brand.name|nowo_mail_kit_plain_text }}
+
+{% endif %}{% endblock -%}
+{%- endautoescape -%}
+{%- block content %}{% endblock -%}
+{%- autoescape false -%}
+{%- block footer %}{% if mail_brand.name %}
+
+
+--
+{{ mail_brand.name|nowo_mail_kit_plain_text }}
+{% endif %}{% endblock -%}
+{%- endautoescape -%}

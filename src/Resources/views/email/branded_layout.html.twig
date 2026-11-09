@@ -1,0 +1,62 @@
+{#-
+    Optional branded e-mail layout (spec 220 S7). Extend it from the HTML template of a TemplatedEmail:
+
+        {% extends '@NowoMailKit/email/branded_layout.html.twig' %}
+        {% block content %}<p>Hello {{ user_name }}</p>{% endblock %}
+
+    and pass the e-mail through BrandedEmailHelper::apply() before sending: the brand name, colours and logo (an inline
+    CID part) then come from the brand provider; without one, nowo_mail_kit.brand.name / colors apply. Table layout and
+    inline styles only; every value is auto-escaped, colours are #rrggbb only and images are cid: references only.
+    `mail_brand` (name, colors.primary, colors.primary_contrast, colors.text, colors.muted, colors.paper,
+    colors.surface, colors.border, logo, mark) is available in every block.
+-#}
+{%- set mail_brand = nowo_mail_kit_brand(nowo_mail_brand ?? null) -%}
+{%- set _c = mail_brand.colors -%}
+{%- set _font = 'font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;' -%}
+<!DOCTYPE html>
+<html lang="{% block html_lang %}en{% endblock %}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>{% block title %}{{ mail_brand.name }}{% endblock %}</title>
+</head>
+<body style="margin:0;padding:0;background-color:{{ _c.paper }};color:{{ _c.text }};">
+{%- block preheader %}{% endblock %}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:{{ _c.paper }};">
+<tr>
+<td align="center" style="padding:24px 12px;">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;">
+{%- block header %}
+{%- if mail_brand.logo %}
+<tr>
+<td style="padding:0 0 16px 0;"><img src="{{ mail_brand.logo.src }}" width="{{ mail_brand.logo.width }}" height="{{ mail_brand.logo.height }}" alt="{{ mail_brand.name }}" style="display:block;border:0;outline:none;text-decoration:none;"></td>
+</tr>
+{%- elseif mail_brand.mark or mail_brand.name %}
+<tr>
+<td style="padding:0 0 16px 0;{{ _font }}font-size:18px;font-weight:bold;line-height:{{ mail_brand.mark ? mail_brand.mark.height : 24 }}px;color:{{ _c.text }};">
+{%- if mail_brand.mark %}<img src="{{ mail_brand.mark.src }}" width="{{ mail_brand.mark.width }}" height="{{ mail_brand.mark.height }}" alt="" style="display:inline-block;vertical-align:middle;border:0;outline:none;text-decoration:none;margin:0 8px 0 0;">{% endif -%}
+{%- if mail_brand.name %}<span style="vertical-align:middle;">{{ mail_brand.name }}</span>{% endif -%}
+</td>
+</tr>
+{%- endif %}
+{%- endblock %}
+<tr>
+<td style="background-color:{{ _c.surface }};border:1px solid {{ _c.border }};border-radius:8px;padding:24px;{{ _font }}font-size:16px;line-height:1.5;color:{{ _c.text }};">
+{%- block content %}{% endblock -%}
+</td>
+</tr>
+{%- block footer %}
+{%- if mail_brand.name %}
+<tr>
+<td style="padding:16px 0 0 0;{{ _font }}font-size:12px;line-height:1.5;color:{{ _c.muted }};">{{ mail_brand.name }}</td>
+</tr>
+{%- endif %}
+{%- endblock %}
+</table>
+</td>
+</tr>
+</table>
+</body>
+</html>

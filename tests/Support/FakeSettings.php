@@ -6,6 +6,7 @@ namespace Nowo\MailKitBundle\Tests\Support;
 
 use LogicException;
 use Nowo\InstanceSettingsBundle\Event\SettingsChangedEvent;
+use Nowo\InstanceSettingsBundle\File\StoredSettingFile;
 use Nowo\InstanceSettingsBundle\Settings\InstanceSettingsInterface;
 
 use function is_bool;
@@ -69,6 +70,14 @@ final class FakeSettings implements InstanceSettingsInterface
     public function hasSecret(string $key): bool
     {
         return $this->getSecret($key) !== null;
+    }
+
+    /**
+     * InstanceSettings 1.4+ image fields: MailKit has none.
+     */
+    public function getFile(string $key): ?StoredSettingFile
+    {
+        return null;
     }
 
     public function isOverridden(string $key): bool

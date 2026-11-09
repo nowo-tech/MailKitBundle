@@ -10,6 +10,7 @@
 - [bootstrap](#bootstrap)
 - [test_email](#test_email)
 - [log](#log)
+- [brand](#brand)
 - [doctrine](#doctrine)
 - [web_ui](#web_ui)
   - [Layout and CSS stack (UiKit)](#layout-and-css-stack-uikit)
@@ -55,6 +56,20 @@ nowo_mail_kit:
         store_bodies: false            # personal data: off by default
         retention_days: 30             # nowo:mail-kit:log:purge default (1 … 3650)
         purge_batch_size: 1000         # rows per DELETE (1 … 100000)
+    brand:                             # 1.4, spec 220: optional branded e-mail layout ("auto" / "off" shorthand)
+        mode: auto                     # auto = read a brand-contracts BrandProviderInterface when one exists; off = ignore it
+        name: null                     # name printed without a provider (≤ 80 characters, no control / bidi characters)
+        colors:                        # fallback colours without a provider (#rrggbb only)
+            primary: '#2563eb'
+            primary_contrast: '#ffffff'
+            text: '#0f172a'
+            muted: '#64748b'
+            paper: '#f8fafc'
+            surface: '#ffffff'
+            border: '#e2e8f0'
+        max_image_bytes: 524288        # largest brand image attached to one e-mail (1 KiB … 2 MiB)
+        max_total_bytes: 1048576       # all brand images of one e-mail (1 KiB … 5 MiB, ≥ max_image_bytes)
+        max_image_side: 4096           # longest image side in pixels, from the image header (16 … 8192)
     doctrine:
         table_prefix: ''               # 'app_' => app_mail_kit_sent_mail
         entity_manager: null           # ORM entity manager name (null = default)
@@ -141,6 +156,21 @@ here (it would be compiled into the container). See [USAGE](USAGE.md#db-only-mod
 | `store_bodies` | `false` | Store the HTML / text bodies (≤ 1 MiB each, redacted values masked) and expose `GET …/log/{id}/body`. |
 | `retention_days` | `30` | Default age of `nowo:mail-kit:log:purge`. |
 | `purge_batch_size` | `1000` | Rows per keyset batch. |
+
+## brand
+
+Since 1.4 (spec 220 S7). Used only by the optional `@NowoMailKit/email/branded_layout.html.twig` / `.txt.twig`
+templates and `BrandedEmailHelper` ([USAGE — Branded e-mails](USAGE.md#branded-e-mails)); nothing changes for e-mails
+that do not use them.
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `mode` | `auto` | `auto`: with `nowo-tech/brand-contracts` installed and a `Nowo\Brand\Contract\BrandProviderInterface` service (InstanceSettings 1.5 with `brand.enabled: true`, or the host's own), the layout takes the brand name and colours from it and the logo bytes from `BrandAssetReaderInterface`. `off`: the provider is ignored. A string `auto` / `off` is accepted as a shorthand. |
+| `name` | `null` | Name printed by the layout without a provider (header, footer, logo `alt`, plain-text part). `null` prints none. Trimmed; refused when blank, longer than 80 characters or containing control, bidi or line-separator characters. |
+| `colors.*` | UiKit `nowo-ui.css` defaults | Fallback colours without a provider: `primary`, `primary_contrast` (text on primary, for buttons), `text`, `muted`, `paper` (page background), `surface` (card), `border`. `#rrggbb` only, lower-cased. |
+| `max_image_bytes` | `524288` | Largest brand image attached; a larger one is left out (logged). 1 KiB … 2 MiB. |
+| `max_total_bytes` | `1048576` | Largest total of the brand images of one e-mail. 1 KiB … 5 MiB; must be ≥ `max_image_bytes`. |
+| `max_image_side` | `4096` | Longest side, in pixels, read from the image header; a larger image is left out. 16 … 8192. |
 
 ## doctrine
 
@@ -243,7 +273,7 @@ REQ-CFG-001 does not apply: the bundle has one configuration tree. Variants (ano
 
 Parameters: `nowo_mail_kit.doctrine.table_prefix`, `.web_ui.enabled`, `.web_ui.path_prefix`, `.log.enabled`, `.log.retention_days`, `.resend.enabled`, `.security.allow_unauthenticated`.
 
-Public services: `Nowo\MailKitBundle\Mailer\RuntimeTransport`, `Readiness\OutboundMailReadiness`, `Dsn\MailerDsnValidator`, `TestMail\TestMailSender`, `Log\SentMailRecorder` and `Log\SentMailRepository` (log on), `Resend\ResendApiChecker` (Resend on), `nowo_mail_kit.outbound_mail_ready_checker` (AuthKit installed). Interfaces: `Dsn\MailerDsnProviderInterface`, `Security\MailKitAccessCheckerInterface`.
+Public services: `Nowo\MailKitBundle\Brand\BrandedEmailHelper` (1.4), `Nowo\MailKitBundle\Mailer\RuntimeTransport`, `Readiness\OutboundMailReadiness`, `Dsn\MailerDsnValidator`, `TestMail\TestMailSender`, `Log\SentMailRecorder` and `Log\SentMailRepository` (log on), `Resend\ResendApiChecker` (Resend on), `nowo_mail_kit.outbound_mail_ready_checker` (AuthKit installed). Interfaces: `Dsn\MailerDsnProviderInterface`, `Security\MailKitAccessCheckerInterface`.
 
 ## Fail-closed checks
 
@@ -254,4 +284,5 @@ The container refuses to compile when:
 - `security.access_roles` is empty without `access_checker` / `allow_unauthenticated`;
 - `security.allow_unauthenticated: true` outside `kernel.debug`;
 - `dsn.allowed_schemes` contains `sendmail`, `sendmail+smtp`, `native` or `null`;
-- a switch is an env placeholder, a prefix / path / interval / template id is invalid.
+- a switch is an env placeholder, a prefix / path / interval / template id is invalid;
+- `brand.name` is blank, too long or contains control / bidi characters, a `brand.colors` value is not `#rrggbb`, or `brand.max_image_bytes` exceeds `brand.max_total_bytes`.

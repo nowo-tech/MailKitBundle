@@ -6,6 +6,8 @@ namespace Nowo\MailKitBundle\DependencyInjection;
 
 use LogicException;
 use Nowo\AuthKitBundle\Mailer\OutboundMailReadyCheckerInterface;
+use Nowo\Brand\Contract\BrandAssetReaderInterface;
+use Nowo\Brand\Contract\BrandProviderInterface;
 use Nowo\FormKitBundle\Form\CsrfOnlyFormFactory;
 use Nowo\InstanceSettingsBundle\Event\SettingsChangedEvent;
 use Nowo\InstanceSettingsBundle\Form\SettingsSectionType;
@@ -14,6 +16,7 @@ use Nowo\InstanceSettingsBundle\Repository\SettingValueRepositoryInterface;
 use Nowo\InstanceSettingsBundle\Section\SettingsSectionRegistry;
 use Nowo\InstanceSettingsBundle\Security\AccessGuard as InstanceSettingsAccessGuard;
 use Nowo\InstanceSettingsBundle\Settings\InstanceSettingsInterface;
+use Nowo\MailKitBundle\Brand\BrandedEmailHelper;
 use Nowo\MailKitBundle\Command\ForgetRecipientCommand;
 use Nowo\MailKitBundle\Command\PurgeLegacyResendCommand;
 use Nowo\MailKitBundle\Command\PurgeSentMailLogCommand;
@@ -49,6 +52,7 @@ use Nowo\MailKitBundle\Settings\MailerSettingsSection;
 use Nowo\MailKitBundle\Settings\MailSettings;
 use Nowo\MailKitBundle\TestMail\TestMailGuard;
 use Nowo\MailKitBundle\TestMail\TestMailSender;
+use Nowo\MailKitBundle\Twig\MailKitBrandTwigExtension;
 use Nowo\MailKitBundle\Twig\MailKitTwigExtension;
 use Nowo\MailKitBundle\Ui\AdminPages;
 use Nowo\MailKitBundle\Ui\MailKitPages;
@@ -158,7 +162,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $config = $this->processConfiguration(new Configuration(), $configs);
         $this->assertLiteralBooleans($config);
 
-        /** @var array{mailer: array{decorate: bool, dsn_provider: string|null, fallback_counts_as_ready: bool}, dsn: array{allowed_schemes: list<string>, allowed_hosts: list<string>, allow_private_hosts: bool, allow_insecure_tls: bool, resolve_dns: bool, dns_timeout: float}, sender: array{default_from: string|null, default_from_name: string|null, require_public_domain: bool}, resend: array{enabled: bool, api_timeout: float}, bootstrap: array{mailer_dsn: string|null, resend_api_key: string|null}, test_email: array{rate_limit: int, rate_interval: string}, log: array{enabled: bool, store_bodies: bool, retention_days: int, purge_batch_size: int}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>, page_size: int, export: array{enabled: bool, max_rows: int, access_roles: list<string>, include_bodies: bool, body_batch_bytes: int}}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}} $config */
+        /** @var array{mailer: array{decorate: bool, dsn_provider: string|null, fallback_counts_as_ready: bool}, dsn: array{allowed_schemes: list<string>, allowed_hosts: list<string>, allow_private_hosts: bool, allow_insecure_tls: bool, resolve_dns: bool, dns_timeout: float}, sender: array{default_from: string|null, default_from_name: string|null, require_public_domain: bool}, resend: array{enabled: bool, api_timeout: float}, bootstrap: array{mailer_dsn: string|null, resend_api_key: string|null}, test_email: array{rate_limit: int, rate_interval: string}, log: array{enabled: bool, store_bodies: bool, retention_days: int, purge_batch_size: int}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>, page_size: int, export: array{enabled: bool, max_rows: int, access_roles: list<string>, include_bodies: bool, body_batch_bytes: int}}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}, brand: array{mode: string, name: string|null, colors: array<string, string>, max_image_bytes: int, max_total_bytes: int, max_image_side: int}} $config */
         $webUi = $config['web_ui'];
 
         if (!$this->hasBundle($container, 'NowoInstanceSettingsBundle') && !$container->hasExtension('nowo_instance_settings')) {
@@ -182,6 +186,33 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $this->registerMailer($container, $config);
         $this->registerTestMail($container, $config);
         $this->registerWebUi($container, $config);
+        $this->registerBrand($container, $config['brand']);
+    }
+
+    /**
+     * Spec 220 S7: the branded e-mail helper and its Twig functions, always registered (the layout works without a
+     * brand). With `brand.mode: auto` and nowo-tech/brand-contracts installed, the brand provider and asset reader are
+     * optional references; without them the helper leaves every e-mail untouched and the layout prints the
+     * configured fallback.
+     *
+     * @param array{mode: string, name: string|null, colors: array<string, string>, max_image_bytes: int, max_total_bytes: int, max_image_side: int} $brand
+     */
+    private function registerBrand(ContainerBuilder $container, array $brand): void
+    {
+        $auto = $brand['mode'] === Configuration::BRAND_AUTO && interface_exists(BrandProviderInterface::class);
+
+        $container->setDefinition(BrandedEmailHelper::class, (new Definition(BrandedEmailHelper::class, [
+            '$defaultName'   => $brand['name'],
+            '$defaultColors' => $brand['colors'],
+            '$provider'      => $auto ? new Reference(BrandProviderInterface::class, ContainerInterface::NULL_ON_INVALID_REFERENCE) : null,
+            '$reader'        => $auto ? new Reference(BrandAssetReaderInterface::class, ContainerInterface::NULL_ON_INVALID_REFERENCE) : null,
+            '$maxImageBytes' => $brand['max_image_bytes'],
+            '$maxTotalBytes' => $brand['max_total_bytes'],
+            '$maxImageSide'  => $brand['max_image_side'],
+            '$logger'        => new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+        ]))->setPublic(true));
+        $container->setDefinition(MailKitBrandTwigExtension::class, (new Definition(MailKitBrandTwigExtension::class, [new Reference(BrandedEmailHelper::class)]))
+            ->addTag('twig.extension'));
     }
 
     /**

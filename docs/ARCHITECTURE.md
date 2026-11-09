@@ -65,6 +65,7 @@ OutboundMailReadiness ──► Twig functions, AuthKit OutboundMailReadyChecker
 | `Readiness\OutboundMailReadiness`, `MailStatus`, `Integration\AuthKit\MailKitOutboundMailReadyChecker`, `Twig\MailKitTwigExtension` | Readiness |
 | `Controller\MailKitController`, `Routing\MailKitRouteLoader`, `Ui\AdminPages`, `MailKitPages`, `SettingsActions`, `Form\SentMailFilterType` | Admin UI |
 | `Security\*`, `EventListener\MailKitAccessListener` | Access |
+| `Brand\BrandedEmailHelper`, `BrandedEmailImage`, `BrandedEmailText`, `Twig\MailKitBrandTwigExtension`, `email/branded_layout.*.twig` | Optional branded e-mails (1.4, spec 220 S7): brand from `nowo-tech/brand-contracts`, logo as an inline CID part |
 | `Command\*` | CLI (purge, forget, send-test) |
 | `DependencyInjection\*`, `Doctrine\TablePrefixListener` | Wiring, table prefix |
 

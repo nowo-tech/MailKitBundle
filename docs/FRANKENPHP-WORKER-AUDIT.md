@@ -39,6 +39,7 @@ A bundle safe under **B** is safe under **A**, classic mode and PHP-FPM.
 | Doctrine | ✅ | Entity manager / connection resolved per call from the registry; log writes through DBAL (no identity map growth), reads through read-only entities |
 | Resources held open | ✅ | An SMTP transport may keep its connection between sends (Symfony behaviour, ping threshold); dropped on reset |
 | Memory growth across requests | ✅ | One cached transport at most; nothing appended per request |
+| Branded e-mails (1.4) | ✅ | `BrandedEmailHelper` is `readonly` with no memo: the brand provider and asset reader are asked on every `apply()` / `embed()`, image bytes live only in the e-mail being built |
 | Output, headers, `exit` | ✅ | Responses / console output only |
 | PHPStan FrankenPHP rulesets / Igor | ✅ | 0 errors / 0 KO (annotated: bundle extension cache, compile-time DI calls, route loader flag) |
 

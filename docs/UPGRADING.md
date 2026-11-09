@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.4.0](#to-140)
 - [To 1.3.0](#to-130)
   - [To 1.3.0](#to-130-1)
 - [To 1.2.0](#to-120)
@@ -17,6 +18,14 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+## To 1.4.0
+
+From **1.3.0**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
 
 Nothing to do: the branded e-mail layout (spec 220 S7) is opt-in.
 

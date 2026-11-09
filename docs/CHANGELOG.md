@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[1.4.0] - 2026-11-09](#140---2026-11-09)
 - [[1.3.0] - 2026-11-02](#130---2026-11-02)
 - [[1.2.0] - 2026-11-02](#120---2026-11-02)
 - [[1.1.1] - 2026-11-01](#111---2026-11-01)
@@ -13,6 +14,8 @@ All notable changes to this project are documented here. The format follows
 - [[1.0.0] - 2026-10-31](#100---2026-10-31)
 
 ## [Unreleased]
+
+## [1.4.0] - 2026-11-09
 
 Branded e-mails (spec 220 S7, target 1.4.0): an optional layout with the brand name, colours and logo of the project,
 the logo attached as an inline CID part. Opt-in; e-mails that do not use it are unchanged. See

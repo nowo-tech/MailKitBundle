@@ -165,7 +165,7 @@ cross-site link can only make the admin's own browser download what it may alrea
 | Outbound I/O | SSRF host guard, scheme allow-list, fixed Resend URL, deadlines. Brand images: no fetch at all (asset reader only). |
 | Permissions / exposure | Opt-in routes, roles, section access for actions, firewall-only token trust, fail-closed compile checks. |
 | Limits / DoS | Rate limit, pagination, capped bodies and errors. |
-| AI security audit (REQ-SEC-004) | Appendix CA: Pass (good) / Low after re-verification on `de7dbbd` — see below. Branded e-mails (1.4, spec 220 S7): **re-verification pending**. |
+| AI security audit (REQ-SEC-004) | Appendix CA: Pass (good) / Low after re-verification on `de7dbbd` — see below. Branded e-mails (1.4, spec 220 S7): **re-verified (Delta IW-C **Pass**; IW-I12 Info: a host part renamed with `setName()` before `apply()` can still win the `cid:`, follow-up)**. |
 
 ## AI security audit (REQ-SEC-004)
 
@@ -179,7 +179,7 @@ cross-site link can only make the admin's own browser download what it may alrea
 | Unreleased (1.4) | branch `feat/brand-s7` | IW-L2 fix (`BrandedEmailPart`, unique part name on a clash) | **Re-verification pending** | — |
 
 Recorded in the monorepo `BUNDLES_SECURITY_ANALYSIS.md` (Appendix CA). Current grade: **Pass (good) / Low**; the 1.4
-brand surface is **re-verification pending**.
+brand surface is **re-verified (Delta IW-C **Pass**; IW-I12 Info: a host part renamed with `setName()` before `apply()` can still win the `cid:`, follow-up)**.
 
 ## Residual risks and host guidance
 

@@ -18,6 +18,21 @@
 
 ## Unreleased
 
+Nothing to do: the branded e-mail layout (spec 220 S7) is opt-in.
+
+- **New, optional:** `@NowoMailKit/email/branded_layout.html.twig` / `.txt.twig`, `Nowo\MailKitBundle\Brand\BrandedEmailHelper`
+  (`apply()`, `embed()`) and the `nowo_mail_kit.brand` configuration ([USAGE — Branded e-mails](USAGE.md#branded-e-mails)).
+  E-mails that do not extend the layout or go through the helper are unchanged.
+- **Brand source:** `composer require nowo-tech/brand-contracts:^1.0` and a `BrandProviderInterface` service (for
+  example InstanceSettings ^1.5 with `nowo_instance_settings.brand.enabled: true`, which also aliases
+  `BrandAssetReaderInterface`). `brand-contracts` stays optional (`suggest`; versions outside 1.x conflict). Without it,
+  or with `nowo_mail_kit.brand: off`, the layout prints `brand.name` / `brand.colors`.
+- **Images are CID parts**, PNG / JPEG / WebP only: an SVG logo (also a committed default asset) is not sent. Give
+  e-mails a raster `logo_light` or `mark`. Hosts that embedded their logo by path (Beacon's `EmailTemplateRenderer`
+  LOGO / MASCOT paths) can switch to `embed($email, 'mark')` / `embed($email, 'extra.email_mascot')`.
+- **Messenger:** call `apply()` where the e-mail is built; the brand view and image parts are serialised with the
+  message.
+
 ## To 1.3.0
 
 From **1.2.0**:

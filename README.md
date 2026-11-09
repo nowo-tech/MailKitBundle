@@ -39,6 +39,7 @@ The transport built from the stored DSN is cached per DSN and dropped on `kernel
 - **Resend** — a key is checked with Resend **before** a save puts it live (wrong key → save refused, the current delivery keeps working); "Check the API key" (`GET /domains`, timeout, no redirects; sending-only keys recognised) and a Resend test e-mail. 1.2 `resend` rows keep working until `seed-from-fallbacks --section=mailer` moves them ([UPGRADING](docs/UPGRADING.md#to-130)).
 - **Sent-mail log** — one row per message (queued → sent / failed, attempts, provider id, size, tag); bodies only with `log.store_bodies` (values passed through `MailHeaders::redact()` masked); UiKit list (filters, server-side sortable columns, pagination) and detail pages; streamed **CSV export** of the filtered, sorted log (formula-injection safe, capped, bodies only on triple opt-in); `nowo:mail-kit:log:purge` (retention, keyset batches) and `nowo:mail-kit:log:forget <email>` (right to erasure).
 - **Readiness** — `OutboundMailReadiness::isOutboundMailReady()`, Twig `nowo_mail_kit_outbound_mail_ready()` / `nowo_mail_kit_status()`, and an **AuthKit** `OutboundMailReadyCheckerInterface` adapter wired automatically when AuthKit is installed.
+- **Branded e-mails** (1.4, optional) — `@NowoMailKit/email/branded_layout.html.twig` / `.txt.twig` with the brand name, colours and logo from a `nowo-tech/brand-contracts` provider (InstanceSettings 1.5 or your own), the logo attached as an inline **CID** part through `BrandAssetReaderInterface` (PNG / JPEG / WebP only, size-limited, never fetched); `BrandedEmailHelper::apply()` / `embed()`; configured fallback without a provider ([USAGE](docs/USAGE.md#branded-e-mails)).
 - **Fail-closed wiring** — the container refuses to compile without Instance Settings or the framework mailer, with the UI on but no form CSRF, with an empty role list, or with `allow_unauthenticated` outside `kernel.debug`.
 
 ## Installation
@@ -95,7 +96,7 @@ Schedule `php bin/console nowo:mail-kit:log:purge` daily.
 - PHP **8.2+** (`>=8.2 <8.6`; Symfony 8.x requires PHP 8.4+)
 - Symfony **7.4**, **8.0** or **8.1** (FrameworkBundle with the mailer, Form, Validator, Security CSRF, RateLimiter, HttpClient, TwigBundle; SecurityBundle for the admin UI)
 - `nowo-tech/instance-settings-bundle` **^1.0** (settings store, encrypted secrets, settings UI), Doctrine ORM **3.3+**, `nowo-tech/ui-kit-bundle` **^2.17.3**, `nowo-tech/form-kit-bundle` **^2.17**, `nowo-tech/outbound-url-guard-bundle` **^1.3**, `twig/extra-bundle`
-- Optional: `symfony/resend-mailer` (Resend), `nowo-tech/auth-kit-bundle` (readiness adapter)
+- Optional: `symfony/resend-mailer` (Resend), `nowo-tech/auth-kit-bundle` (readiness adapter), `nowo-tech/brand-contracts` **^1.0** (branded e-mails)
 
 ## Configuration
 

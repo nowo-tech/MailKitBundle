@@ -22,6 +22,7 @@ the Save button).
 - [Per-page overrides](#per-page-overrides)
 - [Overriding templates (REQ-TWIG-001)](#overriding-templates-req-twig-001)
 - [Bundle partials and assets](#bundle-partials-and-assets)
+- [E-mail layout (1.4)](#e-mail-layout-14)
 - [Translations](#translations)
 - [Allowed exceptions](#allowed-exceptions)
 
@@ -82,6 +83,18 @@ the UiKit theme and `web_ui.templates.<page>` over full-file forks.
 
 None: the pages use UiKit partials only (list / show scaffolds, filters, pagination, flashes) and add no CSS / JS (no
 `nowo_ui_styles` / `nowo_ui_scripts` override, no asset package).
+
+## E-mail layout (1.4)
+
+`email/branded_layout.html.twig` and `email/branded_layout.txt.twig` (spec 220 S7) are layouts for the host's own
+e-mails, not pages: they are not on the UiKit page contract and print no translated text (the host's `content` block
+carries the copy). Extend them as `@NowoMailKit/email/branded_layout.html.twig` (or `@NowoMailKitBundle/...`); the
+`templates/bundles/NowoMailKitBundle/email/` override path works as for the pages. Blocks: `html_lang`, `title`,
+`preheader`, `header`, `content`, `footer`; the sanitised brand view is `mail_brand` in every block (Twig function
+`nowo_mail_kit_brand()`, filter `nowo_mail_kit_plain_text`). See [USAGE — Branded e-mails](USAGE.md#branded-e-mails).
+
+The colours are inline `style` values by necessity (e-mail clients ignore `<style>` blocks and CSS variables); they are
+never literals of the layout but the `mail_brand.colors.*` values (`#rrggbb`, from the brand or `brand.colors`).
 
 ## Translations
 

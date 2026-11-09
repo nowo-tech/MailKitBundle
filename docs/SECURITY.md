@@ -24,7 +24,8 @@ Bundle-specific security analysis. The short GitHub reporting policy lives in [`
 Covers the `mailer` settings section (with its Resend provider fields since 1.3), DSN and sender validation (`MailerDsnValidator`, `DsnHostGuard`,
 constraints), the runtime transport and mailer decorators, the test e-mail and Resend key check, the sent-mail log
 (recorder, repository, entities, purge / forget commands), the admin UI (controller, filter form, access listener /
-checker, route loader), readiness (Twig, AuthKit adapter) and the configuration tree. It does **not** cover the host
+checker, route loader), readiness (Twig, AuthKit adapter), the optional branded e-mail layout and its CID images
+(`BrandedEmailHelper`, spec 220 S7, since 1.4) and the configuration tree. It does **not** cover the host
 firewall, Instance Settings' own storage, encryption and settings UI (see its SECURITY.md), the Symfony mailer
 transports and provider bridges, or the content of the messages your application sends.
 
@@ -41,6 +42,7 @@ transports and provider bridges, or the content of the messages your application
 | DNS | `DsnHostGuard` | Bounded child-process lookup (`dns_timeout`). |
 | Message content | `SentMailRecorder` | Envelope always, bodies only with `log.store_bodies`; internal headers stripped before delivery. |
 | CLI | `nowo:mail-kit:log:purge`, `…:log:forget`, `…:send-test` | Operator input (no session). |
+| Brand (since 1.4) | `BrandedEmailHelper` ← `BrandProviderInterface` / `BrandAssetReaderInterface` (host or InstanceSettings) | Name and colours from the validated brand value objects; image **bytes** from the asset reader only (never fetched from the asset URL); attached as inline CID parts after type, header and size checks. |
 | Configuration | `nowo_mail_kit.*` | Validated at compile time; switches must be literal booleans. |
 
 ## Threat model and mitigations
@@ -63,6 +65,10 @@ transports and provider bridges, or the content of the messages your application
 | **Log write breaking delivery / host transactions** | Writes go through DBAL (never the host unit of work) and are best effort (warning on failure). |
 | **Accidental route exposure** | The controller is not autoconfigured; routes come only from the `nowo_mail_kit` loader, groups switched off are not loaded (REQ-SF-004 rule 7, integration test). |
 | **Demo configuration in production** | `security.allow_unauthenticated: true` is refused unless `kernel.debug` is true. The demo publishes its ports on `127.0.0.1` only and sends to Mailpit. |
+| **Hostile brand image in an e-mail** (spec 220 S7: an uploaded logo whose bytes are SVG / HTML / a polyglot, or a huge image) | `BrandedEmailHelper` attaches only `logo_light`, `mark` and `extra.email_*`, and only when the bytes the reader returns start with the PNG, JPEG or WebP magic **and** `getimagesizefromstring()` reports the same type with both sides ≤ `brand.max_image_side` (4096). SVG and every other type are refused whatever the asset's origin (a committed config-default SVG is not attached either: mail clients do not render it and some webmails would). Bytes are never inlined into the HTML (no `data:` URI, no inline SVG); the image is an inline `DataPart` referenced as `cid:` only. Each image ≤ `brand.max_image_bytes` (512 KiB), all brand images of one e-mail ≤ `brand.max_total_bytes` (1 MiB). Tests: `testANonRasterUploadIsRefused`, `testAConfigDefaultSvgIsNotAttachedEither`, `testAHeaderThatDoesNotMatchItsMagicIsRefused`, `testSizeLimits`. |
+| **SSRF / tracking through brand images** | The helper has no HTTP client and never reads `BrandAsset::$url`; bytes come only from the host's `BrandAssetReaderInterface` (InstanceSettings reads its database store and the hash-pinned default files). The layout prints only `cid:nowo-brand-…` references (re-checked by `nowo_mail_kit_brand()`), so no remote `<img src>` and no tracking pixel is added (owner decision Q-O6). |
+| **XSS / CSS injection through the brand** | The layout is auto-escaped Twig (name in text, `alt` and `<title>`); colours reach `style` attributes only as `#rrggbb` from the contract's `BrandColors` (or the `#rrggbb`-validated `brand.colors` fallback) and are checked again before printing, so a value such as `red;}</style>` falls back to the default colour; image `src` must match `cid:nowo-brand-[a-z0-9-]+.(png\|jpg\|webp)` with integer sizes. The plain-text part prints the name through `nowo_mail_kit_plain_text` (control, bidi and line-separator characters removed) without HTML escaping. A configured fallback name is refused at compile time when it is blank, longer than 80 characters or contains control or bidi characters. |
+| **Brand breaking delivery** | Every provider, reader or image failure is caught and logged (slot and 12-character hash prefix, never the URL or bytes): the e-mail goes out with the configured name and colours and without the logo. `apply()` / `embed()` never throw because of the brand. |
 | **Cross-request state leaks (FrankenPHP worker)** | Only the transport for the last DSN is kept, reset on `kernel.reset` and on settings changes; see [FRANKENPHP-WORKER-AUDIT.md](FRANKENPHP-WORKER-AUDIT.md). |
 
 ## Admin UI exposure and allow_unauthenticated
@@ -155,10 +161,10 @@ cross-site link can only make the admin's own browser download what it may alrea
 | Input / output | DSN / sender constraints, UUID requirements, Twig escaping, sandboxed HTML body. |
 | Dependencies | `composer audit --locked` in CI. |
 | No-secret logs | See [Logging](#logging). |
-| Outbound I/O | SSRF host guard, scheme allow-list, fixed Resend URL, deadlines. |
+| Outbound I/O | SSRF host guard, scheme allow-list, fixed Resend URL, deadlines. Brand images: no fetch at all (asset reader only). |
 | Permissions / exposure | Opt-in routes, roles, section access for actions, firewall-only token trust, fail-closed compile checks. |
 | Limits / DoS | Rate limit, pagination, capped bodies and errors. |
-| AI security audit (REQ-SEC-004) | Appendix CA: Pass (good) / Low after re-verification on `de7dbbd` — see below. |
+| AI security audit (REQ-SEC-004) | Appendix CA: Pass (good) / Low after re-verification on `de7dbbd` — see below. Branded e-mails (1.4, spec 220 S7): **re-verification pending**. |
 
 ## AI security audit (REQ-SEC-004)
 
@@ -168,7 +174,10 @@ cross-site link can only make the admin's own browser download what it may alrea
 | 2026-10-31 | `de7dbbd` (PR #3) | Independent re-verification, Appendix CA | **Pass (good) / Low** | M1 held against 46 bypass cases; follow-ups N1 (unreachable API → raw HttpClient exception), N2 (SES / Scaleway DSNs refused), R1–R3 (erasure index separator, IDN forms, collations), info (insecure TLS option, SES regex anchor) |
 | 2026-10-31 | branch `fix/ca-followup` | Fixes of N1, N2, R1, R2, the info items; R3 documented | — | — |
 
-Recorded in the monorepo `BUNDLES_SECURITY_ANALYSIS.md` (Appendix CA). Current grade: **Pass (good) / Low**.
+| Unreleased (1.4) | branch `feat/brand-s7` | Branded e-mail layout and CID brand images (spec 220 S7) | **Re-verification pending** (batch audit of spec 220 S4–S7) | Self-review only: escaping, colour and `cid:` re-checks, raster-only attachment, size limits, no fetch, failures never block the send, stateless helper |
+
+Recorded in the monorepo `BUNDLES_SECURITY_ANALYSIS.md` (Appendix CA). Current grade: **Pass (good) / Low**; the 1.4
+brand surface is **re-verification pending**.
 
 ## Residual risks and host guidance
 
@@ -199,6 +208,13 @@ Recorded in the monorepo `BUNDLES_SECURITY_ANALYSIS.md` (Appendix CA). Current g
   `Mail settings changed.` notices.
 - **Framework fallback.** `MAILER_DSN` is not validated (ops configuration).
 - **Recipients in the log** are personal data even without bodies: protect the UI, purge, honour erasure requests.
+- **Brand images are only as trustworthy as the reader.** The helper trusts the bytes `BrandAssetReaderInterface`
+  returns for the asset it was given (its type and size are checked, not its content beyond the header). A host reader
+  must read only its own stored or committed files, never fetch a URL. WebP is attached as is; some clients (older
+  Outlook) do not display it, so upload PNG or JPEG logos for e-mail.
+- **`apply()` without the layout.** `BrandedEmailHelper::apply()` attaches the logo part even when the e-mail's
+  template does not reference it; mail clients then show it as an attachment. Use it only with templates that extend
+  the branded layout, or call `embed()` for the images a template prints.
 
 ## Reporting a vulnerability
 

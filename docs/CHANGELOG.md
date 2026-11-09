@@ -14,6 +14,36 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+Branded e-mails (spec 220 S7, target 1.4.0): an optional layout with the brand name, colours and logo of the project,
+the logo attached as an inline CID part. Opt-in; e-mails that do not use it are unchanged. See
+[UPGRADING](UPGRADING.md#unreleased).
+
+### Added
+
+- `@NowoMailKit/email/branded_layout.html.twig` (table layout, inline styles, blocks `html_lang`, `title`,
+  `preheader`, `header`, `content`, `footer`) and `@NowoMailKit/email/branded_layout.txt.twig` (plain-text part).
+- `Nowo\MailKitBundle\Brand\BrandedEmailHelper` (public service): `apply(TemplatedEmail)` puts the brand name, the
+  light colours and the `logo_light` (or `mark`) image into the e-mail; `embed(Email, slot)` attaches `logo_light`,
+  `mark` or `extra.email_<id>` and returns its `cid:` reference. Reads an optional `nowo-tech/brand-contracts`
+  `BrandProviderInterface` and `BrandAssetReaderInterface` (owner decision Q-O6: CID, no remote image).
+- Twig `nowo_mail_kit_brand()` (sanitised brand view, the configured fallback without a provider) and the
+  `nowo_mail_kit_plain_text` filter.
+- `nowo_mail_kit.brand`: `mode` (`auto` / `off`), fallback `name` and `colors`, `max_image_bytes` (512 KiB),
+  `max_total_bytes` (1 MiB), `max_image_side` (4096).
+- `nowo-tech/brand-contracts` in `require-dev` and `suggest`, with `conflict` `<1.0 || >=2.0`.
+
+### Security
+
+- Brand images are attached only when their bytes are PNG, JPEG or WebP (magic bytes and image header agreeing) and
+  within the size and dimension limits; SVG is never attached, whatever its origin. Nothing is fetched from the asset
+  URL (bytes come only from the asset reader), and the layout prints only re-checked `cid:` references, so no remote
+  image or tracking pixel is added.
+- Name escaped by Twig in the HTML part and stripped of control, bidi and separator characters in the plain-text part;
+  colours only `#rrggbb` from the brand contract or the validated fallback, checked again before printing.
+- A failing provider, reader or image never fails the send: the e-mail goes out with the configured brand and without
+  the logo (logged with the slot and a hash prefix only). The helper is stateless (worker-safe).
+- Audit status: **re-verification pending** (spec 220 S4–S7 batch audit).
+
 ## [1.3.0] - 2026-11-02
 
 provider choice (DSN / Resend) with provider-dependent fields, key check on save, legacy purge

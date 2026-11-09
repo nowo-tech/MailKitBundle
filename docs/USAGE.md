@@ -17,6 +17,7 @@
 - [Resend](#resend)
   - [Migrating the 1.2 `resend` section](#migrating-the-12-resend-section)
 - [DB-only mode](#db-only-mode)
+- [Branded e-mails](#branded-e-mails)
 - [Readiness and AuthKit](#readiness-and-authkit)
 - [Sent-mail log](#sent-mail-log)
   - [Admin pages](#admin-pages)
@@ -268,6 +269,85 @@ Order:
 (unless `mailer.fallback_counts_as_ready: true`), no key for `resend`. Health / status pages read the same report from
 `OutboundMailReadiness::status()->missingFields` (`['mailer.dsn']` or `['mailer.resend_api_key']`,
 names only) or `OutboundMailReadiness::missingFields()`. With a custom `mailer.dsn_provider` nothing is reported.
+
+## Branded e-mails
+
+Since 1.4 (spec 220 S7). An optional layout for the e-mails your application sends, with the brand name, colours and
+logo of the project. Nothing changes for e-mails that do not use it.
+
+```twig
+{# templates/email/welcome.html.twig #}
+{% extends '@NowoMailKit/email/branded_layout.html.twig' %}
+{% block content %}<p>Hello {{ user_name }}</p>{% endblock %}
+
+{# templates/email/welcome.txt.twig #}
+{% extends '@NowoMailKit/email/branded_layout.txt.twig' %}
+{% block content %}Hello {{ user_name }}{% endblock %}
+```
+
+```php
+use Nowo\MailKitBundle\Brand\BrandedEmailHelper;
+use Symfony\Bridge\Twig\Mime\TemplatedEmail;
+
+public function __construct(private MailerInterface $mailer, private BrandedEmailHelper $brand) {}
+
+$email = (new TemplatedEmail())
+    ->to($user->getEmail())
+    ->subject('Welcome')
+    ->htmlTemplate('email/welcome.html.twig')
+    ->textTemplate('email/welcome.txt.twig')
+    ->context(['user_name' => $user->getName()]);
+
+$this->mailer->send($this->brand->apply($email));
+```
+
+Where the brand comes from:
+
+- **With a brand provider** (`nowo-tech/brand-contracts` installed and a `BrandProviderInterface` service, for example
+  InstanceSettings 1.5 with `nowo_instance_settings.brand.enabled: true`, and `nowo_mail_kit.brand: auto`, the
+  default): `apply()` puts the brand name and the light colours into the context entry `nowo_mail_brand`, and attaches
+  the `logo_light` image (or, without a usable logo, the `mark`) as an **inline CID part** read through
+  `BrandAssetReaderInterface` (owner decision Q-O6: no remote image, works offline, no tracking-pixel effect).
+- **Without a provider**, with `brand: off`, or when the provider fails: `apply()` returns the e-mail untouched and the
+  layout prints `nowo_mail_kit.brand.name` and `brand.colors` ([CONFIGURATION](CONFIGURATION.md#brand)), with no
+  image. The rendered e-mail is the same, byte for byte, whether or not `apply()` was called.
+
+The layout (table layout, inline styles, 600 px wide) has the blocks `html_lang` (default `en`), `title`, `preheader`,
+`header` (logo, or mark + name, or name), `content` and `footer` (name). Every block can read `mail_brand`: `name`,
+`colors.primary`, `colors.primary_contrast`, `colors.text`, `colors.muted`, `colors.paper`, `colors.surface`,
+`colors.border` (all `#rrggbb`), `logo` and `mark` (`src`, `width`, `height` or null). A button in your content:
+
+```twig
+<a href="{{ url }}" style="display:inline-block;padding:10px 16px;border-radius:6px;background-color:{{ mail_brand.colors.primary }};color:{{ mail_brand.colors.primary_contrast }};text-decoration:none;">Open</a>
+```
+
+Other brand images in your own templates: `embed()` attaches `mark`, `logo_light` or a host-declared
+`extra.email_<id>` slot and returns its `cid:` reference (null when it is unavailable):
+
+```php
+$mascot = $this->brand->embed($email, 'extra.email_mascot');
+$email->context(['mascot' => $mascot] + $email->getContext());
+```
+
+```twig
+{% if mascot %}<img src="{{ mascot }}" alt="" width="120">{% endif %}
+```
+
+Rules (see [SECURITY](SECURITY.md#threat-model-and-mitigations)):
+
+- Only PNG, JPEG and WebP are attached, decided from the bytes (magic bytes and image header agreeing), never from the
+  asset's declared type. SVG is never attached, not even a committed default asset: give e-mails a PNG or JPEG logo.
+  WebP is not shown by every client (older Outlook).
+- Each image ≤ `brand.max_image_bytes`, all brand images of one e-mail ≤ `brand.max_total_bytes`, sides ≤
+  `brand.max_image_side`; a larger image is left out.
+- Nothing is fetched from the asset URL; the bytes come only from the reader. A reader failure means no logo, and the
+  send never fails because of the brand (every failure is logged with the slot and a hash prefix).
+- Display sizes: the logo 40 px high (at most 240 px wide), the mark 40 × 40, extra images at their size up to 600 px.
+- Only the light palette is used (mail clients' dark modes recolour on their own); `color-scheme: light` is declared.
+- The helper is stateless: the provider is asked on every call, so a FrankenPHP or Messenger worker keeps no brand
+  between messages. Call `apply()` where the e-mail is built: the brand view (plain scalars) and the image parts
+  travel with the message, so a Messenger worker that renders it later prints the same brand.
+- `apply()` attaches the logo even if the template does not print it: use it with templates that extend the layout.
 
 ## Readiness and AuthKit
 

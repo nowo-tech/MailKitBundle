@@ -14,9 +14,9 @@ use Nowo\Brand\Contract\ColorMath;
 use Psr\Log\LoggerInterface;
 use Symfony\Bridge\Twig\Mime\TemplatedEmail;
 use Symfony\Component\Mime\Email;
-use Symfony\Component\Mime\Part\DataPart;
 use Throwable;
 
+use function bin2hex;
 use function getimagesizefromstring;
 use function in_array;
 use function is_array;
@@ -25,6 +25,8 @@ use function is_string;
 use function max;
 use function min;
 use function preg_match;
+use function preg_quote;
+use function random_bytes;
 use function round;
 use function str_replace;
 use function str_starts_with;
@@ -329,7 +331,7 @@ final readonly class BrandedEmailHelper
         $base    = self::PART_PREFIX . str_replace(['.', '_'], '-', $slot);
         foreach ($email->getAttachments() as $part) {
             $filename = $part->getFilename();
-            if (is_string($filename) && str_starts_with($filename, $base . '.')) {
+            if ($part instanceof BrandedEmailPart && is_string($filename) && preg_match('/^' . preg_quote($base, '/') . '(?:-[0-9a-f]{12})?\.(?:png|jpg|webp)\z/', $filename) === 1) {
                 return $this->checked($filename, $part->getBody(), $slot, $context, false);
             }
         }
@@ -362,7 +364,7 @@ final readonly class BrandedEmailHelper
             return null;
         }
 
-        return $this->checked($base . '.' . self::IMAGE_TYPES[$type][1], $bytes, $slot, $context, true);
+        return $this->checked($this->partName($email, $base, self::IMAGE_TYPES[$type][1]), $bytes, $slot, $context, true);
     }
 
     /**
@@ -413,12 +415,27 @@ final readonly class BrandedEmailHelper
         return str_starts_with($slot, self::EXTRA_EMAIL_PREFIX) && BrandAssetSlot::isExtra($slot);
     }
 
+    /**
+     * `<base>.<ext>`, or `<base>-<12 random hex>.<ext>` when the application already attached a part with that name:
+     * Symfony resolves a `cid:` reference to the first part with the name, so the brand part must not share it.
+     */
+    private function partName(Email $email, string $base, string $extension): string
+    {
+        $name = $base . '.' . $extension;
+        foreach ($email->getAttachments() as $part) {
+            if ($part->getFilename() === $name) {
+                return $base . '-' . bin2hex(random_bytes(6)) . '.' . $extension;
+            }
+        }
+
+        return $name;
+    }
+
     private function attachedBrandBytes(Email $email): int
     {
         $total = 0;
         foreach ($email->getAttachments() as $part) {
-            $filename = $part->getFilename();
-            if (is_string($filename) && str_starts_with($filename, self::PART_PREFIX)) {
+            if ($part instanceof BrandedEmailPart) {
                 $total += strlen($part->getBody());
             }
         }
@@ -429,10 +446,10 @@ final readonly class BrandedEmailHelper
     private function attach(Email $email, BrandedEmailImage $image): void
     {
         foreach ($email->getAttachments() as $part) {
-            if ($part->getFilename() === $image->name) {
+            if ($part instanceof BrandedEmailPart && $part->getFilename() === $image->name) {
                 return;
             }
         }
-        $email->addPart((new DataPart($image->bytes, $image->name, $image->mimeType))->asInline());
+        $email->addPart((new BrandedEmailPart($image->bytes, $image->name, $image->mimeType))->asInline());
     }
 }

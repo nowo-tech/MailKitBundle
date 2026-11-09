@@ -42,7 +42,10 @@ the logo attached as an inline CID part. Opt-in; e-mails that do not use it are 
   colours only `#rrggbb` from the brand contract or the validated fallback, checked again before printing.
 - A failing provider, reader or image never fails the send: the e-mail goes out with the configured brand and without
   the logo (logged with the slot and a hash prefix only). The helper is stateless (worker-safe).
-- Audit status: **re-verification pending** (spec 220 S4–S7 batch audit).
+- Audit IW-L2: the helper reuses and counts only the parts it attached itself (`BrandedEmailPart`); an application
+  attachment named like a brand part (`nowo-brand-logo-light.png`) is never used as the logo, and the brand part then
+  gets a unique `nowo-brand-<slot>-<12 hex>.<ext>` name so the `cid:` reference cannot resolve to the other part.
+- Audit status: Appendix IW Pass-Low; the IW-L2 fix is **re-verification pending**.
 
 ## [1.3.0] - 2026-11-02
 

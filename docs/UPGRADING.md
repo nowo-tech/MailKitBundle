@@ -31,7 +31,9 @@ Nothing to do: the branded e-mail layout (spec 220 S7) is opt-in.
   e-mails a raster `logo_light` or `mark`. Hosts that embedded their logo by path (Beacon's `EmailTemplateRenderer`
   LOGO / MASCOT paths) can switch to `embed($email, 'mark')` / `embed($email, 'extra.email_mascot')`.
 - **Messenger:** call `apply()` where the e-mail is built; the brand view and image parts are serialised with the
-  message.
+  message, so each queued e-mail carries up to `brand.max_total_bytes` (1 MiB by default, 5 MiB at most) in the
+  transport (for example a Doctrine `messenger_messages` row). With a size-limited transport keep the defaults or lower
+  them, or call `apply()` in your own handler before sending (audit IW-I11).
 
 ## To 1.3.0
 

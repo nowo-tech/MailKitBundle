@@ -9,6 +9,7 @@ use Nowo\Brand\Contract\BrandAssetSlot;
 use Nowo\Brand\Contract\BrandProviderInterface;
 use Nowo\MailKitBundle\Brand\BrandedEmailHelper;
 use Nowo\MailKitBundle\Brand\BrandedEmailImage;
+use Nowo\MailKitBundle\Brand\BrandedEmailPart;
 use Nowo\MailKitBundle\Tests\Support\BrandFixtures;
 use Nowo\MailKitBundle\Tests\Support\MemoryBrandAssetReader;
 use Nowo\MailKitBundle\Tests\Support\RecordingLogger;
@@ -20,6 +21,7 @@ use Symfony\Bridge\Twig\Mime\TemplatedEmail;
 use Symfony\Component\Mime\Email;
 use Symfony\Component\Mime\Part\DataPart;
 
+use function quoted_printable_decode;
 use function serialize;
 use function str_repeat;
 
@@ -240,6 +242,55 @@ final class BrandedEmailHelperTest extends TestCase
         self::assertSame('cid:nowo-brand-extra-email-mascot.png', $helper->embed($email, 'extra.email_mascot'));
         self::assertCount(1, $email->getAttachments());
         self::assertCount(1, $reader->reads, 'the second embed reuses the attached part');
+    }
+
+    public function testAnApplicationAttachmentWithABrandNameIsNeverUsedAsTheLogo(): void
+    {
+        $reader = new MemoryBrandAssetReader([BrandAssetSlot::LOGO_LIGHT => BrandFixtures::png(200, 50)]);
+        $helper = $this->helper(new StaticBrandProvider(BrandFixtures::brand([BrandAssetSlot::LOGO_LIGHT => BrandFixtures::asset(BrandAssetSlot::LOGO_LIGHT)])), $reader);
+        $user   = BrandFixtures::png(300, 300, 900);
+        $email  = $this->email()->from('app@example.com')->attach($user, 'nowo-brand-logo-light.png', 'image/png');
+        $email->addPart((new DataPart(BrandFixtures::png(64, 64), 'nowo-brand-mark.png', 'image/png'))->asInline());
+
+        $view = $helper->apply($email)->getContext()[BrandedEmailHelper::CONTEXT_KEY];
+        $logo = $view['logo'];
+        self::assertIsArray($logo);
+
+        self::assertCount(1, $reader->reads, 'the brand logo is read, not taken from the application attachment');
+        self::assertMatchesRegularExpression('/^cid:nowo-brand-logo-light-[0-9a-f]{12}\.png$/', $logo['src']);
+        self::assertSame(160, $logo['width']);
+        self::assertSame($logo, $helper->view($view)['logo']);
+
+        $parts = $email->getAttachments();
+        self::assertCount(3, $parts);
+        $ours = $parts[2];
+        self::assertInstanceOf(BrandedEmailPart::class, $ours);
+        self::assertSame(BrandFixtures::png(200, 50), $ours->getBody());
+        self::assertSame($user, $parts[0]->getBody(), 'the application attachment is kept as is');
+
+        // The cid: reference resolves to the brand part, never to the application attachment.
+        $email->html('<img src="' . $logo['src'] . '" alt="">')->text('x');
+        $raw = quoted_printable_decode($email->toString());
+        self::assertStringContainsString('src="cid:' . $ours->getContentId() . '"', $raw);
+        self::assertInstanceOf(DataPart::class, $parts[0]);
+        self::assertStringNotContainsString('src="cid:' . $parts[0]->getContentId() . '"', $raw);
+
+        self::assertSame($logo['src'], $helper->embed($email, BrandAssetSlot::LOGO_LIGHT), 'the helper reuses its own part');
+        self::assertCount(3, $email->getAttachments());
+        self::assertCount(1, $reader->reads);
+    }
+
+    public function testApplicationAttachmentsDoNotCountTowardsTheBrandTotal(): void
+    {
+        $helper = new BrandedEmailHelper(
+            provider: new StaticBrandProvider(BrandFixtures::brand([BrandAssetSlot::MARK => BrandFixtures::asset(BrandAssetSlot::MARK, 64, 64)])),
+            reader: new MemoryBrandAssetReader([BrandAssetSlot::MARK => BrandFixtures::png(64, 64)]),
+            maxImageBytes: 2048,
+            maxTotalBytes: 2048,
+        );
+        $email = $this->email()->attach(str_repeat('x', 4096), 'nowo-brand-big.png', 'image/png');
+
+        self::assertSame('cid:nowo-brand-mark.png', $helper->embed($email, BrandAssetSlot::MARK));
     }
 
     public function testApplyAfterEmbedReusesTheLogoPart(): void

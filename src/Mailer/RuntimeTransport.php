@@ -4,14 +4,20 @@ declare(strict_types=1);
 
 namespace Nowo\MailKitBundle\Mailer;
 
+use DateTimeImmutable;
 use Nowo\MailKitBundle\Dsn\DsnSource;
 use Nowo\MailKitBundle\Dsn\MailerDsnAudit;
 use Nowo\MailKitBundle\Dsn\MailerDsnProviderInterface;
 use Nowo\MailKitBundle\Dsn\MailerDsnValidator;
 use Nowo\MailKitBundle\Dsn\RuntimeDsn;
+use Nowo\MailKitBundle\Event\MailDeliveredEvent;
+use Nowo\MailKitBundle\Event\MailDeliveryFailedEvent;
 use Nowo\MailKitBundle\Log\SentMailRecorder;
 use Nowo\MailKitBundle\Sender\SenderPolicy;
+use Psr\Clock\ClockInterface;
+use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\Clock\NativeClock;
 use Symfony\Component\Mailer\Envelope;
 use Symfony\Component\Mailer\Exception\TransportException;
 use Symfony\Component\Mailer\SentMessage;
@@ -40,6 +46,9 @@ use function strlen;
  * The internal {@see MailHeaders} are removed before delivery; the outcome is written to the sent-mail log when it
  * is enabled. A failure is rethrown as {@see DeliveryFailedException}: scrubbed message and reference, never the
  * provider response body (so it is safe in flashes, the log and the Messenger failure transport).
+ *
+ * Since 1.5 every outcome is also dispatched as an id-only PSR-14 event ({@see MailDeliveredEvent},
+ * {@see MailDeliveryFailedEvent}) after the log write; a failing listener is logged and never changes the outcome.
  */
 final class RuntimeTransport implements TransportInterface, ResetInterface
 {
@@ -57,6 +66,8 @@ final class RuntimeTransport implements TransportInterface, ResetInterface
     /**
      * @param TransportInterface $fallback the decorated `mailer.transports`
      * @param Transport $factory `mailer.transport_factory` (every installed bridge)
+     * @param EventDispatcherInterface|null $dispatcher receives the delivery events (1.5)
+     * @param ClockInterface|null $clock time of the delivery events (1.5)
      */
     public function __construct(
         private readonly TransportInterface $fallback,
@@ -66,6 +77,8 @@ final class RuntimeTransport implements TransportInterface, ResetInterface
         private readonly SenderPolicy $sender,
         private readonly ?SentMailRecorder $recorder = null,
         private readonly ?LoggerInterface $logger = null,
+        private readonly ?EventDispatcherInterface $dispatcher = null,
+        private readonly ?ClockInterface $clock = null,
     ) {
     }
 
@@ -141,6 +154,7 @@ final class RuntimeTransport implements TransportInterface, ResetInterface
     {
         $snapshot = $message instanceof Message ? clone $message : $message;
         $id       = $message instanceof Message ? MailHeaders::value($message, MailHeaders::LOG_ID) : null;
+        $tag      = $message instanceof Message ? MailHeaders::value($message, MailHeaders::TAG) : null;
         if ($message instanceof Message) {
             MailHeaders::strip($message);
         }
@@ -151,7 +165,7 @@ final class RuntimeTransport implements TransportInterface, ResetInterface
         } catch (Throwable $exception) {
             // Scrubbed message + reference only: no provider body, no credential, no `previous` (CA M1 / L3 / I3).
             $failure = DeliveryFailedException::from($exception, ...$this->credentials($dsn));
-            $this->recorder?->failed($id, $snapshot, $label, $failure->getMessage());
+            $logId   = $this->recorder?->failed($id, $snapshot, $label, $failure->getMessage()) ?? $id;
             $this->logger?->warning('Mail delivery failed.', [
                 'bundle'    => 'NowoMailKitBundle',
                 'transport' => $dsn instanceof RuntimeDsn ? $dsn->label() : self::FALLBACK_LABEL,
@@ -159,13 +173,42 @@ final class RuntimeTransport implements TransportInterface, ResetInterface
                 'reference' => $failure->reference,
                 'detail'    => $failure->detail,
             ]);
+            $this->notify(new MailDeliveryFailedEvent($logId, $tag, $label, $failure->reference, $this->now()));
 
             throw $failure;
         }
 
-        $this->recorder?->sent($id, $snapshot, $label, $sent?->getMessageId(), $sent instanceof SentMessage ? strlen($sent->toString()) : null);
+        $size = $sent instanceof SentMessage ? strlen($sent->toString()) : null;
+        // A raw (non-MIME) message has no Message-ID: SentMessage leaves it unset.
+        $providerId = $sent instanceof SentMessage && $sent->getOriginalMessage() instanceof Message ? $sent->getMessageId() : null;
+        $logId      = $this->recorder?->sent($id, $snapshot, $label, $providerId, $size) ?? $id;
+        $this->notify(new MailDeliveredEvent($logId, $tag, $label, $providerId, $size, $this->now()));
 
         return $sent;
+    }
+
+    /**
+     * Dispatches a delivery event; a listener failure is logged (the message was already sent or already failed).
+     */
+    private function notify(MailDeliveredEvent|MailDeliveryFailedEvent $event): void
+    {
+        if (!$this->dispatcher instanceof EventDispatcherInterface) {
+            return;
+        }
+        try {
+            $this->dispatcher->dispatch($event);
+        } catch (Throwable $exception) {
+            $this->logger?->error('Mail delivery listener failed.', [
+                'bundle' => 'NowoMailKitBundle',
+                'event'  => $event::class,
+                'error'  => $exception::class,
+            ]);
+        }
+    }
+
+    private function now(): DateTimeImmutable
+    {
+        return ($this->clock ?? new NativeClock())->now();
     }
 
     /**

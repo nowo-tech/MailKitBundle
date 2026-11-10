@@ -4,23 +4,22 @@ declare(strict_types=1);
 
 namespace Nowo\MailKitBundle\Sender;
 
-use Nowo\MailKitBundle\Settings\MailSettings;
 use Symfony\Component\Mime\Address;
 use Symfony\Component\Mime\Message;
 use Symfony\Component\Mime\RawMessage;
 
 /**
- * Fills the runtime sender of outgoing messages: `From` (settings `mailer.from` / `mailer.from_name`, or
- * `mailer.resend_from` when Resend is active) and `Reply-To` (`mailer.reply_to`) — only when the message has none, so
- * code that sets its own sender keeps it.
+ * Fills the runtime sender of outgoing messages: `From` and `Reply-To` from the {@see SenderProviderInterface} (by
+ * default the settings `mailer.from` / `mailer.from_name`, or `mailer.resend_from` when Resend is active, and
+ * `mailer.reply_to`) — only when the message has none, so code that sets its own sender keeps it.
  */
 final readonly class SenderPolicy
 {
     /**
-     * @param MailSettings $settings typed view of the mail settings
+     * @param SenderProviderInterface $settings default sender (the mail settings unless `mailer.sender_provider` is set)
      */
     public function __construct(
-        private MailSettings $settings,
+        private SenderProviderInterface $settings,
     ) {
     }
 

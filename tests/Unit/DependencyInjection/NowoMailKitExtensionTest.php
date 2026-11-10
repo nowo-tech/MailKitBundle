@@ -9,11 +9,15 @@ use Nowo\InstanceSettingsBundle\Settings\InstanceSettingsInterface;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\MailerIntegrationPass;
 use Nowo\MailKitBundle\DependencyInjection\NowoMailKitExtension;
 use Nowo\MailKitBundle\Dsn\MailerDsnProviderInterface;
+use Nowo\MailKitBundle\Mailer\RuntimeTransport;
 use Nowo\MailKitBundle\NowoMailKitBundle;
 use Nowo\MailKitBundle\Resend\ResendApiChecker;
 use Nowo\MailKitBundle\Security\MailKitAccessCheckerInterface;
+use Nowo\MailKitBundle\Sender\SenderPolicy;
+use Nowo\MailKitBundle\Sender\SenderProviderInterface;
 use Nowo\MailKitBundle\Settings\LegacyResendSettings;
 use Nowo\MailKitBundle\Settings\MailerSettingsSection;
+use Nowo\MailKitBundle\Settings\MailSettings;
 use Nowo\MailKitBundle\Validator\ResendApiKeyAcceptedValidator;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
@@ -76,13 +80,20 @@ final class NowoMailKitExtensionTest extends TestCase
     {
         $container = $this->container([]);
         (new NowoMailKitExtension())->load([[
-            'mailer'   => ['dsn_provider' => 'app.dsn_provider', 'decorate' => false],
+            'mailer'   => ['dsn_provider' => 'app.dsn_provider', 'sender_provider' => 'app.sender_provider', 'decorate' => false],
             'security' => ['access_checker' => 'app.mail_checker'],
             'resend'   => ['enabled' => true],
             'web_ui'   => ['enabled' => true],
         ]], $container);
 
         self::assertSame('app.dsn_provider', (string) $container->getAlias(MailerDsnProviderInterface::class));
+        self::assertSame('app.sender_provider', (string) $container->getAlias(SenderProviderInterface::class));
+        self::assertSame(SenderProviderInterface::class, (string) $container->getDefinition(SenderPolicy::class)->getArgument(0));
+        self::assertSame(['event_dispatcher', 'clock'], [(string) $container->getDefinition(RuntimeTransport::class)->getArgument(7), (string) $container->getDefinition(RuntimeTransport::class)->getArgument(8)]);
+
+        $default = $this->container([]);
+        (new NowoMailKitExtension())->load([[]], $default);
+        self::assertSame(MailSettings::class, (string) $default->getAlias(SenderProviderInterface::class));
         self::assertSame('app.mail_checker', (string) $container->getAlias(MailKitAccessCheckerInterface::class));
         self::assertFalse($container->hasDefinition(MailerIntegrationPass::MAILER_ID));
         self::assertTrue($container->hasDefinition(ResendApiChecker::class));

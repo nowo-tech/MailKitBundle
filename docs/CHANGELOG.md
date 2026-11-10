@@ -15,7 +15,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+Target 1.5.0. DDD / hexagonal P2 fixes (audit 2026-11-09).
+
+### Added
+
+- `Sender\SenderProviderInterface` (`from()`, `replyTo()`): the default sender of the sender policy is now a port.
+  `MailSettings` implements it and stays the default. New option `nowo_mail_kit.mailer.sender_provider` (service id,
+  null = the settings).
+- Id-only delivery events `Event\MailDeliveredEvent` (`logId`, `tag`, `transport`, `providerMessageId`, `size`,
+  `occurredAt`) and `Event\MailDeliveryFailedEvent` (`logId`, `tag`, `transport`, `reference`, `occurredAt`),
+  dispatched by `RuntimeTransport` after the log write. A listener exception is logged and never changes the outcome.
+
 ### Changed
+
+- `SenderPolicy` takes a `SenderProviderInterface` (a `MailSettings` still fits).
+- `SentMailRecorder::sent()` / `failed()` return the log row id (`?string`) instead of `void`.
+- `RuntimeTransport` takes two more optional constructor arguments (`?EventDispatcherInterface`, `?ClockInterface`).
+- A raw (non-MIME) message sent with the log enabled no longer reads an unset `SentMessage` Message-ID (the provider
+  message id is null for it).
 
 - Docs: new USAGE section "Using it from a DDD / hexagonal application" (where the bundle sits in a hexagonal host, the ports, events and DTOs to build an anti-corruption layer on, and the known limitations).
 

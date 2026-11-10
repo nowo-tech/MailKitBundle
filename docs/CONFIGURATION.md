@@ -30,6 +30,7 @@ nowo_mail_kit:
     mailer:
         decorate: true                 # decorate mailer.mailer + mailer.transports (runtime DSN on every send)
         dsn_provider: null             # service id implementing MailerDsnProviderInterface (null = Instance Settings)
+        sender_provider: null          # service id implementing SenderProviderInterface (null = Instance Settings, 1.5)
         fallback_counts_as_ready: false # MAILER_DSN counts for isOutboundMailReady() when nothing is stored
     dsn:
         allowed_schemes: [smtp, smtps, mailgun, mailgun+api, …, scaleway+smtp]   # sendmail / native / null refused
@@ -99,6 +100,7 @@ Unknown keys are rejected. Switches (`mailer.decorate`, `dsn.allow_private_hosts
 | --- | --- | --- |
 | `decorate` | `true` | Registers `nowo_mail_kit.mailer` (decorates `mailer.mailer`, the `MailerInterface`) and `RuntimeTransport` as decorator of `mailer.transports`, so the framework mailer **and** the Messenger `SendEmailMessage` handler use the runtime DSN. With `false`, the framework mailer is untouched; `RuntimeTransport` (fallback = `mailer.transports`), the test e-mail, readiness and the log still work for code that uses them directly. |
 | `dsn_provider` | `null` | Service id of a `MailerDsnProviderInterface`; the default reads the `mailer` settings. |
+| `sender_provider` | `null` | Since 1.5. Service id of a `Sender\SenderProviderInterface` (default `From` / `Reply-To` of messages without one); the default reads the `mailer` settings (`MailSettings`). |
 | `fallback_counts_as_ready` | `false` | `isOutboundMailReady()` is false while nothing is stored, because `MAILER_DSN` cannot be inspected through the framework transports. Set it to `true` when your `MAILER_DSN` is a real transport. |
 
 ## dsn

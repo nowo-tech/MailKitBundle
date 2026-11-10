@@ -485,8 +485,23 @@ final readonly class SymfonyInvitationNotifier implements InvitationNotifier
 | Interface | Purpose | Config |
 | --- | --- | --- |
 | `Nowo\MailKitBundle\Dsn\MailerDsnProviderInterface` | Where the DSN comes from (vault, per-tenant table…); `getDsn(): ?RuntimeDsn`, null = framework transport | `nowo_mail_kit.mailer.dsn_provider` |
+| `Nowo\MailKitBundle\Sender\SenderProviderInterface` (1.5) | Default `From` / `Reply-To` of messages without one (tenant, brand, your config); `from(): ?Address`, `replyTo(): ?Address` | `nowo_mail_kit.mailer.sender_provider` |
 | `Nowo\MailKitBundle\Security\MailKitAccessCheckerInterface` | Who opens the admin UI; `canAccess(?object $user): bool` | `nowo_mail_kit.security.access_checker` |
 | `Nowo\Brand\Contract\BrandProviderInterface` / `BrandAssetReaderInterface` (optional) | Brand of the branded layout | `nowo_mail_kit.brand: auto` |
+
+**Reacting to deliveries (1.5)**
+
+`RuntimeTransport` dispatches id-only PSR-14 events after each send, once the sent-mail log row is written:
+
+- `Nowo\MailKitBundle\Event\MailDeliveredEvent`: `logId`, `tag`, `transport` (scheme label), `providerMessageId`,
+  `size`, `occurredAt`.
+- `Nowo\MailKitBundle\Event\MailDeliveryFailedEvent`: `logId`, `tag`, `transport`, `reference` (the one of the
+  `DeliveryFailedException`), `occurredAt`.
+
+They never carry addresses, subject, body, DSN or provider error text. To correlate them with your domain, tag the
+message (`MailHeaders::tag($email, 'invitation')`) and keep your own mapping, or look the row up by `logId`. A delivery
+is an external fact, so the events are not held back by a transaction you may have open. A listener that throws is
+logged and never fails the send (no Messenger retry, no duplicate e-mail).
 
 **Services and value objects your adapters can use**
 
@@ -504,10 +519,9 @@ entity managers, add the `NowoMailKitBundle` mapping to the manager you name in 
 
 **Known limitations**
 
-- The From / Reply-To defaults come only from the Instance Settings `mailer` section; there is no sender provider port
-  yet, and Instance Settings is required even with a custom DSN provider. Set `From` on the message to override it.
-- MailKit dispatches no delivery event of its own. Symfony Mailer's `SentMessageEvent` / `FailedMessageEvent` still
-  fire, but without the MailKit log id or tag.
+- Instance Settings stays a required dependency (the `mailer` settings section, the test e-mail and the admin
+  pages are built on it), even when both `mailer.dsn_provider` and `mailer.sender_provider` point to your own
+  services.
 - `OutboundMailReadiness`, `SentMailRecorder` and `SentMailRepository` are final classes without interfaces: wrap them
   in your own port if your application layer must not depend on them.
 - The log tables are mapped even with `log.enabled: false`.

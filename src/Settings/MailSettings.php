@@ -7,6 +7,7 @@ namespace Nowo\MailKitBundle\Settings;
 use Nowo\InstanceSettingsBundle\Settings\InstanceSettingsInterface;
 use Nowo\MailKitBundle\Dsn\DsnSource;
 use Nowo\MailKitBundle\Dsn\RuntimeDsn;
+use Nowo\MailKitBundle\Sender\SenderProviderInterface;
 use Symfony\Component\Mime\Address;
 use Throwable;
 
@@ -21,8 +22,10 @@ use function trim;
  * `nowo_mail_kit.resend.enabled`); the Resend key and sender are `mailer.resend_api_key` / `mailer.resend_from`.
  * Until the 1.2 `resend` rows are migrated ({@see LegacyResendSettings}), an instance without a stored
  * `mailer.provider` keeps the 1.2 behaviour: `resend.enabled` selects Resend, `resend.api_key` / `resend.from` apply.
+ *
+ * Default {@see SenderProviderInterface} of the sender policy (1.5).
  */
-final readonly class MailSettings
+final readonly class MailSettings implements SenderProviderInterface
 {
     /**
      * @param bool $resendEnabled `nowo_mail_kit.resend.enabled` (the `mailer` section offers the Resend provider)

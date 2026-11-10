@@ -6,10 +6,12 @@ namespace Nowo\MailKitBundle\Tests\Unit\Sender;
 
 use Nowo\MailKitBundle\Sender\SenderAddress;
 use Nowo\MailKitBundle\Sender\SenderPolicy;
+use Nowo\MailKitBundle\Sender\SenderProviderInterface;
 use Nowo\MailKitBundle\Settings\MailSettings;
 use Nowo\MailKitBundle\Tests\Support\FakeSettings;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Mime\Address;
 use Symfony\Component\Mime\Email;
 use Symfony\Component\Mime\RawMessage;
 
@@ -36,6 +38,26 @@ final class SenderTest extends TestCase
     public function testIsDeliverable(?string $from, bool $expected): void
     {
         self::assertSame($expected, SenderAddress::isDeliverable($from));
+    }
+
+    public function testAHostSenderProviderReplacesTheSettings(): void
+    {
+        $provider = new class implements SenderProviderInterface {
+            public function from(): Address
+            {
+                return new Address('tenant@example.com', 'Tenant');
+            }
+
+            public function replyTo(): ?Address
+            {
+                return null;
+            }
+        };
+        $email = new Email();
+        (new SenderPolicy($provider))->apply($email);
+
+        self::assertSame('"Tenant" <tenant@example.com>', $email->getFrom()[0]->toString());
+        self::assertSame([], $email->getReplyTo());
     }
 
     public function testPolicyFillsOnlyMissingHeaders(): void

@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+  - [To 1.5.0](#to-150)
 - [To 1.4.0](#to-140)
 - [To 1.3.0](#to-130)
   - [To 1.3.0](#to-130-1)
@@ -18,6 +19,18 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+### To 1.5.0
+
+Target **1.5.0**, from **1.4.0**: `composer update nowo-tech/mail-kit-bundle`. Nothing to change by default.
+
+1. **Sender port (optional).** To take the default `From` / `Reply-To` from your own context instead of the
+   Instance Settings `mailer` section, implement `Nowo\MailKitBundle\Sender\SenderProviderInterface` and set
+   `nowo_mail_kit.mailer.sender_provider: <service id>`. Messages that set their own `From` / `Reply-To` keep them.
+   Code that builds `SenderPolicy` by hand with a `MailSettings` keeps working.
+2. **Delivery events (new).** `MailDeliveredEvent` / `MailDeliveryFailedEvent` are dispatched on every send through
+   the runtime transport. Listening is optional; a throwing listener is logged at `error`, not rethrown.
+3. Instance Settings stays required (`^1.3.1`); this release does not need a newer one.
 
 ## To 1.4.0
 

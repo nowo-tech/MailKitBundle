@@ -348,7 +348,7 @@ Rules (see [SECURITY](SECURITY.md#threat-model-and-mitigations)):
 - The helper is stateless: the provider is asked on every call, so a FrankenPHP or Messenger worker keeps no brand
   between messages. Call `apply()` where the e-mail is built: the brand view (plain scalars) and the image parts
   travel with the message, so a Messenger worker that renders it later prints the same brand. A queued message
-  therefore carries the image bytes (up to `brand.max_total_bytes`); see [UPGRADING](UPGRADING.md#unreleased).
+  therefore carries the image bytes (up to `brand.max_total_bytes`); see [UPGRADING](UPGRADING.md#to-150).
 - The helper reuses and counts only the parts it attached itself (`BrandedEmailPart`): an attachment your application
   added under a `nowo-brand-…` name is never taken for the logo, and the brand part then gets a unique name.
 - `apply()` attaches the logo even if the template does not print it: use it with templates that extend the layout.

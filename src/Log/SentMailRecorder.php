@@ -105,11 +105,11 @@ final readonly class SentMailRecorder
     }
 
     /**
-     * Marks the row sent (or inserts one when there is no queued row).
+     * Marks the row sent (or inserts one when there is no queued row); returns the row id (null when the write failed).
      */
-    public function sent(?string $id, RawMessage $message, string $transport, ?string $providerMessageId, ?int $size): void
+    public function sent(?string $id, RawMessage $message, string $transport, ?string $providerMessageId, ?int $size): ?string
     {
-        $this->resolve($id, $message, $transport, SentMailStatus::Sent, [
+        return $this->resolve($id, $message, $transport, SentMailStatus::Sent, [
             'status'              => SentMailStatus::Sent->value,
             'transport'           => mb_substr($transport, 0, 32),
             'provider_message_id' => $providerMessageId === null ? null : mb_substr($providerMessageId, 0, 255),
@@ -121,11 +121,11 @@ final readonly class SentMailRecorder
 
     /**
      * Marks the row failed with the (already public) error, scrubbed again and capped (or inserts one when there is no
-     * queued row).
+     * queued row); returns the row id (null when the write failed).
      */
-    public function failed(?string $id, RawMessage $message, string $transport, string $error): void
+    public function failed(?string $id, RawMessage $message, string $transport, string $error): ?string
     {
-        $this->resolve($id, $message, $transport, SentMailStatus::Failed, [
+        return $this->resolve($id, $message, $transport, SentMailStatus::Failed, [
             'status'    => SentMailStatus::Failed->value,
             'transport' => mb_substr($transport, 0, 32),
             'error'     => ErrorScrubber::scrub($error),
@@ -308,12 +308,10 @@ final readonly class SentMailRecorder
      * @param array<string, mixed> $values
      * @param array<string, string> $types
      */
-    private function resolve(?string $id, RawMessage $message, string $transport, SentMailStatus $status, array $values, array $types): void
+    private function resolve(?string $id, RawMessage $message, string $transport, SentMailStatus $status, array $values, array $types): ?string
     {
         if ($id === null) {
-            $this->insert($message, $transport, $status, 1, $values, $types);
-
-            return;
+            return $this->insert($message, $transport, $status, 1, $values, $types);
         }
 
         try {
@@ -325,11 +323,15 @@ final readonly class SentMailRecorder
             );
             if ($updated === 0) {
                 // The queued row was purged or never written: keep the outcome anyway.
-                $this->insert($message, $transport, $status, 1, $values, $types);
+                return $this->insert($message, $transport, $status, 1, $values, $types);
             }
         } catch (Throwable $exception) {
             $this->logger?->warning('Sent-mail log update failed.', ['bundle' => 'NowoMailKitBundle', 'error' => $exception::class]);
+
+            return null;
         }
+
+        return $id;
     }
 
     /**

@@ -31,8 +31,8 @@ final class SentMailLogTest extends KernelTestCase
         MailHeaders::tag($email, 'invoice');
         $id = $recorder->queued($email);
         self::assertNotNull($id);
-        $recorder->sent($id, $email, 'smtp', 'provider-1', 1234);
-        $recorder->failed($id, $email, 'smtp', 'second attempt failed');
+        self::assertSame($id, $recorder->sent($id, $email, 'smtp', 'provider-1', 1234), '1.5: the row id is returned');
+        self::assertSame($id, $recorder->failed($id, $email, 'smtp', 'second attempt failed'));
 
         $row = $repository->find($id);
         self::assertNotNull($row);
@@ -50,8 +50,10 @@ final class SentMailLogTest extends KernelTestCase
         self::assertNull($repository->findBody($id));
 
         // An unknown id (purged queued row) still records the outcome; raw messages have no envelope data.
-        $recorder->sent('018f0000-0000-7000-8000-000000000000', new RawMessage('raw'), 'default', null, null);
-        $recorder->failed(null, new RawMessage('raw'), 'default', 'x');
+        $inserted = $recorder->sent('018f0000-0000-7000-8000-000000000000', new RawMessage('raw'), 'default', null, null);
+        self::assertNotNull($inserted);
+        self::assertNotSame('018f0000-0000-7000-8000-000000000000', $inserted, 'a new row replaces the purged one');
+        self::assertNotNull($recorder->failed(null, new RawMessage('raw'), 'default', 'x'));
 
         $now = new DateTimeImmutable();
         self::assertSame(3, $repository->countFiltered(new SentMailFilters()));

@@ -501,7 +501,12 @@ final readonly class SymfonyInvitationNotifier implements InvitationNotifier
 They never carry addresses, subject, body, DSN or provider error text. To correlate them with your domain, tag the
 message (`MailHeaders::tag($email, 'invitation')`) and keep your own mapping, or look the row up by `logId`. A delivery
 is an external fact, so the events are not held back by a transaction you may have open. A listener that throws is
-logged and never fails the send (no Messenger retry, no duplicate e-mail).
+logged and never fails the send (no Messenger retry, no duplicate e-mail). Keep personal data out of the tag.
+`logId` is null with the log off; when the log write failed it is the id of the queued row, if the message was queued.
+
+Send alerts from these listeners **asynchronously** (dispatch a Messenger message): a mail sent synchronously from a
+delivery listener is delivered and logged, but dispatches no delivery event of its own (one level only), so an alert
+about a failing transport cannot recurse through the same transport.
 
 **Services and value objects your adapters can use**
 

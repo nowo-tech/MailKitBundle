@@ -13,12 +13,13 @@ use Nowo\MailKitBundle\Mailer\DeliveryFailedException;
  *
  * Ids and labels only: never addresses, subject, body, DSN or the provider's error text. `reference` is the one of the
  * exception (also in the application log and the sent-mail log row `logId`). A listener that throws is logged and
- * never replaces the delivery failure.
+ * never replaces the delivery failure. Send alerts about failures asynchronously (Messenger): an alert sent
+ * synchronously from this listener dispatches no event of its own, so a failing transport cannot recurse.
  */
 final readonly class MailDeliveryFailedEvent
 {
     /**
-     * @param string|null $logId sent-mail log row id
+     * @param string|null $logId sent-mail log row id (null with the log off; the queued row id when the log write failed)
      * @param string|null $tag message category
      * @param string $transport transport scheme label (`smtp`, `resend+api`, `default`)
      * @param string $reference support reference of the failure

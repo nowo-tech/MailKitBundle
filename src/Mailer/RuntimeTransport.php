@@ -63,6 +63,9 @@ final class RuntimeTransport implements TransportInterface, ResetInterface
 
     private ?string $checkedError = null;
 
+    /** A delivery event is being dispatched (re-entrancy guard, audit KI-M-L1). */
+    private bool $notifying = false;
+
     /**
      * @param TransportInterface $fallback the decorated `mailer.transports`
      * @param Transport $factory `mailer.transport_factory` (every installed bridge)
@@ -140,6 +143,7 @@ final class RuntimeTransport implements TransportInterface, ResetInterface
         $this->resolvedDsn  = null;
         $this->checkedDsn   = null;
         $this->checkedError = null;
+        $this->notifying    = false;
     }
 
     /**
@@ -189,12 +193,25 @@ final class RuntimeTransport implements TransportInterface, ResetInterface
 
     /**
      * Dispatches a delivery event; a listener failure is logged (the message was already sent or already failed).
+     *
+     * A message sent synchronously from a delivery listener (an alert about a failure, through the same transport)
+     * is delivered and logged, but dispatches no event of its own: one level only, so a failing transport cannot
+     * recurse (audit KI-M-L1). Send such alerts asynchronously (Messenger) to get their events.
      */
     private function notify(MailDeliveredEvent|MailDeliveryFailedEvent $event): void
     {
         if (!$this->dispatcher instanceof EventDispatcherInterface) {
             return;
         }
+        if ($this->notifying) {
+            $this->logger?->notice('Mail delivery event not dispatched: the message was sent from a delivery listener.', [
+                'bundle' => 'NowoMailKitBundle',
+                'event'  => $event::class,
+            ]);
+
+            return;
+        }
+        $this->notifying = true;
         try {
             $this->dispatcher->dispatch($event);
         } catch (Throwable $exception) {
@@ -203,6 +220,8 @@ final class RuntimeTransport implements TransportInterface, ResetInterface
                 'event'  => $event::class,
                 'error'  => $exception::class,
             ]);
+        } finally {
+            $this->notifying = false;
         }
     }
 

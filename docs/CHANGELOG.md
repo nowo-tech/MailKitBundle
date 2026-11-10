@@ -31,8 +31,11 @@ Target 1.5.0. DDD / hexagonal P2 fixes (audit 2026-11-09).
 - `SenderPolicy` takes a `SenderProviderInterface` (a `MailSettings` still fits).
 - `SentMailRecorder::sent()` / `failed()` return the log row id (`?string`) instead of `void`.
 - `RuntimeTransport` takes two more optional constructor arguments (`?EventDispatcherInterface`, `?ClockInterface`).
-- A raw (non-MIME) message sent with the log enabled no longer reads an unset `SentMessage` Message-ID (the provider
-  message id is null for it).
+- Fixes a possible duplicate send of raw (non-MIME) messages: with the log enabled, reading the unset `SentMessage`
+  Message-ID threw an `Error` after delivery, so Messenger retried an e-mail that had already gone out. The provider
+  message id is now null for raw messages.
+- Delivery events are not re-entrant: a mail sent synchronously from a delivery listener dispatches no event of its
+  own (audit KI-M-L1); send alerts asynchronously.
 
 - Docs: new USAGE section "Using it from a DDD / hexagonal application" (where the bundle sits in a hexagonal host, the ports, events and DTOs to build an anti-corruption layer on, and the known limitations).
 

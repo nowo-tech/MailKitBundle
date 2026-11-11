@@ -7,6 +7,7 @@ namespace Nowo\MailKitBundle\Settings;
 use Closure;
 use Nowo\InstanceSettingsBundle\Repository\SettingValueRepositoryInterface;
 use Nowo\InstanceSettingsBundle\Section\SettingsSectionRegistry;
+use Nowo\MailKitBundle\EventListener\LegacyResendSettingsResetListener;
 use Symfony\Contracts\Service\ResetInterface;
 
 use function in_array;
@@ -20,8 +21,9 @@ use function trim;
  * has copied them, {@see MailSettings} keeps reading these rows so an upgraded instance keeps sending through Resend.
  *
  * The rows are read straight from the Instance Settings repository (the section is no longer registered), at most
- * once per request (memo cleared by `kernel.reset`). Values are never logged. When the application registers a section
- * named `resend` itself, nothing is read ({@see self::sectionTaken()}).
+ * once per unit of work: the memo is forgotten at every request, Messenger message and console command boundary by
+ * {@see LegacyResendSettingsResetListener} (1.7.1) and by `kernel.reset`. Values are never logged. When the
+ * application registers a section named `resend` itself, nothing is read ({@see self::sectionTaken()}).
  */
 final class LegacyResendSettings implements ResetInterface
 {
@@ -66,7 +68,7 @@ final class LegacyResendSettings implements ResetInterface
     }
 
     /**
-     * Clears the memo (`kernel.reset`).
+     * Clears the memo (`kernel.reset` and every unit-of-work boundary).
      */
     public function reset(): void
     {

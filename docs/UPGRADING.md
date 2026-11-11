@@ -22,6 +22,16 @@
 
 ## Unreleased
 
+Next patch: 1.7.1. No configuration change.
+
+- With `resend.enabled: true`, the memo of the MailKit 1.2 `resend` rows is now also forgotten at the start of each
+  main request, at `kernel.terminate`, at every Messenger message boundary and when a console command starts and
+  terminates, so a worker picks up a migration (`nowo:instance-settings:seed-from-fallbacks --section=mailer`), a purge
+  or an edit made by another worker on its next unit of work. One extra read of the `resend` rows per unit of work
+  while they are still stored; none once they are gone.
+- Hosts that disable or bypass the services resetter must also clear their own entity managers at every boundary
+  (see `docs/FRANKENPHP-WORKER-AUDIT.md`, "Host rule").
+
 ## To 1.7.0
 
 From **1.6.0**:

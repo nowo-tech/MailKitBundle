@@ -3,7 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
-  - [To 1.6.0](#to-160)
+- [To 1.6.0](#to-160)
 - [To 1.5.0](#to-150)
   - [To 1.5.0](#to-150-1)
 - [To 1.4.0](#to-140)
@@ -22,7 +22,7 @@
 
 ## Unreleased
 
-### To 1.6.0
+## To 1.6.0
 
 Target **1.6.0**, from **1.5.0**: `composer update nowo-tech/mail-kit-bundle`. **Standard hosts: nothing to change**
 (Instance Settings registered → same services, same defaults).

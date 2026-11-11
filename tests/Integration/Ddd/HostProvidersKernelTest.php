@@ -13,6 +13,7 @@ use Nowo\MailKitBundle\Entity\SentMail;
 use Nowo\MailKitBundle\EventListener\SettingsChangedListener;
 use Nowo\MailKitBundle\Log\NullSentMailErasure;
 use Nowo\MailKitBundle\Log\SentMailErasureInterface;
+use Nowo\MailKitBundle\Log\SentMailLogTableMissingException;
 use Nowo\MailKitBundle\Log\SentMailRecorder;
 use Nowo\MailKitBundle\Readiness\OutboundMailReadinessInterface;
 use Nowo\MailKitBundle\Settings\MailerSettingsSection;
@@ -25,6 +26,8 @@ use Nowo\MailKitBundle\Tests\Support\RequestTenantSenderProvider;
 use Nowo\MailKitBundle\Tests\Support\SendMailController;
 use Nowo\MailKitBundle\Tests\Support\StaticDsnProvider;
 use Nowo\MailKitBundle\Tests\Support\StaticSenderProvider;
+use Symfony\Bundle\FrameworkBundle\Console\Application;
+use Symfony\Component\Console\Tester\ApplicationTester;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\HttpKernel;
@@ -166,6 +169,66 @@ final class HostProvidersKernelTest extends KernelTestCase
         $erasure = $this->service($kernel, SentMailErasureInterface::class);
         self::assertSame(['deleted' => 0, 'redacted' => 0], $erasure->forgetAddress('victim@example.net'));
         self::assertSame(0, $erasure->purgeBefore(new DateTimeImmutable('+1 day')));
+    }
+
+    /**
+     * LL-MK-L3: with the entities mapped, a missing log table never reads as a successful erasure.
+     */
+    public function testMissingLogTablesFailClearlyWhenTheEntitiesAreMapped(): void
+    {
+        $kernel     = $this->bootKernel();
+        $connection = $this->connection($kernel);
+        $connection->executeStatement('DROP TABLE mail_kit_sent_mail_body');
+        $connection->executeStatement('DROP TABLE mail_kit_sent_mail');
+        $erasure = $this->service($kernel, SentMailErasureInterface::class);
+
+        try {
+            $erasure->forgetAddress('victim@example.net');
+            self::fail('A missing log table must not read as success.');
+        } catch (SentMailLogTableMissingException $missing) {
+            self::assertSame(['mail_kit_sent_mail', 'mail_kit_sent_mail_body'], $missing->tables);
+            self::assertStringContainsString('table_prefix', $missing->getMessage());
+        }
+        try {
+            $erasure->purgeBefore(new DateTimeImmutable('+1 day'));
+            self::fail('A missing log table must not read as success.');
+        } catch (SentMailLogTableMissingException $missing) {
+            self::assertSame(0, $missing->deleted);
+        }
+
+        $application = new Application($kernel);
+        $application->setAutoExit(false);
+        $tester = new ApplicationTester($application);
+        self::assertNotSame(0, $tester->run(['command' => 'nowo:mail-kit:log:forget', 'email' => 'victim@example.net']));
+        self::assertStringContainsString('do not exist', $tester->getDisplay(true));
+    }
+
+    public function testAMissingBodyTableStillErasesTheMainRowsThenFails(): void
+    {
+        $kernel   = $this->bootKernel();
+        $recorder = $this->service($kernel, SentMailRecorder::class);
+        foreach (['victim@example.net', 'other@example.net', 'third@example.net'] as $to) {
+            $recorder->sent(null, (new Email())->from('ops@example.com')->to($to)->subject('Hi')->text('Hi'), 'memory', null, 10);
+        }
+        $connection = $this->connection($kernel);
+        $connection->executeStatement('DROP TABLE mail_kit_sent_mail_body');
+
+        try {
+            $recorder->forgetAddress('victim@example.net');
+            self::fail('A missing body table must be reported.');
+        } catch (SentMailLogTableMissingException $missing) {
+            self::assertSame(['mail_kit_sent_mail_body'], $missing->tables);
+            self::assertSame(1, $missing->deleted);
+        }
+        self::assertSame(2, (int) $connection->fetchOne('SELECT COUNT(*) FROM mail_kit_sent_mail'));
+
+        try {
+            $recorder->purgeBefore(new DateTimeImmutable('+1 day'), 1);
+            self::fail('A missing body table must be reported.');
+        } catch (SentMailLogTableMissingException $missing) {
+            self::assertSame(2, $missing->deleted);
+        }
+        self::assertSame(0, (int) $connection->fetchOne('SELECT COUNT(*) FROM mail_kit_sent_mail'));
     }
 
     /**

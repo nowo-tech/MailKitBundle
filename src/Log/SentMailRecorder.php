@@ -85,6 +85,8 @@ final readonly class SentMailRecorder implements SentMailErasureInterface
      * @param string|null $entityManager entity manager name (null = default)
      * @param string $tablePrefix `doctrine.table_prefix`
      * @param bool $storeBodies `log.store_bodies`
+     * @param bool $optionalTables true with `log.map_entities: false`: missing log tables mean nothing is stored;
+     *                             otherwise erasure and retention fail with {@see SentMailLogTableMissingException}
      */
     public function __construct(
         private ManagerRegistry $doctrine,
@@ -93,6 +95,7 @@ final readonly class SentMailRecorder implements SentMailErasureInterface
         private bool $storeBodies = false,
         private ?LoggerInterface $logger = null,
         private ?ClockInterface $clock = null,
+        private bool $optionalTables = false,
     ) {
     }
 
@@ -134,14 +137,17 @@ final readonly class SentMailRecorder implements SentMailErasureInterface
     }
 
     /**
-     * Deletes rows queued before the date in keyset batches; returns the number of deleted rows (0 when the log table
-     * does not exist).
+     * Deletes rows queued before the date in keyset batches; returns the number of deleted rows.
+     *
+     * @throws SentMailLogTableMissingException when a log table is missing and the entities are mapped (rows of the
+     *                                          main table are deleted first when only the body table is missing)
      */
     public function purgeBefore(DateTimeImmutable $before, int $batch = 1000): int
     {
-        $batch      = max(1, $batch);
-        $connection = $this->connection();
-        if (!$this->hasTables($connection)) {
+        $batch         = max(1, $batch);
+        $connection    = $this->connection();
+        [$main, $body] = $this->tables($connection);
+        if (!$main) {
             return 0;
         }
         $deleted = 0;
@@ -151,8 +157,9 @@ final readonly class SentMailRecorder implements SentMailErasureInterface
                 [$before],
                 [Types::DATETIME_IMMUTABLE],
             );
-            $deleted += $this->deleteIds($connection, $ids);
+            $deleted += $this->deleteIds($connection, $ids, $body);
         } while (count($ids) === $batch);
+        $this->assertBodyTable($body, $deleted, 0);
 
         return $deleted;
     }
@@ -169,15 +176,22 @@ final readonly class SentMailRecorder implements SentMailErasureInterface
      * Right to erasure (GDPR art. 17) for one address: deletes every row (and body) the address sent or received
      * (to, cc, bcc — normalised index, no JSON matching) and masks the address in the subjects and stored bodies of the
      * remaining rows. Works the same on SQLite, MySQL / MariaDB and PostgreSQL. Also with `log.enabled: false` (1.6):
-     * rows written while the log was on stay erasable. Nothing to do when the log tables do not exist.
+     * rows written while the log was on stay erasable.
+     *
+     * @throws SentMailLogTableMissingException when a log table is missing and the entities are mapped (rows of the
+     *                                          main table are erased first when only the body table is missing)
      *
      * @return array{deleted: int, redacted: int}
      */
     public function forgetAddress(string $email): array
     {
-        $forms      = self::forms($email);
-        $connection = $this->connection();
-        if ($forms === [] || !$this->hasTables($connection)) {
+        $forms = self::forms($email);
+        if ($forms === []) {
+            return ['deleted' => 0, 'redacted' => 0];
+        }
+        $connection    = $this->connection();
+        [$main, $body] = $this->tables($connection);
+        if (!$main) {
             return ['deleted' => 0, 'redacted' => 0];
         }
         $where  = [];
@@ -188,7 +202,7 @@ final readonly class SentMailRecorder implements SentMailErasureInterface
         }
         $where[] = 'sender IN (' . implode(', ', array_fill(0, count($forms), '?')) . ')';
         $ids     = $connection->fetchFirstColumn('SELECT id FROM ' . $this->table() . ' WHERE ' . implode(' OR ', $where), [...$params, ...$forms]);
-        $deleted = $this->deleteIds($connection, $ids);
+        $deleted = $this->deleteIds($connection, $ids, $body);
 
         $redacted = 0;
         foreach ($forms as $form) {
@@ -196,13 +210,16 @@ final readonly class SentMailRecorder implements SentMailErasureInterface
             foreach ($connection->fetchAllAssociative('SELECT id, subject FROM ' . $this->table() . " WHERE LOWER(subject) LIKE ? ESCAPE '!'", [$pattern]) as $row) {
                 $redacted += (int) $connection->update($this->table(), ['subject' => $this->mask((string) $row['subject'], $forms)], ['id' => $row['id']]);
             }
-            foreach ($connection->fetchAllAssociative('SELECT id, html_body, text_body FROM ' . $this->bodyTable() . " WHERE LOWER(html_body) LIKE ? ESCAPE '!' OR LOWER(text_body) LIKE ? ESCAPE '!'", [$pattern, $pattern]) as $row) {
+            $bodies = $body ? $connection->fetchAllAssociative('SELECT id, html_body, text_body FROM ' . $this->bodyTable() . " WHERE LOWER(html_body) LIKE ? ESCAPE '!' OR LOWER(text_body) LIKE ? ESCAPE '!'", [$pattern, $pattern]) : [];
+            foreach ($bodies as $row) {
                 $redacted += (int) $connection->update($this->bodyTable(), [
                     'html_body' => is_string($row['html_body']) ? $this->mask($row['html_body'], $forms) : null,
                     'text_body' => is_string($row['text_body']) ? $this->mask($row['text_body'], $forms) : null,
                 ], ['id' => $row['id']]);
             }
         }
+
+        $this->assertBodyTable($body, $deleted, $redacted);
 
         return ['deleted' => $deleted, 'redacted' => $redacted];
     }
@@ -299,12 +316,14 @@ final readonly class SentMailRecorder implements SentMailErasureInterface
     /**
      * @param list<mixed> $ids
      */
-    private function deleteIds(Connection $connection, array $ids): int
+    private function deleteIds(Connection $connection, array $ids, bool $bodyTable = true): int
     {
         if ($ids === []) {
             return 0;
         }
-        $connection->executeStatement('DELETE FROM ' . $this->bodyTable() . ' WHERE id IN (?)', [$ids], [ArrayParameterType::STRING]);
+        if ($bodyTable) {
+            $connection->executeStatement('DELETE FROM ' . $this->bodyTable() . ' WHERE id IN (?)', [$ids], [ArrayParameterType::STRING]);
+        }
 
         return (int) $connection->executeStatement('DELETE FROM ' . $this->table() . ' WHERE id IN (?)', [$ids], [ArrayParameterType::STRING]);
     }
@@ -432,11 +451,36 @@ final readonly class SentMailRecorder implements SentMailErasureInterface
     }
 
     /**
-     * Whether both log tables exist (they may not on a host that never created them, e.g. `log.map_entities: false`).
+     * Which log tables exist, checked one by one: `[main, body]`. With the entities mapped a missing main table fails
+     * here (nothing can be erased); with `log.map_entities: false` missing tables mean nothing is stored.
+     *
+     * @throws SentMailLogTableMissingException
+     *
+     * @return array{bool, bool}
      */
-    private function hasTables(Connection $connection): bool
+    private function tables(Connection $connection): array
     {
-        return $connection->createSchemaManager()->tablesExist([$this->table(), $this->bodyTable()]);
+        $schema = $connection->createSchemaManager();
+        $main   = $schema->tablesExist([$this->table()]);
+        $body   = $schema->tablesExist([$this->bodyTable()]);
+        if (!$main && !$this->optionalTables) {
+            throw new SentMailLogTableMissingException($body ? [$this->table()] : [$this->table(), $this->bodyTable()]);
+        }
+
+        return [$main, $body];
+    }
+
+    /**
+     * After the main-table rows were handled: a missing body table fails (stored bodies may hold personal data),
+     * except with `log.map_entities: false`.
+     *
+     * @throws SentMailLogTableMissingException
+     */
+    private function assertBodyTable(bool $body, int $deleted, int $redacted): void
+    {
+        if (!$body && !$this->optionalTables) {
+            throw new SentMailLogTableMissingException([$this->bodyTable()], $deleted, $redacted);
+        }
     }
 
     private function connection(): Connection

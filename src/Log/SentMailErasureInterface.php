@@ -18,12 +18,16 @@ interface SentMailErasureInterface
     /**
      * Deletes every row (and body) the address sent or received and masks it in the remaining subjects and bodies.
      *
+     * @throws SentMailLogTableMissingException when a log table is missing while the entities are mapped
+     *
      * @return array{deleted: int, redacted: int}
      */
     public function forgetAddress(string $email): array;
 
     /**
      * Deletes rows queued before the date in keyset batches; returns the number of deleted rows.
+     *
+     * @throws SentMailLogTableMissingException when a log table is missing while the entities are mapped
      */
     public function purgeBefore(DateTimeImmutable $before, int $batch = 1000): int;
 }

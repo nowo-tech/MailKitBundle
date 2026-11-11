@@ -542,7 +542,9 @@ about a failing transport cannot recurse through the same transport.
   automatically through `OutboundMailReadyCheckerInterface`.
 - `SentMailErasureInterface::forgetAddress($email)` (`['deleted' => n, 'redacted' => n]`) and `purgeBefore()` (1.6)
   from your account-deletion / retention use case; always registered. With Doctrine it really erases, also with
-  `log.enabled: false` (rows from when the log was on); it is a no-op only without Doctrine (nothing can be stored).
+  `log.enabled: false` (rows from when the log was on); it is a no-op only without Doctrine (nothing can be stored). A missing log table (wrong `doctrine.table_prefix` /
+  entity manager, unmigrated schema) throws `SentMailLogTableMissingException` instead of reporting zero rows, except
+  with `log.map_entities: false`.
 - `RuntimeDsn`, `MailStatus`, `TestMailResult`, `SentMailFilters` are immutable value objects.
 
 **Persistence**

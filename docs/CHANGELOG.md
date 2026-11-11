@@ -38,7 +38,11 @@ and rule 1 (ports for the services used as API).
 - `Log\SentMailErasureInterface` (`forgetAddress()`, `purgeBefore()`), always registered: `SentMailRecorder` whenever
   Doctrine is registered — also with `log.enabled: false`, so rows written while the log was on are really erased and
   purged (and `nowo:mail-kit:log:forget` / `log:purge` stay available) — and `Log\NullSentMailErasure` (no-op) only on
-  a host without Doctrine, where nothing can be stored. The recorder returns zero when the log tables do not exist.
+  a host without Doctrine, where nothing can be stored. A missing log table never
+  reads as success: with the entities mapped, erasure and retention throw `Log\SentMailLogTableMissingException`
+  (the forget / purge commands exit non-zero); when only the body table is missing the main-table rows are erased
+  first and the exception carries the counts. Only with `log.map_entities: false` do missing tables mean "nothing
+  stored" (zero).
 - `log.map_entities` (default `true`): `false` (only with `log.enabled: false`) keeps the `SentMail` / `SentMailBody`
   mapping out of your entity manager, for XML-mapping-only hosts. Deprecation notice: in 2.0 the default follows
   `log.enabled`.

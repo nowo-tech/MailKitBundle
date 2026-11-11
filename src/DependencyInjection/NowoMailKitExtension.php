@@ -192,7 +192,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $config = $this->processConfiguration(new Configuration(), $configs);
         $this->assertLiteralBooleans($config);
 
-        /** @var array{mailer: array{decorate: bool, dsn_provider: string|null, sender_provider: string|null, fallback_counts_as_ready: bool}, dsn: array{allowed_schemes: list<string>, allowed_hosts: list<string>, allow_private_hosts: bool, allow_insecure_tls: bool, resolve_dns: bool, dns_timeout: float}, sender: array{default_from: string|null, default_from_name: string|null, require_public_domain: bool}, resend: array{enabled: bool, api_timeout: float}, bootstrap: array{mailer_dsn: string|null, resend_api_key: string|null}, test_email: array{rate_limit: int, rate_interval: string}, log: array{enabled: bool, store_bodies: bool, retention_days: int, purge_batch_size: int}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>, page_size: int, export: array{enabled: bool, max_rows: int, access_roles: list<string>, include_bodies: bool, body_batch_bytes: int}}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}, brand: array{mode: string, name: string|null, colors: array<string, string>, max_image_bytes: int, max_total_bytes: int, max_image_side: int}} $config */
+        /** @var array{mailer: array{decorate: bool, dsn_provider: string|null, sender_provider: string|null, fallback_counts_as_ready: bool}, dsn: array{allowed_schemes: list<string>, allowed_hosts: list<string>, allow_private_hosts: bool, allow_insecure_tls: bool, resolve_dns: bool, dns_timeout: float}, sender: array{default_from: string|null, default_from_name: string|null, require_public_domain: bool}, resend: array{enabled: bool, api_timeout: float}, bootstrap: array{mailer_dsn: string|null, resend_api_key: string|null}, test_email: array{rate_limit: int, rate_interval: string}, log: array{enabled: bool, map_entities: bool, store_bodies: bool, retention_days: int, purge_batch_size: int}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>, page_size: int, export: array{enabled: bool, max_rows: int, access_roles: list<string>, include_bodies: bool, body_batch_bytes: int}}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}, brand: array{mode: string, name: string|null, colors: array<string, string>, max_image_bytes: int, max_total_bytes: int, max_image_side: int}} $config */
         $webUi = $config['web_ui'];
 
         $settings = $this->hasBundle($container, 'NowoInstanceSettingsBundle') || $container->hasExtension('nowo_instance_settings');
@@ -370,7 +370,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
      * `log.enabled: false` it records nothing but still erases and purges the rows written while the log was on (1.6,
      * LL-MK-M1). Only without Doctrine is the erasure port a no-op.
      *
-     * @param array{enabled: bool, store_bodies: bool, retention_days: int, purge_batch_size: int} $log
+     * @param array{enabled: bool, map_entities: bool, store_bodies: bool, retention_days: int, purge_batch_size: int} $log
      * @param array{table_prefix: string, entity_manager: string|null} $doctrine
      * @param bool $hasDoctrine DoctrineBundle registered
      */
@@ -394,6 +394,8 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             $log['store_bodies'],
             new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE),
             new Reference('clock', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            // LL-MK-L3: missing tables are "nothing stored" only when the host opted out of the mapping.
+            !$log['map_entities'],
         ]))->setPublic(true));
         if ($log['enabled']) {
             $container->setDefinition(SentMailRepository::class, (new Definition(SentMailRepository::class, [

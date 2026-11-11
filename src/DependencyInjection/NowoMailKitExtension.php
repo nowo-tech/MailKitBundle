@@ -33,9 +33,15 @@ use Nowo\MailKitBundle\EventListener\SettingsChangedListener;
 use Nowo\MailKitBundle\Form\LegacyResendSettingsTypeExtension;
 use Nowo\MailKitBundle\Form\SentMailFilterType;
 use Nowo\MailKitBundle\Integration\AuthKit\MailKitOutboundMailReadyChecker;
+use Nowo\MailKitBundle\Integration\UserKit\EmailsReceivedPersonalDataEraser;
+use Nowo\MailKitBundle\Integration\UserKit\EmailsReceivedPersonalDataExportProvider;
+use Nowo\MailKitBundle\Log\DefaultSentMailPersonalDataSubjectResolver;
 use Nowo\MailKitBundle\Log\NullSentMailErasure;
+use Nowo\MailKitBundle\Log\NullSentMailPersonalDataExporter;
 use Nowo\MailKitBundle\Log\SentMailCsvExporter;
 use Nowo\MailKitBundle\Log\SentMailErasureInterface;
+use Nowo\MailKitBundle\Log\SentMailPersonalDataExporterInterface;
+use Nowo\MailKitBundle\Log\SentMailPersonalDataSubjectResolverInterface;
 use Nowo\MailKitBundle\Log\SentMailRecorder;
 use Nowo\MailKitBundle\Log\SentMailRepository;
 use Nowo\MailKitBundle\Mailer\MailKitMailer;
@@ -65,6 +71,7 @@ use Nowo\MailKitBundle\Validator\DeliverableSenderValidator;
 use Nowo\MailKitBundle\Validator\MailerDsnConstraintValidator;
 use Nowo\MailKitBundle\Validator\ResendApiKeyAcceptedValidator;
 use Nowo\OutboundUrlGuardBundle\Dns\HostnameDnsLookup;
+use Nowo\UserKitBundle\PersonalData\PersonalDataEraserInterface;
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\DependencyInjection\Argument\ServiceClosureArgument;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
@@ -192,7 +199,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $config = $this->processConfiguration(new Configuration(), $configs);
         $this->assertLiteralBooleans($config);
 
-        /** @var array{mailer: array{decorate: bool, dsn_provider: string|null, sender_provider: string|null, fallback_counts_as_ready: bool}, dsn: array{allowed_schemes: list<string>, allowed_hosts: list<string>, allow_private_hosts: bool, allow_insecure_tls: bool, resolve_dns: bool, dns_timeout: float}, sender: array{default_from: string|null, default_from_name: string|null, require_public_domain: bool}, resend: array{enabled: bool, api_timeout: float}, bootstrap: array{mailer_dsn: string|null, resend_api_key: string|null}, test_email: array{rate_limit: int, rate_interval: string}, log: array{enabled: bool, map_entities: bool, store_bodies: bool, retention_days: int, purge_batch_size: int}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>, page_size: int, export: array{enabled: bool, max_rows: int, access_roles: list<string>, include_bodies: bool, body_batch_bytes: int}}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}, brand: array{mode: string, name: string|null, colors: array<string, string>, max_image_bytes: int, max_total_bytes: int, max_image_side: int}} $config */
+        /** @var array{mailer: array{decorate: bool, dsn_provider: string|null, sender_provider: string|null, fallback_counts_as_ready: bool}, dsn: array{allowed_schemes: list<string>, allowed_hosts: list<string>, allow_private_hosts: bool, allow_insecure_tls: bool, resolve_dns: bool, dns_timeout: float}, sender: array{default_from: string|null, default_from_name: string|null, require_public_domain: bool}, resend: array{enabled: bool, api_timeout: float}, bootstrap: array{mailer_dsn: string|null, resend_api_key: string|null}, test_email: array{rate_limit: int, rate_interval: string}, log: array{enabled: bool, map_entities: bool, store_bodies: bool, retention_days: int, purge_batch_size: int}, personal_data: array{enabled: bool, subject_resolver: string|null}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>, page_size: int, export: array{enabled: bool, max_rows: int, access_roles: list<string>, include_bodies: bool, body_batch_bytes: int}}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}, brand: array{mode: string, name: string|null, colors: array<string, string>, max_image_bytes: int, max_total_bytes: int, max_image_side: int}} $config */
         $webUi = $config['web_ui'];
 
         $settings = $this->hasBundle($container, 'NowoInstanceSettingsBundle') || $container->hasExtension('nowo_instance_settings');
@@ -216,7 +223,9 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             $this->registerSettings($container, $config);
         }
         $this->registerValidation($container, $config['dsn']);
-        $this->registerLog($container, $config['log'], $config['doctrine'], $this->hasBundle($container, 'DoctrineBundle') || $container->hasExtension('doctrine'));
+        $hasDoctrine = $this->hasBundle($container, 'DoctrineBundle') || $container->hasExtension('doctrine');
+        $this->registerLog($container, $config['log'], $config['doctrine'], $hasDoctrine);
+        $this->registerPersonalData($container, $config['personal_data'], ($config['log']['enabled'] || $hasDoctrine) && $config['log']['map_entities']);
         $this->registerMailer($container, $config, $settings);
         $this->registerTestMail($container, $config, $settings);
         $this->registerWebUi($container, $config, $settings);
@@ -382,11 +391,14 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         if (!$log['enabled'] && !$hasDoctrine) {
             $container->setDefinition(NullSentMailErasure::class, new Definition(NullSentMailErasure::class));
             $container->setAlias(SentMailErasureInterface::class, NullSentMailErasure::class)->setPublic(true);
+            $container->setDefinition(NullSentMailPersonalDataExporter::class, new Definition(NullSentMailPersonalDataExporter::class));
+            $container->setAlias(SentMailPersonalDataExporterInterface::class, NullSentMailPersonalDataExporter::class)->setPublic(true);
 
             return;
         }
 
         $container->setAlias(SentMailErasureInterface::class, SentMailRecorder::class)->setPublic(true);
+        $container->setAlias(SentMailPersonalDataExporterInterface::class, SentMailRecorder::class)->setPublic(true);
         $container->setDefinition(SentMailRecorder::class, (new Definition(SentMailRecorder::class, [
             new Reference('doctrine'),
             $doctrine['entity_manager'],
@@ -396,6 +408,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             new Reference('clock', ContainerInterface::NULL_ON_INVALID_REFERENCE),
             // LL-MK-L3: missing tables are "nothing stored" only when the host opted out of the mapping.
             !$log['map_entities'],
+            new Reference('event_dispatcher', ContainerInterface::NULL_ON_INVALID_REFERENCE),
         ]))->setPublic(true));
         if ($log['enabled']) {
             $container->setDefinition(SentMailRepository::class, (new Definition(SentMailRepository::class, [
@@ -415,6 +428,32 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             new Reference(SentMailRecorder::class),
             new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE),
         ]))->addTag('console.command', ['command' => ForgetRecipientCommand::NAME]));
+    }
+
+    /**
+     * GDPR ports (1.7): the subject resolver SPI always; the UserKit eraser and export provider (`emails_received`) only
+     * with UserKit installed, the log entities mapped (the recorder registered) and `personal_data.enabled`.
+     *
+     * @param array{enabled: bool, subject_resolver: string|null} $personalData
+     * @param bool $logMapped the recorder is registered and the log entities are mapped
+     */
+    private function registerPersonalData(ContainerBuilder $container, array $personalData, bool $logMapped): void
+    {
+        $container->setDefinition(DefaultSentMailPersonalDataSubjectResolver::class, new Definition(DefaultSentMailPersonalDataSubjectResolver::class));
+        $resolver = is_string($personalData['subject_resolver']) && $personalData['subject_resolver'] !== '' ? $personalData['subject_resolver'] : DefaultSentMailPersonalDataSubjectResolver::class;
+        $container->setAlias(SentMailPersonalDataSubjectResolverInterface::class, $resolver)->setPublic(true);
+
+        if (!$personalData['enabled'] || !$logMapped || !interface_exists(PersonalDataEraserInterface::class)) {
+            return;
+        }
+        $container->setDefinition(EmailsReceivedPersonalDataEraser::class, (new Definition(EmailsReceivedPersonalDataEraser::class, [
+            new Reference(SentMailErasureInterface::class),
+            new Reference(SentMailPersonalDataSubjectResolverInterface::class),
+        ]))->addTag('nowo_user_kit.personal_data.eraser', ['priority' => EmailsReceivedPersonalDataEraser::PRIORITY]));
+        $container->setDefinition(EmailsReceivedPersonalDataExportProvider::class, (new Definition(EmailsReceivedPersonalDataExportProvider::class, [
+            new Reference(SentMailPersonalDataExporterInterface::class),
+            new Reference(SentMailPersonalDataSubjectResolverInterface::class),
+        ]))->addTag('nowo_user_kit.personal_data.export_provider', ['priority' => EmailsReceivedPersonalDataExportProvider::PRIORITY]));
     }
 
     /**
@@ -675,6 +714,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             'log.enabled'                    => $config['log']['enabled'] ?? null,
             'log.map_entities'               => $config['log']['map_entities'] ?? null,
             'log.store_bodies'               => $config['log']['store_bodies'] ?? null,
+            'personal_data.enabled'          => $config['personal_data']['enabled'] ?? null,
             'web_ui.enabled'                 => $config['web_ui']['enabled'] ?? null,
             'web_ui.export.enabled'          => $config['web_ui']['export']['enabled'] ?? null,
             'web_ui.export.include_bodies'   => $config['web_ui']['export']['include_bodies'] ?? null,

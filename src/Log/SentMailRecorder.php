@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\MailKitBundle\Log;
 
 use DateTimeImmutable;
+use DateTimeInterface;
 use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Types\Types;
@@ -14,8 +15,10 @@ use LogicException;
 use Normalizer;
 use Nowo\MailKitBundle\Entity\SentMail;
 use Nowo\MailKitBundle\Entity\SentMailBody;
+use Nowo\MailKitBundle\Event\SentMailPersonalDataErasedEvent;
 use Nowo\MailKitBundle\Mailer\MailHeaders;
 use Psr\Clock\ClockInterface;
+use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Clock\NativeClock;
 use Symfony\Component\Mime\Address;
@@ -29,15 +32,18 @@ use function array_fill;
 use function array_filter;
 use function array_keys;
 use function array_map;
+use function array_chunk;
 use function array_merge;
 use function array_unique;
 use function array_values;
 use function base64_encode;
 use function count;
+use function explode;
 use function htmlspecialchars;
 use function idn_to_ascii;
 use function idn_to_utf8;
 use function implode;
+use function in_array;
 use function is_string;
 use function json_encode;
 use function max;
@@ -70,7 +76,7 @@ use const JSON_UNESCAPED_UNICODE;
  * Privacy: envelope data only by default (subject, sender, recipients); bodies only with `log.store_bodies`, with the
  * {@see MailHeaders::REDACT} values masked. Errors are scrubbed of credentials ({@see ErrorScrubber}).
  */
-final readonly class SentMailRecorder implements SentMailErasureInterface
+final readonly class SentMailRecorder implements SentMailErasureInterface, SentMailPersonalDataExporterInterface
 {
     /** Separator of the recipient index (unit separator: refused in addresses). */
     public const SEPARATOR = "\x1F";
@@ -81,12 +87,16 @@ final readonly class SentMailRecorder implements SentMailErasureInterface
     /** Cap of one stored body, in bytes. */
     public const BODY_MAX = 1_048_576;
 
+    /** Rows read or deleted per statement by the export and the erasure of one address (1.7). */
+    public const PERSONAL_DATA_BATCH = 500;
+
     /**
      * @param string|null $entityManager entity manager name (null = default)
      * @param string $tablePrefix `doctrine.table_prefix`
      * @param bool $storeBodies `log.store_bodies`
      * @param bool $optionalTables true with `log.map_entities: false`: missing log tables mean nothing is stored;
      *                             otherwise erasure and retention fail with {@see SentMailLogTableMissingException}
+     * @param EventDispatcherInterface|null $dispatcher receives {@see SentMailPersonalDataErasedEvent} (1.7)
      */
     public function __construct(
         private ManagerRegistry $doctrine,
@@ -96,6 +106,7 @@ final readonly class SentMailRecorder implements SentMailErasureInterface
         private ?LoggerInterface $logger = null,
         private ?ClockInterface $clock = null,
         private bool $optionalTables = false,
+        private ?EventDispatcherInterface $dispatcher = null,
     ) {
     }
 
@@ -176,7 +187,13 @@ final readonly class SentMailRecorder implements SentMailErasureInterface
      * Right to erasure (GDPR art. 17) for one address: deletes every row (and body) the address sent or received
      * (to, cc, bcc — normalised index, no JSON matching) and masks the address in the subjects and stored bodies of the
      * remaining rows. Works the same on SQLite, MySQL / MariaDB and PostgreSQL. Also with `log.enabled: false` (1.6):
-     * rows written while the log was on stay erasable.
+     * rows written while the log was on stay erasable. Idempotent: a second run returns zero counts.
+     *
+     * 1.7: exact match — SQL only pre-filters, every row is re-checked in PHP against the normalised address (an
+     * accent-insensitive MySQL collation must not erase `josé@` for `jose@`), then deleted by id in batches of
+     * {@see self::PERSONAL_DATA_BATCH}. Transactional: without an open transaction on the log connection the erasure
+     * runs in its own and {@see SentMailPersonalDataErasedEvent} is dispatched after the commit; inside the caller's
+     * transaction it joins it and dispatches nothing (the returned counts are the outcome).
      *
      * @throws SentMailLogTableMissingException when a log table is missing and the entities are mapped (rows of the
      *                                          main table are erased first when only the body table is missing)
@@ -194,34 +211,51 @@ final readonly class SentMailRecorder implements SentMailErasureInterface
         if (!$main) {
             return ['deleted' => 0, 'redacted' => 0];
         }
-        $where  = [];
-        $params = [];
-        foreach ($forms as $form) {
-            $where[]  = "recipient_index LIKE ? ESCAPE '!'";
-            $params[] = '%' . self::likeEscape(self::SEPARATOR . $form . self::SEPARATOR) . '%';
+
+        if ($connection->isTransactionActive()) {
+            // The caller's transaction may still roll back: no event, the counts are the outcome.
+            $result = $this->erase($connection, $forms, $body);
+        } else {
+            // @igor-ignore - Closure runs synchronously inside transactional(); it is not stored on the service.
+            $result = $connection->transactional(fn (Connection $connection): array => $this->erase($connection, $forms, $body));
+            $this->dispatcher?->dispatch(new SentMailPersonalDataErasedEvent($forms[0], $result['deleted'], $result['redacted']));
         }
-        $where[] = 'sender IN (' . implode(', ', array_fill(0, count($forms), '?')) . ')';
-        $ids     = $connection->fetchFirstColumn('SELECT id FROM ' . $this->table() . ' WHERE ' . implode(' OR ', $where), [...$params, ...$forms]);
-        $deleted = $this->deleteIds($connection, $ids, $body);
+        $this->assertBodyTable($body, $result['deleted'], $result['redacted']);
 
-        $redacted = 0;
-        foreach ($forms as $form) {
-            $pattern = '%' . self::likeEscape($form) . '%';
-            foreach ($connection->fetchAllAssociative('SELECT id, subject FROM ' . $this->table() . " WHERE LOWER(subject) LIKE ? ESCAPE '!'", [$pattern]) as $row) {
-                $redacted += (int) $connection->update($this->table(), ['subject' => $this->mask((string) $row['subject'], $forms)], ['id' => $row['id']]);
-            }
-            $bodies = $body ? $connection->fetchAllAssociative('SELECT id, html_body, text_body FROM ' . $this->bodyTable() . " WHERE LOWER(html_body) LIKE ? ESCAPE '!' OR LOWER(text_body) LIKE ? ESCAPE '!'", [$pattern, $pattern]) : [];
-            foreach ($bodies as $row) {
-                $redacted += (int) $connection->update($this->bodyTable(), [
-                    'html_body' => is_string($row['html_body']) ? $this->mask($row['html_body'], $forms) : null,
-                    'text_body' => is_string($row['text_body']) ? $this->mask($row['text_body'], $forms) : null,
-                ], ['id' => $row['id']]);
-            }
+        return $result;
+    }
+
+    /**
+     * Rows the address received (to, cc, bcc) or sent (1.7, GDPR art. 15 / 20): envelope only, exact match (SQL
+     * pre-filter, PHP re-check), read in id batches of {@see self::PERSONAL_DATA_BATCH}.
+     *
+     * @throws SentMailLogTableMissingException when the log table is missing and the entities are mapped
+     *
+     * @return list<array{id: string, roles: list<'recipient'|'sender'>, status: string, template: string|null, subject: string, queued_at: string|null, sent_at: string|null, failed_at: string|null}>
+     */
+    public function export(SentMailPersonalDataSubject $subject): array
+    {
+        $connection = $this->connection();
+        [$main]     = $this->tables($connection);
+        if (!$main) {
+            return [];
         }
 
-        $this->assertBodyTable($body, $deleted, $redacted);
+        $rows = [];
+        foreach ($this->rowsOf($connection, $subject->forms(), ', status, tag, subject, queued_at, sent_at, failed_at') as [$row, $roles]) {
+            $rows[] = [
+                'id'        => (string) $row['id'],
+                'roles'     => $roles,
+                'status'    => (string) $row['status'],
+                'template'  => is_string($row['tag']) ? $row['tag'] : null,
+                'subject'   => (string) $row['subject'],
+                'queued_at' => $this->atom($connection, $row['queued_at']),
+                'sent_at'   => $this->atom($connection, $row['sent_at']),
+                'failed_at' => $this->atom($connection, $row['failed_at']),
+            ];
+        }
 
-        return ['deleted' => $deleted, 'redacted' => $redacted];
+        return $rows;
     }
 
     /**
@@ -311,6 +345,117 @@ final readonly class SentMailRecorder implements SentMailErasureInterface
     public static function likeEscape(string $value): string
     {
         return str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $value);
+    }
+
+    /**
+     * Deletes the rows of the address and masks it elsewhere (inside the transaction of {@see self::forgetAddress()}).
+     *
+     * @param list<string> $forms
+     *
+     * @return array{deleted: int, redacted: int}
+     */
+    private function erase(Connection $connection, array $forms, bool $body): array
+    {
+        $ids = [];
+        foreach ($this->rowsOf($connection, $forms) as [$row]) {
+            $ids[] = (string) $row['id'];
+        }
+        $deleted = 0;
+        foreach (array_chunk($ids, self::PERSONAL_DATA_BATCH) as $batch) {
+            $deleted += $this->deleteIds($connection, $batch, $body);
+        }
+
+        $redacted = 0;
+        foreach ($forms as $form) {
+            $pattern = '%' . self::likeEscape($form) . '%';
+            foreach ($connection->fetchAllAssociative('SELECT id, subject FROM ' . $this->table() . " WHERE LOWER(subject) LIKE ? ESCAPE '!'", [$pattern]) as $row) {
+                $masked = $this->mask((string) $row['subject'], $forms);
+                // The LIKE is only a pre-filter (case / accent-insensitive collations): count real changes only.
+                if ($masked !== $row['subject']) {
+                    $redacted += (int) $connection->update($this->table(), ['subject' => $masked], ['id' => $row['id']]);
+                }
+            }
+            $bodies = $body ? $connection->fetchAllAssociative('SELECT id, html_body, text_body FROM ' . $this->bodyTable() . " WHERE LOWER(html_body) LIKE ? ESCAPE '!' OR LOWER(text_body) LIKE ? ESCAPE '!'", [$pattern, $pattern]) : [];
+            foreach ($bodies as $row) {
+                $html = is_string($row['html_body']) ? $this->mask($row['html_body'], $forms) : null;
+                $text = is_string($row['text_body']) ? $this->mask($row['text_body'], $forms) : null;
+                if ($html !== $row['html_body'] || $text !== $row['text_body']) {
+                    $redacted += (int) $connection->update($this->bodyTable(), ['html_body' => $html, 'text_body' => $text], ['id' => $row['id']]);
+                }
+            }
+        }
+
+        return ['deleted' => $deleted, 'redacted' => $redacted];
+    }
+
+    /**
+     * Rows whose recipient index or sender holds one of the forms, with the roles of the address: SQL pre-filter
+     * (index LIKE, sender IN), then an exact re-check in PHP (`===` on the index entries and the sender), in id batches.
+     *
+     * @param list<string> $forms
+     * @param string $columns extra columns, each preceded by a comma
+     *
+     * @return list<array{array<string, mixed>, list<'recipient'|'sender'>}>
+     */
+    private function rowsOf(Connection $connection, array $forms, string $columns = ''): array
+    {
+        $where  = [];
+        $params = [];
+        foreach ($forms as $form) {
+            $where[]  = "recipient_index LIKE ? ESCAPE '!'";
+            $params[] = '%' . self::likeEscape(self::SEPARATOR . $form . self::SEPARATOR) . '%';
+        }
+        $where[] = 'sender IN (' . implode(', ', array_fill(0, count($forms), '?')) . ')';
+        $sql     = 'SELECT id, recipient_index, sender' . $columns . ' FROM ' . $this->table() . ' WHERE (' . implode(' OR ', $where) . ') AND id > ? ORDER BY id LIMIT ' . self::PERSONAL_DATA_BATCH;
+
+        $rows = [];
+        $last = '';
+        do {
+            $page = $connection->fetchAllAssociative($sql, [...$params, ...$forms, $last]);
+            foreach ($page as $row) {
+                $last  = (string) $row['id'];
+                $roles = self::roles($row, $forms);
+                if ($roles !== []) {
+                    $rows[] = [$row, $roles];
+                }
+            }
+        } while (count($page) === self::PERSONAL_DATA_BATCH);
+
+        return $rows;
+    }
+
+    /**
+     * Exact roles of the address in one row: `recipient` when one form is an entry of the index, `sender` when the
+     * sender is one of the forms.
+     *
+     * @param array<string, mixed> $row
+     * @param list<string> $forms
+     *
+     * @return list<'recipient'|'sender'>
+     */
+    private static function roles(array $row, array $forms): array
+    {
+        $entries = explode(self::SEPARATOR, (string) $row['recipient_index']);
+        $roles   = [];
+        foreach ($forms as $form) {
+            if (in_array($form, $entries, true)) {
+                $roles[] = 'recipient';
+
+                break;
+            }
+        }
+        if (in_array((string) $row['sender'], $forms, true)) {
+            $roles[] = 'sender';
+        }
+
+        return $roles;
+    }
+
+    private function atom(Connection $connection, mixed $value): ?string
+    {
+        $date = $value === null ? null : $connection->convertToPHPValue($value, Types::DATETIME_IMMUTABLE);
+
+        return $date instanceof DateTimeInterface ? $date->format(DateTimeInterface::ATOM) : null;
     }
 
     /**

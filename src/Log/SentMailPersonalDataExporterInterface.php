@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Nowo\MailKitBundle\Log;
 
+use Nowo\MailKitBundle\Mailer\MailHeaders;
+
 /**
  * Export port of the sent-mail log (1.7, GDPR art. 15 / 20): the log rows one address received (to, cc, bcc) or sent,
  * matched exactly on the normalised address ({@see SentMailPersonalDataSubject}). Erasure stays
@@ -17,7 +19,7 @@ interface SentMailPersonalDataExporterInterface
 {
     /**
      * Rows of the address, oldest id first. Dates are ATOM strings; `template` is the message tag
-     * ({@see \Nowo\MailKitBundle\Mailer\MailHeaders::tag()}); `roles` says whether the address was a recipient, the
+     * ({@see MailHeaders::tag()}); `roles` says whether the address was a recipient, the
      * sender or both.
      *
      * @throws SentMailLogTableMissingException when the log table is missing while the entities are mapped

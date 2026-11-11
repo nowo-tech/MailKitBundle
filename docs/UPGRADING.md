@@ -21,6 +21,23 @@
 
 ## Unreleased
 
+Target **1.7.0** (next minor), from **1.6.0**: `composer update nowo-tech/mail-kit-bundle`. **Nothing to change.**
+
+1. **GDPR ports.** `Log\SentMailPersonalDataExporterInterface` (new) exports the log rows of one address;
+   `Log\SentMailPersonalDataEraserInterface` (new) erases them for a `SentMailPersonalDataSubject` and returns a
+   `SentMailErasureResult` (`forgetAddress()` stays). If
+   your application reads `mail_kit_sent_mail` itself for a GDPR export (e.g. with `SentMailRecorder::forms()` /
+   `likeEscape()`), call the port instead. See [USAGE — GDPR erasure and export](USAGE.md#gdpr-erasure-and-export).
+2. **UserKit installed?** The eraser and the export section `emails_received` now register automatically (UserKit
+   >= 1.12, log entities mapped). If your application already has its own `emails_received` eraser or export
+   provider for these tables, delete it, or set `nowo_mail_kit.personal_data.enabled: false`. UserKit refuses two
+   export sections with the same key.
+3. **Exact erasure.** `forgetAddress()` re-checks every row in PHP: on MySQL / MariaDB with an accent-insensitive
+   collation an address no longer erases its accent variants (`jose@` vs `josé@`). Case variants are still one
+   address (the log stores addresses in lower case). It now runs in its own transaction, or joins yours, and
+   dispatches `SentMailPersonalDataErasedEvent` after its own commit. `redacted` counts only rows that really
+   changed, and masking replaces whole addresses only (`na@` no longer masks part of `ana@`).
+
 ## To 1.6.0
 
 Target **1.6.0**, from **1.5.0**: `composer update nowo-tech/mail-kit-bundle`. **Standard hosts: nothing to change**

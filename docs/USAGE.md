@@ -24,6 +24,12 @@
   - [Sorting](#sorting)
   - [CSV export](#csv-export)
   - [Retention and erasure](#retention-and-erasure)
+- [GDPR erasure and export](#gdpr-erasure-and-export)
+  - [Ports](#ports)
+  - [Matching rule](#matching-rule)
+  - [What is and is not erased](#what-is-and-is-not-erased)
+  - [Transactions and the erased event](#transactions-and-the-erased-event)
+  - [UserKit bridge](#userkit-bridge)
 - [Reacting to changes and auditing](#reacting-to-changes-and-auditing)
 - [Using it from a DDD / hexagonal application](#using-it-from-a-ddd--hexagonal-application)
 - [Admin UI](#admin-ui)
@@ -441,9 +447,116 @@ php bin/console nowo:mail-kit:log:purge --older-than-days=7
 php bin/console nowo:mail-kit:log:forget alice@example.com     # rows she sent or received deleted, address masked elsewhere (GDPR art. 17)
 ```
 
-Schedule the purge (cron or Symfony Scheduler). `SentMailRecorder::forgetAddress()` (`['deleted' => n, 'redacted' => n]`) is the same erasure for an account-deletion flow; search and erasure use the normalised `recipient_index` column (each address NFC-normalised, lower-case, in its Unicode and punycode forms, separated by a control character) and work on SQLite, MySQL / MariaDB and PostgreSQL.
+Schedule the purge (cron or Symfony Scheduler). `SentMailRecorder::forgetAddress()` (`['deleted' => n, 'redacted' => n]`) is the same erasure for an account-deletion flow; search and erasure use the normalised `recipient_index` column (each address NFC-normalised, lower-case, in its Unicode and punycode forms, separated by a control character) and work on SQLite, MySQL / MariaDB and PostgreSQL. For the export port, the exact matching rule, transactions and the UserKit bridge see [GDPR erasure and export](#gdpr-erasure-and-export).
 
 **Failures.** A failed send throws `Nowo\MailKitBundle\Mailer\DeliveryFailedException` (a `TransportException`): a short message with a reference (`The mail provider answered HTTP 403 (reference 1a2b3c4d).` for API bridges, the scrubbed SMTP answer otherwise). Provider response bodies and credentials never reach the log row, the flash or the Messenger failure transport; the scrubbed detail is logged (`Mail delivery failed.`, `reference`, `detail`).
+
+## GDPR erasure and export
+
+Since 1.7 the sent-mail log has erasure and export ports, so an application never writes SQL on the
+`mail_kit_sent_mail` tables. Both are plain PHP (no Doctrine, Symfony or HTTP types), public and always registered:
+backed by `Log\SentMailRecorder` whenever Doctrine is registered (also with `log.enabled: false`), by no-op
+implementations on a host without Doctrine.
+
+### Ports
+
+| Port | Method | Result |
+| --- | --- | --- |
+| `Log\SentMailErasureInterface` (1.6, unchanged) | `forgetAddress(string $email)` | `['deleted' => n, 'redacted' => n]`: rows the address received (to, cc, bcc) or sent are deleted with their bodies; the address is masked (`[redacted]`) in the subjects and stored bodies of the other rows. |
+| `Log\SentMailPersonalDataEraserInterface` (1.7) | `erase(SentMailPersonalDataSubject $subject)` | `Log\SentMailErasureResult` (`deleted`, `redacted`, `toArray()`, `total()`): the same erasure as `forgetAddress()`, with a validated subject. |
+| `Log\SentMailPersonalDataExporterInterface` (1.7) | `export(SentMailPersonalDataSubject $subject)` | List of rows, oldest id first. |
+| `Log\SentMailPersonalDataSubjectResolverInterface` (1.7, SPI) | `subjectsFor(object $user, ?string $originalIdentifier)` | The addresses of a host user (used by the UserKit bridge). |
+
+`Log\SentMailPersonalDataSubject::fromEmail($email)` builds the subject. It refuses an empty value, a value without
+`@`, control characters (NUL included), invalid UTF-8 and more than 255 characters; `tryFromEmail()` returns null
+instead of throwing.
+
+```php
+use Nowo\MailKitBundle\Log\SentMailPersonalDataEraserInterface;
+use Nowo\MailKitBundle\Log\SentMailPersonalDataExporterInterface;
+use Nowo\MailKitBundle\Log\SentMailPersonalDataSubject;
+
+$subject = SentMailPersonalDataSubject::fromEmail('alice@example.com');
+$rows    = $exporter->export($subject);
+$result  = $eraser->erase($subject);           // SentMailErasureResult: deleted 3, redacted 1
+// 1.6 port, same erasure: $erasure->forgetAddress('alice@example.com') returns ['deleted' => 3, 'redacted' => 1]
+```
+
+One exported row:
+
+```json
+{"id": "0196…", "roles": ["recipient"], "status": "sent", "template": "welcome", "subject": "Welcome",
+ "queued_at": "2026-11-11T10:00:00+00:00", "sent_at": "2026-11-11T10:00:01+00:00", "failed_at": null}
+```
+
+`roles` holds `recipient` (to, cc or bcc), `sender` or both. `template` is the `MailHeaders::tag()` category. The
+export is envelope data only. It never includes the bodies: they may hold other people's data and masked secrets, and
+they are stored only with `log.store_bodies`. It never includes the other recipients, the transport, the provider
+message id or the error text either. Both operations are idempotent: a second erasure returns zero counts.
+
+### Matching rule
+
+The log normalises every address when it writes it: trimmed, Unicode NFC, lower-case, domain in Unicode, indexed in its
+Unicode and punycode forms. The ports apply the same normalisation and nothing else, then compare exactly:
+
+- `Alice@Example.com` and `alice@example.com` are **the same address** in the log (case is folded on write, local part
+  included), so both select the same rows.
+- `user@bücher.de` and `user@xn--bcher-kva.de` are the same address.
+- `jose@example.com` and `josé@example.com` are **different addresses**. SQL only pre-filters (`recipient_index LIKE`,
+  `sender IN`). Every candidate row is checked again in PHP with `===` on the index entries and the sender, so an
+  accent-insensitive MySQL / MariaDB collation can never export or erase another person's rows. Deletes go by primary
+  key in batches of 500 (`SentMailRecorder::PERSONAL_DATA_BATCH`).
+- Masking in other rows' subjects and bodies is case-insensitive and accent-sensitive, and replaces whole addresses
+  only: erasing `na@example.com` does not touch `ana@example.com`, `x.na@example.com` or `na@example.com.au`. The
+  `redacted` count only counts rows that really changed.
+
+### What is and is not erased
+
+- Deleted: every log row (and its stored body) the address received as to, cc or bcc, or sent. A message to several
+  people is **one** row: erasing one recipient deletes the whole row, so it also disappears from the other
+  recipients' export. The row records a delivery to the erased address, and its subject and body may hold that
+  person's data.
+- Masked: the address in the subjects and stored bodies of the rows that stay (e.g. a message to `ops@` that mentions
+  the person).
+- Not erased: names or other data of the person that are not the address itself (a display name in a subject, a
+  phone number in a body). Use `log.store_bodies: false` (default) and the retention purge to keep that small.
+
+### Transactions and the erased event
+
+`erase()` and `forgetAddress()` write with DBAL on the log connection (`doctrine.entity_manager`) and never flushes an entity
+manager:
+
+- **No transaction open:** it opens its own, commits, then dispatches `Event\SentMailPersonalDataErasedEvent`
+  (`email`, `deleted`, `redacted`; also for a run that matched nothing) for your erasure audit trail.
+- **Inside your transaction** (UserKit runs all erasers inside one): it joins it and dispatches **no event**, because
+  your transaction may still roll back. The returned counts are the outcome.
+
+When only the body table is missing (mapped entities), the main rows are erased and committed first, then
+`SentMailLogTableMissingException` is thrown, as in 1.6.
+
+### UserKit bridge
+
+With `nowo-tech/user-kit-bundle` (>= 1.12) installed, the log entities mapped (default) and
+`personal_data.enabled: true` (default), MailKit registers:
+
+| Service | UserKit tag | Key | Priority |
+| --- | --- | --- | --- |
+| `Integration\UserKit\EmailsReceivedPersonalDataEraser` | `nowo_user_kit.personal_data.eraser` | `emails_received` | 110 |
+| `Integration\UserKit\EmailsReceivedPersonalDataExportProvider` | `nowo_user_kit.personal_data.export_provider` | section `emails_received` | 0 |
+
+The eraser runs before a host identity eraser at priority < 110, while the account still has its address. It calls
+`SentMailPersonalDataEraserInterface::erase()` once for each distinct address of the user:
+
+- the subjects of the resolver. The default resolver (`Log\DefaultSentMailPersonalDataSubjectResolver`) returns
+  `ErasureRequest::identifier()` (the identifier before any eraser ran) when it is an e-mail address, plus the
+  user's `getEmail()` when the user has one;
+- `context['previous_email']`, when it is a non-empty address (pass it after an e-mail change).
+
+The export section lists the rows of every address of the user, each row once. It uses the current
+`getUserIdentifier()` and `getEmail()`. Set `personal_data.subject_resolver` to your own resolver service to change
+which addresses belong to a user. Set `personal_data.enabled: false` if your application already erases and exports
+these tables itself. UserKit refuses two export sections with the same key, so remove your own `emails_received`
+provider or turn the bridge off.
 
 ## Reacting to changes and auditing
 

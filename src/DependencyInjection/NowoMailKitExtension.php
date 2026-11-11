@@ -40,6 +40,7 @@ use Nowo\MailKitBundle\Log\NullSentMailErasure;
 use Nowo\MailKitBundle\Log\NullSentMailPersonalDataExporter;
 use Nowo\MailKitBundle\Log\SentMailCsvExporter;
 use Nowo\MailKitBundle\Log\SentMailErasureInterface;
+use Nowo\MailKitBundle\Log\SentMailPersonalDataEraserInterface;
 use Nowo\MailKitBundle\Log\SentMailPersonalDataExporterInterface;
 use Nowo\MailKitBundle\Log\SentMailPersonalDataSubjectResolverInterface;
 use Nowo\MailKitBundle\Log\SentMailRecorder;
@@ -391,6 +392,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         if (!$log['enabled'] && !$hasDoctrine) {
             $container->setDefinition(NullSentMailErasure::class, new Definition(NullSentMailErasure::class));
             $container->setAlias(SentMailErasureInterface::class, NullSentMailErasure::class)->setPublic(true);
+            $container->setAlias(SentMailPersonalDataEraserInterface::class, NullSentMailErasure::class)->setPublic(true);
             $container->setDefinition(NullSentMailPersonalDataExporter::class, new Definition(NullSentMailPersonalDataExporter::class));
             $container->setAlias(SentMailPersonalDataExporterInterface::class, NullSentMailPersonalDataExporter::class)->setPublic(true);
 
@@ -398,6 +400,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         }
 
         $container->setAlias(SentMailErasureInterface::class, SentMailRecorder::class)->setPublic(true);
+        $container->setAlias(SentMailPersonalDataEraserInterface::class, SentMailRecorder::class)->setPublic(true);
         $container->setAlias(SentMailPersonalDataExporterInterface::class, SentMailRecorder::class)->setPublic(true);
         $container->setDefinition(SentMailRecorder::class, (new Definition(SentMailRecorder::class, [
             new Reference('doctrine'),
@@ -447,7 +450,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             return;
         }
         $container->setDefinition(EmailsReceivedPersonalDataEraser::class, (new Definition(EmailsReceivedPersonalDataEraser::class, [
-            new Reference(SentMailErasureInterface::class),
+            new Reference(SentMailPersonalDataEraserInterface::class),
             new Reference(SentMailPersonalDataSubjectResolverInterface::class),
         ]))->addTag('nowo_user_kit.personal_data.eraser', ['priority' => EmailsReceivedPersonalDataEraser::PRIORITY]));
         $container->setDefinition(EmailsReceivedPersonalDataExportProvider::class, (new Definition(EmailsReceivedPersonalDataExportProvider::class, [

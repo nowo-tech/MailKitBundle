@@ -6,35 +6,64 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+  - [Added](#added)
+  - [Changed](#changed)
 - [[1.6.0] - 2026-11-11](#160---2026-11-11)
-  - [Target 1.6.0](#target-160)
-- [[1.5.0] - 2026-11-10](#150---2026-11-10)
   - [Added](#added-1)
   - [Changed](#changed-1)
-- [[1.4.0] - 2026-11-09](#140---2026-11-09)
+- [[1.5.0] - 2026-11-10](#150---2026-11-10)
   - [Added](#added-2)
+  - [Changed](#changed-2)
+- [[1.4.0] - 2026-11-09](#140---2026-11-09)
+  - [Added](#added-3)
   - [Security](#security)
 - [[1.3.0] - 2026-11-02](#130---2026-11-02)
-  - [Added](#added-3)
-  - [Changed](#changed-2)
-  - [Security](#security-1)
-- [[1.2.0] - 2026-11-02](#120---2026-11-02)
   - [Added](#added-4)
   - [Changed](#changed-3)
+  - [Security](#security-1)
+- [[1.2.0] - 2026-11-02](#120---2026-11-02)
+  - [Added](#added-5)
+  - [Changed](#changed-4)
   - [Fixed](#fixed)
 - [[1.1.1] - 2026-11-01](#111---2026-11-01)
   - [Security](#security-2)
-  - [Changed](#changed-4)
+  - [Changed](#changed-5)
   - [Fixed](#fixed-1)
 - [[1.1.0] - 2026-11-01](#110---2026-11-01)
-  - [Added](#added-5)
-  - [Changed](#changed-5)
-- [[1.0.0] - 2026-10-31](#100---2026-10-31)
   - [Added](#added-6)
+  - [Changed](#changed-6)
+- [[1.0.0] - 2026-10-31](#100---2026-10-31)
+  - [Added](#added-7)
   - [Security (independent audit, Appendix CA)](#security-independent-audit-appendix-ca)
   - [Security (re-verification follow-ups)](#security-re-verification-follow-ups)
 
 ## [Unreleased]
+
+### Added
+
+- **GDPR export port** (Beacon re-audit extraction #4): `Log\SentMailPersonalDataExporterInterface::export(SentMailPersonalDataSubject)`
+  returns the log rows an address received (to, cc, bcc) or sent — `id`, `roles`, `status`, `template` (tag),
+  `subject`, `queued_at` / `sent_at` / `failed_at` (ATOM). Envelope only: no bodies, other recipients, transport,
+  provider id or error. Backed by `SentMailRecorder` (Doctrine registered) or `NullSentMailPersonalDataExporter`.
+- **GDPR erasure port keyed by a subject**: `Log\SentMailPersonalDataEraserInterface::erase(SentMailPersonalDataSubject)`
+  returns a `Log\SentMailErasureResult` (`deleted`, `redacted`, `toArray()`, `total()`); it delegates to
+  `forgetAddress()` (unchanged, BC). Backed by `SentMailRecorder` or `NullSentMailErasure`.
+- `Log\SentMailPersonalDataSubject` (address value object, the log's own normalisation: trim, NFC, lower-case, IDN)
+  and the `Log\SentMailPersonalDataSubjectResolverInterface` SPI with `DefaultSentMailPersonalDataSubjectResolver`.
+- `Event\SentMailPersonalDataErasedEvent` (address + counts), dispatched after `forgetAddress()` committed its own
+  transaction; not dispatched inside a caller's transaction.
+- **UserKit bridge**: with `nowo-tech/user-kit-bundle` >= 1.12 installed and the log entities mapped, the eraser
+  `emails_received` (priority 110: original identifier, `getEmail()`, `context['previous_email']`) and the export
+  section `emails_received` register automatically. New config node `personal_data` (`enabled: true`,
+  `subject_resolver: null`).
+
+### Changed
+
+- `SentMailErasureInterface::forgetAddress()` matches exactly: SQL only pre-filters, every row is re-checked in PHP
+  against the normalised address (an accent-insensitive MySQL / MariaDB collation no longer erases `josé@` for
+  `jose@`), rows are deleted by id in batches of 500, inside a transaction of its own (or the caller's). `redacted`
+  counts only rows whose subject or body really changed. Masking replaces whole addresses only: erasing
+  `na@example.com` no longer masks part of `ana@example.com` or `na@example.com.au` in other rows.
 
 ## [1.6.0] - 2026-11-11
 

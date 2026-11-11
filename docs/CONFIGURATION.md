@@ -10,6 +10,7 @@
 - [bootstrap](#bootstrap)
 - [test_email](#test_email)
 - [log](#log)
+- [personal_data](#personal_data)
 - [brand](#brand)
 - [doctrine](#doctrine)
 - [web_ui](#web_ui)
@@ -58,6 +59,9 @@ nowo_mail_kit:
         store_bodies: false            # personal data: off by default
         retention_days: 30             # nowo:mail-kit:log:purge default (1 … 3650)
         purge_batch_size: 1000         # rows per DELETE (1 … 100000)
+    personal_data:                     # 1.7: GDPR bridge for nowo-tech/user-kit-bundle
+        enabled: true                  # register the emails_received eraser + export section (UserKit installed, log mapped)
+        subject_resolver: null         # service id implementing Log\SentMailPersonalDataSubjectResolverInterface
     brand:                             # 1.4, spec 220: optional branded e-mail layout ("auto" / "off" shorthand)
         mode: auto                     # auto = read a brand-contracts BrandProviderInterface when one exists; off = ignore it
         name: null                     # name printed without a provider (≤ 80 characters, no control / bidi characters)
@@ -93,7 +97,7 @@ nowo_mail_kit:
         allow_unauthenticated: false   # DEV / DEMO only; refused unless kernel.debug is true
 ```
 
-Unknown keys are rejected. Switches (`mailer.decorate`, `dsn.allow_private_hosts`, `dsn.allow_insecure_tls`, `resend.enabled`, `log.enabled`, `log.store_bodies`, `web_ui.enabled`, `web_ui.export.enabled`, `web_ui.export.include_bodies`, `security.allow_unauthenticated`) must be literal booleans: `%env(bool:…)%` placeholders are refused because they would read as `true` while the container is built.
+Unknown keys are rejected. Switches (`mailer.decorate`, `dsn.allow_private_hosts`, `dsn.allow_insecure_tls`, `resend.enabled`, `log.enabled`, `log.map_entities`, `log.store_bodies`, `personal_data.enabled`, `web_ui.enabled`, `web_ui.export.enabled`, `web_ui.export.include_bodies`, `security.allow_unauthenticated`) must be literal booleans: `%env(bool:…)%` placeholders are refused because they would read as `true` while the container is built.
 
 ## mailer
 
@@ -160,6 +164,16 @@ here (it would be compiled into the container). See [USAGE](USAGE.md#db-only-mod
 | `store_bodies` | `false` | Store the HTML / text bodies (≤ 1 MiB each, redacted values masked) and expose `GET …/log/{id}/body`. |
 | `retention_days` | `30` | Default age of `nowo:mail-kit:log:purge`. |
 | `purge_batch_size` | `1000` | Rows per keyset batch. |
+
+## personal_data
+
+Since 1.7. The ports themselves (`Log\SentMailErasureInterface`, `Log\SentMailPersonalDataEraserInterface`, `Log\SentMailPersonalDataExporterInterface`) are
+always registered; this node only drives the UserKit bridge. See [USAGE — GDPR erasure and export](USAGE.md#gdpr-erasure-and-export).
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `enabled` | `true` | With `nowo-tech/user-kit-bundle` installed and the log entities mapped (`log.map_entities: true`, Doctrine registered), register the UserKit eraser `emails_received` (priority 110, before the host identity eraser) and the export section `emails_received`. Set `false` when your application already erases / exports the log tables. Literal boolean. |
+| `subject_resolver` | `null` | Service id implementing `Log\SentMailPersonalDataSubjectResolverInterface` (the addresses of a user). `null` = the original user identifier when it is an e-mail, plus `getEmail()`. |
 
 ## brand
 
@@ -277,7 +291,7 @@ REQ-CFG-001 does not apply: the bundle has one configuration tree. Variants (ano
 
 Parameters: `nowo_mail_kit.doctrine.table_prefix`, `.web_ui.enabled`, `.web_ui.path_prefix`, `.log.enabled`, `.log.retention_days`, `.resend.enabled`, `.security.allow_unauthenticated`.
 
-Public services: `Nowo\MailKitBundle\Brand\BrandedEmailHelper` (1.4), `Nowo\MailKitBundle\Mailer\RuntimeTransport`, `Readiness\OutboundMailReadiness`, `Dsn\MailerDsnValidator`, `TestMail\TestMailSender`, `Log\SentMailRecorder` and `Log\SentMailRepository` (log on), `Resend\ResendApiChecker` (Resend on), `nowo_mail_kit.outbound_mail_ready_checker` (AuthKit installed). Interfaces: `Dsn\MailerDsnProviderInterface`, `Security\MailKitAccessCheckerInterface`.
+Public services: `Nowo\MailKitBundle\Brand\BrandedEmailHelper` (1.4), `Nowo\MailKitBundle\Mailer\RuntimeTransport`, `Readiness\OutboundMailReadiness`, `Dsn\MailerDsnValidator`, `TestMail\TestMailSender`, `Log\SentMailRecorder` and `Log\SentMailRepository` (log on), `Resend\ResendApiChecker` (Resend on), `nowo_mail_kit.outbound_mail_ready_checker` (AuthKit installed). Interfaces: `Dsn\MailerDsnProviderInterface`, `Security\MailKitAccessCheckerInterface`, `Log\SentMailErasureInterface`, `Log\SentMailPersonalDataEraserInterface`, `Log\SentMailPersonalDataExporterInterface` and `Log\SentMailPersonalDataSubjectResolverInterface` (1.7). With UserKit: `Integration\UserKit\EmailsReceivedPersonalDataEraser` and `Integration\UserKit\EmailsReceivedPersonalDataExportProvider` (private, tagged).
 
 ## Fail-closed checks
 

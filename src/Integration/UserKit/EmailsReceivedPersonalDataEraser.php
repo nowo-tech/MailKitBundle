@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\MailKitBundle\Integration\UserKit;
 
-use Nowo\MailKitBundle\Log\SentMailErasureInterface;
+use Nowo\MailKitBundle\Log\SentMailPersonalDataEraserInterface;
 use Nowo\MailKitBundle\Log\SentMailPersonalDataSubject;
 use Nowo\MailKitBundle\Log\SentMailPersonalDataSubjectResolverInterface;
 use Nowo\UserKitBundle\PersonalData\ErasureRequest;
@@ -15,7 +15,7 @@ use function is_string;
 
 /**
  * UserKit personal-data eraser `emails_received` (1.7; registered with UserKit installed, the log entities mapped and
- * `personal_data.enabled`): {@see SentMailErasureInterface::forgetAddress()} once per distinct address of the user —
+ * `personal_data.enabled`): {@see SentMailPersonalDataEraserInterface::erase()} once per distinct address of the user —
  * the subjects of {@see SentMailPersonalDataSubjectResolverInterface} (by default the original identifier when it is
  * an e-mail and `getEmail()`) plus `context['previous_email']` when it is a non-empty string. Runs before the host
  * identity eraser (priority {@see self::PRIORITY}), while the account still has its address. Inside UserKit's
@@ -33,11 +33,11 @@ final readonly class EmailsReceivedPersonalDataEraser implements PersonalDataEra
     public const PREVIOUS_EMAIL = 'previous_email';
 
     /**
-     * @param SentMailErasureInterface $erasure the log erasure port
+     * @param SentMailPersonalDataEraserInterface $erasure the log erasure port
      * @param SentMailPersonalDataSubjectResolverInterface $subjects addresses of the user
      */
     public function __construct(
-        private SentMailErasureInterface $erasure,
+        private SentMailPersonalDataEraserInterface $erasure,
         private SentMailPersonalDataSubjectResolverInterface $subjects,
     ) {
     }
@@ -74,7 +74,7 @@ final readonly class EmailsReceivedPersonalDataEraser implements PersonalDataEra
         }
 
         foreach (array_values($subjects) as $subject) {
-            $this->erasure->forgetAddress($subject->email);
+            $this->erasure->erase($subject);
         }
     }
 }

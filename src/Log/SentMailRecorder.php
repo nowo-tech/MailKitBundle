@@ -28,11 +28,11 @@ use Symfony\Component\Mime\RawMessage;
 use Symfony\Component\Uid\Uuid;
 use Throwable;
 
+use function array_chunk;
 use function array_fill;
 use function array_filter;
 use function array_keys;
 use function array_map;
-use function array_chunk;
 use function array_merge;
 use function array_unique;
 use function array_values;
@@ -76,7 +76,7 @@ use const JSON_UNESCAPED_UNICODE;
  * Privacy: envelope data only by default (subject, sender, recipients); bodies only with `log.store_bodies`, with the
  * {@see MailHeaders::REDACT} values masked. Errors are scrubbed of credentials ({@see ErrorScrubber}).
  */
-final readonly class SentMailRecorder implements SentMailErasureInterface, SentMailPersonalDataExporterInterface
+final readonly class SentMailRecorder implements SentMailErasureInterface, SentMailPersonalDataEraserInterface, SentMailPersonalDataExporterInterface
 {
     /** Separator of the recipient index (unit separator: refused in addresses). */
     public const SEPARATOR = "\x1F";
@@ -86,6 +86,16 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
 
     /** Cap of one stored body, in bytes. */
     public const BODY_MAX = 1_048_576;
+
+    /**
+     * Masking boundary (1.7): no letter, digit, `.`, `_`, `+` or `-` right before the address, so `na@example.com`
+     * never masks part of `ana@example.com`. Rarer local-part characters (`/`, `=`, …) still count as a boundary:
+     * `/unsubscribe/ana@example.com` and `?email=ana%40example.com` are masked.
+     */
+    private const MASK_BEFORE = '(?<![\\p{L}\\p{N}\\p{M}._+-])';
+
+    /** Masking boundary (1.7): the domain does not go on (no label character, no `.label`) right after the address. */
+    private const MASK_AFTER = '(?![\\p{L}\\p{N}\\p{M}_-]|\\.[\\p{L}\\p{N}])';
 
     /** Rows read or deleted per statement by the export and the erasure of one address (1.7). */
     public const PERSONAL_DATA_BATCH = 500;
@@ -214,15 +224,27 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
 
         if ($connection->isTransactionActive()) {
             // The caller's transaction may still roll back: no event, the counts are the outcome.
-            $result = $this->erase($connection, $forms, $body);
+            $result = $this->eraseRows($connection, $forms, $body);
         } else {
             // @igor-ignore - Closure runs synchronously inside transactional(); it is not stored on the service.
-            $result = $connection->transactional(fn (Connection $connection): array => $this->erase($connection, $forms, $body));
+            $result = $connection->transactional(fn (Connection $connection): array => $this->eraseRows($connection, $forms, $body));
             $this->dispatcher?->dispatch(new SentMailPersonalDataErasedEvent($forms[0], $result['deleted'], $result['redacted']));
         }
         $this->assertBodyTable($body, $result['deleted'], $result['redacted']);
 
         return $result;
+    }
+
+    /**
+     * {@see self::forgetAddress()} for a validated subject (1.7): same matching, transaction and event semantics.
+     *
+     * @throws SentMailLogTableMissingException when a log table is missing and the entities are mapped
+     */
+    public function erase(SentMailPersonalDataSubject $subject): SentMailErasureResult
+    {
+        $result = $this->forgetAddress($subject->email);
+
+        return new SentMailErasureResult($result['deleted'], $result['redacted']);
     }
 
     /**
@@ -354,7 +376,7 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
      *
      * @return array{deleted: int, redacted: int}
      */
-    private function erase(Connection $connection, array $forms, bool $body): array
+    private function eraseRows(Connection $connection, array $forms, bool $body): array
     {
         $ids = [];
         foreach ($this->rowsOf($connection, $forms) as [$row]) {
@@ -414,7 +436,7 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
             $page = $connection->fetchAllAssociative($sql, [...$params, ...$forms, $last]);
             foreach ($page as $row) {
                 $last  = (string) $row['id'];
-                $roles = self::roles($row, $forms);
+                $roles = $this->roles($row, $forms);
                 if ($roles !== []) {
                     $rows[] = [$row, $roles];
                 }
@@ -433,7 +455,7 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
      *
      * @return list<'recipient'|'sender'>
      */
-    private static function roles(array $row, array $forms): array
+    private function roles(array $row, array $forms): array
     {
         $entries = explode(self::SEPARATOR, (string) $row['recipient_index']);
         $roles   = [];
@@ -592,7 +614,9 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
             $alternatives[] = preg_quote(rawurlencode($form), '/');
         }
 
-        return (string) preg_replace('/' . implode('|', $alternatives) . '/iu', self::REDACTED, $text);
+        // Whole addresses only (1.7): erasing `na@example.com` must not mask part of `ana@example.com` or
+        // `na@example.com.au`, which belong to other people.
+        return (string) preg_replace('/' . self::MASK_BEFORE . '(?:' . implode('|', $alternatives) . ')' . self::MASK_AFTER . '/iu', self::REDACTED, $text);
     }
 
     /**

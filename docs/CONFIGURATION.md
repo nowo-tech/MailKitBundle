@@ -54,6 +54,7 @@ nowo_mail_kit:
         rate_interval: '10 minutes'
     log:
         enabled: true
+        map_entities: true             # 1.6: false (only with enabled: false) = no SentMail mapping in your EM
         store_bodies: false            # personal data: off by default
         retention_days: 30             # nowo:mail-kit:log:purge default (1 … 3650)
         purge_batch_size: 1000         # rows per DELETE (1 … 100000)
@@ -99,7 +100,7 @@ Unknown keys are rejected. Switches (`mailer.decorate`, `dsn.allow_private_hosts
 | Key | Default | Description |
 | --- | --- | --- |
 | `decorate` | `true` | Registers `nowo_mail_kit.mailer` (decorates `mailer.mailer`, the `MailerInterface`) and `RuntimeTransport` as decorator of `mailer.transports`, so the framework mailer **and** the Messenger `SendEmailMessage` handler use the runtime DSN. With `false`, the framework mailer is untouched; `RuntimeTransport` (fallback = `mailer.transports`), the test e-mail, readiness and the log still work for code that uses them directly. |
-| `dsn_provider` | `null` | Service id of a `MailerDsnProviderInterface`; the default reads the `mailer` settings. |
+| `dsn_provider` | `null` | Service id of a `MailerDsnProviderInterface`; the default reads the `mailer` settings. Since 1.6, with `sender_provider` also set, Instance Settings becomes optional ([USAGE](USAGE.md#using-it-from-a-ddd--hexagonal-application)). |
 | `sender_provider` | `null` | Since 1.5. Service id of a `Sender\SenderProviderInterface` (default `From` / `Reply-To` of messages without one); the default reads the `mailer` settings (`MailSettings`). |
 | `fallback_counts_as_ready` | `false` | `isOutboundMailReady()` is false while nothing is stored, because `MAILER_DSN` cannot be inspected through the framework transports. Set it to `true` when your `MAILER_DSN` is a real transport. |
 
@@ -154,7 +155,8 @@ here (it would be compiled into the container). See [USAGE](USAGE.md#db-only-mod
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `enabled` | `true` | Sent-mail log writes, log pages and the purge / forget commands. |
+| `enabled` | `true` | Sent-mail log writes and log pages. With `false` and Doctrine registered, the purge / forget commands and `SentMailErasureInterface` still work on rows written while the log was on (1.6). |
+| `map_entities` | `true` | 1.6. Doctrine mapping of `SentMail` / `SentMailBody`. `false` is allowed only with `enabled: false` (XML-only entity managers); purge or erase the tables first, the next schema diff proposes dropping them. In 2.0 the default follows `enabled`. |
 | `store_bodies` | `false` | Store the HTML / text bodies (≤ 1 MiB each, redacted values masked) and expose `GET …/log/{id}/body`. |
 | `retention_days` | `30` | Default age of `nowo:mail-kit:log:purge`. |
 | `purge_batch_size` | `1000` | Rows per keyset batch. |

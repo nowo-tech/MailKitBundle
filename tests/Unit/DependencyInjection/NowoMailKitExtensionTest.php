@@ -9,6 +9,7 @@ use Nowo\InstanceSettingsBundle\Settings\InstanceSettingsInterface;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\MailerIntegrationPass;
 use Nowo\MailKitBundle\DependencyInjection\NowoMailKitExtension;
 use Nowo\MailKitBundle\Dsn\MailerDsnProviderInterface;
+use Nowo\MailKitBundle\Log\SentMailRecorder;
 use Nowo\MailKitBundle\Mailer\RuntimeTransport;
 use Nowo\MailKitBundle\NowoMailKitBundle;
 use Nowo\MailKitBundle\Resend\ResendApiChecker;
@@ -129,11 +130,28 @@ final class NowoMailKitExtensionTest extends TestCase
 
     public function testThePassNeedsInstanceSettingsAndTheMailer(): void
     {
+        $fromSettings = new ContainerBuilder();
+        $fromSettings->setDefinition(MailSettings::class, new Definition(MailSettings::class));
         try {
-            (new MailerIntegrationPass())->process(new ContainerBuilder());
-            self::fail('Instance Settings must be required.');
+            (new MailerIntegrationPass())->process($fromSettings);
+            self::fail('Instance Settings must be required when the configuration is read from it.');
         } catch (LogicException $e) {
             self::assertStringContainsString('instance-settings-bundle', $e->getMessage());
+        }
+        $log = new ContainerBuilder();
+        $log->setDefinition(SentMailRecorder::class, new Definition(SentMailRecorder::class));
+        try {
+            (new MailerIntegrationPass())->process($log);
+            self::fail('Doctrine must be required by the log.');
+        } catch (LogicException $e) {
+            self::assertStringContainsString('requires doctrine/doctrine-bundle', $e->getMessage());
+        }
+        // 1.6: host providers only, no settings section: only the framework mailer is required.
+        try {
+            (new MailerIntegrationPass())->process(new ContainerBuilder());
+            self::fail('The framework mailer must be required.');
+        } catch (LogicException $e) {
+            self::assertStringContainsString('requires the framework mailer', $e->getMessage());
         }
         $container = new ContainerBuilder();
         $container->setDefinition(InstanceSettingsInterface::class, new Definition('stdClass'));

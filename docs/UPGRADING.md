@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+  - [To 1.6.0](#to-160)
 - [To 1.5.0](#to-150)
   - [To 1.5.0](#to-150-1)
 - [To 1.4.0](#to-140)
@@ -20,6 +21,29 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+### To 1.6.0
+
+Target **1.6.0**, from **1.5.0**: `composer update nowo-tech/mail-kit-bundle`. **Standard hosts: nothing to change**
+(Instance Settings registered → same services, same defaults).
+
+1. **Without Instance Settings (opt-in, DDD hosts).** Set both `nowo_mail_kit.mailer.dsn_provider` and
+   `nowo_mail_kit.mailer.sender_provider` to your own services and leave `NowoInstanceSettingsBundle` out of
+   `config/bundles.php`. Keep `resend.enabled: false`. With `log.enabled: false` you can leave DoctrineBundle and
+   DoctrineEncrypt out too. The settings actions disappear (there is no settings page); `nowo:mail-kit:send-test`
+   uses your sender port.
+2. **Log off: schema unchanged, erasure real.** With `log.enabled: false` the log entities stay mapped (no schema
+   diff against 1.5.0) and `SentMailErasureInterface` / `nowo:mail-kit:log:forget` / `log:purge` still delete the
+   rows written while the log was on. To keep the mapping out of an XML-only entity manager, set
+   `log.map_entities: false` (only with the log off) **after** purging or erasing what those tables hold: the next
+   schema diff proposes dropping them. Deprecation notice: in 2.0 `log.map_entities` defaults to `log.enabled`.
+3. **Test e-mail sender.** With a host `mailer.sender_provider`, `nowo:mail-kit:send-test` and the admin test action
+   now use your port (the sender real mail uses) instead of the `mailer` settings.
+4. **New ports (optional).** Prefer `OutboundMailReadinessInterface` over `OutboundMailReadiness`, and
+   `SentMailErasureInterface` over an optional `SentMailRecorder` for erasure / retention.
+5. **Deprecation notice.** Instance Settings, DoctrineEncrypt and the ORM stay in `require` in 1.x; 2.0 moves them to
+   `suggest`. If your application uses Instance Settings itself, require `nowo-tech/instance-settings-bundle`
+   explicitly now instead of relying on MailKit to install it.
 
 ## To 1.5.0
 

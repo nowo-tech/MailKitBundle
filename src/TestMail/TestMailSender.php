@@ -11,6 +11,7 @@ use Nowo\MailKitBundle\Mailer\MailHeaders;
 use Nowo\MailKitBundle\Mailer\RuntimeTransport;
 use Nowo\MailKitBundle\NowoMailKitBundle;
 use Nowo\MailKitBundle\Sender\SenderAddress;
+use Nowo\MailKitBundle\Sender\SenderProviderInterface;
 use Nowo\MailKitBundle\Settings\MailSettings;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Mime\Address;
@@ -36,6 +37,10 @@ use const FILTER_VALIDATE_EMAIL;
  *
  * Recipient: the explicit address, else `mailer.test_recipient`, else the e-mail of the user (a `getEmail()`
  * method, or an identifier that is an address).
+ *
+ * Sender of the mailer test: the host {@see SenderProviderInterface} when `mailer.sender_provider` is set (the same
+ * sender as real mail, 1.6), else the `mailer` settings. Without Instance Settings `$settings` is null: no stored
+ * test recipient and no Resend test.
  */
 final readonly class TestMailSender
 {
@@ -43,14 +48,17 @@ final readonly class TestMailSender
     public const TAG = 'mail_kit_test';
 
     /**
+     * @param MailSettings|null $settings the `mailer` settings; null without Instance Settings (host providers)
      * @param bool $requirePublicDomain `sender.require_public_domain`
+     * @param SenderProviderInterface|null $senderProvider host sender port (`mailer.sender_provider`); wins over the settings
      */
     public function __construct(
         private RuntimeTransport $transport,
-        private MailSettings $settings,
+        private ?MailSettings $settings,
         private ?TranslatorInterface $translator = null,
         private bool $requirePublicDomain = true,
         private ?LoggerInterface $logger = null,
+        private ?SenderProviderInterface $senderProvider = null,
     ) {
     }
 
@@ -59,7 +67,10 @@ final readonly class TestMailSender
      */
     public function sendMailer(?string $to = null, ?object $user = null): TestMailResult
     {
-        return $this->send('mailer', $this->settings->from(), $to, $user);
+        // The host sender port when one is wired (same sender as real mail), else the `mailer` settings.
+        $from = $this->senderProvider instanceof SenderProviderInterface ? $this->senderProvider->from() : $this->settings?->from();
+
+        return $this->send('mailer', $from, $to, $user);
     }
 
     /**
@@ -67,7 +78,7 @@ final readonly class TestMailSender
      */
     public function sendResend(?string $to = null, ?object $user = null): TestMailResult
     {
-        if ($this->settings->resendApiKey() === null) {
+        if (!$this->settings instanceof MailSettings || $this->settings->resendApiKey() === null) {
             return new TestMailResult(TestMailOutcome::NotConfigured);
         }
 
@@ -79,7 +90,7 @@ final readonly class TestMailSender
      */
     public function recipient(?string $to, ?object $user): ?string
     {
-        foreach ([$to, $this->settings->testRecipient(), $this->userEmail($user)] as $candidate) {
+        foreach ([$to, $this->settings?->testRecipient(), $this->userEmail($user)] as $candidate) {
             $candidate = trim((string) $candidate);
             if ($candidate !== '') {
                 return filter_var($candidate, FILTER_VALIDATE_EMAIL) === false ? null : $candidate;
@@ -102,7 +113,7 @@ final readonly class TestMailSender
             return new TestMailResult(TestMailOutcome::InvalidSender, $recipient);
         }
 
-        $resend = $channel === 'resend' ? $this->settings->resendDsn() : null;
+        $resend = $channel === 'resend' ? $this->settings?->resendDsn() : null;
         $label  = $resend instanceof RuntimeDsn ? $resend->label() : $this->transport->currentLabel();
         $text   = $this->trans('test_email.body', ['%transport%' => $label, '%from%' => $from->getAddress()]);
         $email  = (new Email())

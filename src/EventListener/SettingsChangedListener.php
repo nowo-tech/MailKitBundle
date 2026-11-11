@@ -6,7 +6,7 @@ namespace Nowo\MailKitBundle\EventListener;
 
 use Nowo\InstanceSettingsBundle\Event\SettingsChangedEvent;
 use Nowo\MailKitBundle\Mailer\RuntimeTransport;
-use Nowo\MailKitBundle\Readiness\OutboundMailReadiness;
+use Nowo\MailKitBundle\Readiness\OutboundMailReadinessInterface;
 use Nowo\MailKitBundle\Settings\MailerSettingsSection;
 use Psr\Log\LoggerInterface;
 
@@ -24,7 +24,7 @@ final readonly class SettingsChangedListener
      */
     public function __construct(
         private RuntimeTransport $transport,
-        private OutboundMailReadiness $readiness,
+        private OutboundMailReadinessInterface $readiness,
         private ?LoggerInterface $logger = null,
     ) {
     }

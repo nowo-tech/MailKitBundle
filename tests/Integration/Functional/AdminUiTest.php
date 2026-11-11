@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\MailKitBundle\Tests\Integration\Functional;
 
 use Nowo\MailKitBundle\Log\SentMailRecorder;
+use Nowo\MailKitBundle\Log\SentMailRepository;
 use Nowo\MailKitBundle\Settings\MailSettings;
 use Nowo\MailKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\MailKitBundle\Tests\Support\ResendApiMock;
@@ -320,7 +321,9 @@ final class AdminUiTest extends KernelTestCase
         $this->assertResponseStatus($client, 404);
         $client->request('POST', '/admin/mail/actions/resend/check');
         $this->assertResponseStatus($client, 404);
-        self::assertFalse($this->container($kernel)->has(SentMailRecorder::class));
+        // 1.6 (LL-MK-M1): the recorder stays for erasure / retention of older rows; the log pages' repository does not.
+        self::assertTrue($this->container($kernel)->has(SentMailRecorder::class));
+        self::assertFalse($this->container($kernel)->has(SentMailRepository::class));
     }
 
     private function assertResponseStatus(KernelBrowser $client, int $status): void

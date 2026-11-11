@@ -10,7 +10,7 @@
 
 This bundle is **FrankenPHP worker mode friendly**.
 
-The transport built from the stored DSN is cached per DSN and dropped on `kernel.reset` and on `SettingsChangedEvent`; the DSN itself is read on every send, so a change saved in one worker is used by every worker on its next message. See [docs/FRANKENPHP-WORKER-AUDIT.md](docs/FRANKENPHP-WORKER-AUDIT.md).
+The transport built from the stored DSN is cached per DSN and dropped on `kernel.reset` and on `SettingsChangedEvent`; the DSN itself is read on every send, so a change saved in one worker is used by every worker on its next message. See [docs/FRANKENPHP-WORKER-AUDIT.md](docs/FRANKENPHP-WORKER-AUDIT.md). If your worker runs without `kernel.reset` (services resetter off), note that Symfony's own `mailer.message_logger_listener` keeps every sent message until a reset (about 3 KB per mail): reset it yourself, or remove it in prod (for example a compiler pass calling `$container->removeDefinition('mailer.message_logger_listener')` when the profiler is off).
 
 ## Screenshots
 
@@ -40,7 +40,7 @@ The transport built from the stored DSN is cached per DSN and dropped on `kernel
 - **Sent-mail log** — one row per message (queued → sent / failed, attempts, provider id, size, tag); bodies only with `log.store_bodies` (values passed through `MailHeaders::redact()` masked); UiKit list (filters, server-side sortable columns, pagination) and detail pages; streamed **CSV export** of the filtered, sorted log (formula-injection safe, capped, bodies only on triple opt-in); `nowo:mail-kit:log:purge` (retention, keyset batches) and `nowo:mail-kit:log:forget <email>` (right to erasure).
 - **Readiness** — `OutboundMailReadiness::isOutboundMailReady()`, Twig `nowo_mail_kit_outbound_mail_ready()` / `nowo_mail_kit_status()`, and an **AuthKit** `OutboundMailReadyCheckerInterface` adapter wired automatically when AuthKit is installed.
 - **Branded e-mails** (1.4, optional) — `@NowoMailKit/email/branded_layout.html.twig` / `.txt.twig` with the brand name, colours and logo from a `nowo-tech/brand-contracts` provider (InstanceSettings 1.5 or your own), the logo attached as an inline **CID** part through `BrandAssetReaderInterface` (PNG / JPEG / WebP only, size-limited, never fetched); `BrandedEmailHelper::apply()` / `embed()`; configured fallback without a provider ([USAGE](docs/USAGE.md#branded-e-mails)).
-- **Fail-closed wiring** — the container refuses to compile without Instance Settings or the framework mailer, with the UI on but no form CSRF, with an empty role list, or with `allow_unauthenticated` outside `kernel.debug`.
+- **Fail-closed wiring** — the container refuses to compile without Instance Settings (unless both the DSN and sender providers are host services, 1.6) or the framework mailer, with the UI on but no form CSRF, with an empty role list, or with `allow_unauthenticated` outside `kernel.debug`.
 
 ## Installation
 

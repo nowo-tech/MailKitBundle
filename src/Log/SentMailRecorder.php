@@ -391,7 +391,7 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
     {
         $ids      = [];
         $unlinked = 0;
-        foreach ($this->rowsOf($connection, $forms, ', recipients, subject') as [$row, $roles]) {
+        foreach ($this->rowsOf($connection, $forms, ', recipients, subject, error') as [$row, $roles]) {
             $recipients = $this->withoutAddress($this->decodeRecipients($row['recipients']), $forms);
             if ($recipients === []) {
                 // Nobody else is left in this row (sole recipient, or own message to self): delete it.
@@ -403,6 +403,8 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
                 'recipients'      => json_encode($recipients, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
                 'recipient_index' => self::recipientIndex($recipients),
                 'subject'         => $this->mask((string) $row['subject'], $forms),
+                // LY-D-L1: a bounce kept on a shared row (`550 <x@…>`) may name the erased address.
+                'error' => is_string($row['error']) ? $this->mask($row['error'], $forms) : null,
             ];
             if (in_array('sender', $roles, true)) {
                 $values['sender'] = self::REDACTED;
@@ -417,11 +419,12 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
         $redacted = 0;
         foreach ($forms as $form) {
             $pattern = '%' . self::likeEscape($form) . '%';
-            foreach ($connection->fetchAllAssociative('SELECT id, subject FROM ' . $this->table() . " WHERE LOWER(subject) LIKE ? ESCAPE '!'", [$pattern]) as $row) {
-                $masked = $this->mask((string) $row['subject'], $forms);
+            foreach ($connection->fetchAllAssociative('SELECT id, subject, error FROM ' . $this->table() . " WHERE LOWER(subject) LIKE ? ESCAPE '!' OR LOWER(error) LIKE ? ESCAPE '!'", [$pattern, $pattern]) as $row) {
+                $subject = $this->mask((string) $row['subject'], $forms);
+                $error   = is_string($row['error']) ? $this->mask($row['error'], $forms) : null;
                 // The LIKE is only a pre-filter (case / accent-insensitive collations): count real changes only.
-                if ($masked !== $row['subject']) {
-                    $redacted += (int) $connection->update($this->table(), ['subject' => $masked], ['id' => $row['id']]);
+                if ($subject !== $row['subject'] || $error !== $row['error']) {
+                    $redacted += (int) $connection->update($this->table(), ['subject' => $subject, 'error' => $error], ['id' => $row['id']]);
                 }
             }
             $bodies = $body ? $connection->fetchAllAssociative('SELECT id, html_body, text_body FROM ' . $this->bodyTable() . " WHERE LOWER(html_body) LIKE ? ESCAPE '!' OR LOWER(text_body) LIKE ? ESCAPE '!'", [$pattern, $pattern]) : [];

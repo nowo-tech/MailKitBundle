@@ -517,12 +517,13 @@ does not take the row away from the others:
 
 - **Unlinked** (`unlinked`): a row the address received (to, cc, bcc) or sent that still has **another recipient**.
   The row stays for the others: the address is removed from `recipients` and `recipient_index`, the sender becomes
-  `[redacted]` when it was the address, and the address is masked in the subject and the stored body. The other
+  `[redacted]` when it was the address, and the address is masked in the subject, the delivery error (an SMTP bounce
+  such as `550 <alice@…>`) and the stored body. The other
   recipients still export it with their own data; the erased address appears nowhere in it. A site whose
   `default_from` is a person's own mailbox keeps the log of what it sent to everybody else when that person is erased.
 - **Deleted** (`deleted`): a row with **no other recipient left** (the address was the only recipient, or sent it to
   itself), with its stored body.
-- **Masked** (`redacted`): the address in the subjects and stored bodies of the other rows (e.g. a message to `ops@`
+- **Masked** (`redacted`): the address in the subjects, delivery errors and stored bodies of the other rows (e.g. a message to `ops@`
   that mentions the person), and in the stored bodies of the unlinked rows.
 - Not erased: names or other data of the person that are not the address itself (a display name in a subject, a
   phone number in a body). Use `log.store_bodies: false` (default) and the retention purge to keep that small.

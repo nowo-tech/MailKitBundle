@@ -177,6 +177,28 @@ final class PersonalDataTest extends KernelTestCase
     }
 
     /**
+     * LY-D-L1: the stored delivery error (an SMTP bounce) can name the erased address; it is masked on the rows that
+     * stay, both the unlinked ones and the others.
+     */
+    public function testDeliveryErrorsAreMasked(): void
+    {
+        $kernel   = $this->bootKernel();
+        $recorder = $this->service($kernel, SentMailRecorder::class);
+        $recorder->failed(null, (new Email())->from('app@example.com')->to('gone@example.com', 'stay@example.com')->subject('Shared')->text('t'), 'smtp', '550 5.1.1 <gone@example.com>: Recipient address rejected');
+        $recorder->failed(null, (new Email())->from('app@example.com')->to('ops@example.com')->subject('Other')->text('t'), 'smtp', 'Relay refused for GONE@example.com');
+        $recorder->failed(null, (new Email())->from('app@example.com')->to('ops@example.com')->subject('Unrelated')->text('t'), 'smtp', '550 <agone@example.com> unknown');
+
+        self::assertSame(['deleted' => 0, 'unlinked' => 1, 'redacted' => 1], $recorder->forgetAddress('gone@example.com'));
+        self::assertSame(0, $recorder->erase(SentMailPersonalDataSubject::fromEmail('gone@example.com'))->total());
+        $errors = $this->connection($kernel)->fetchAllKeyValue('SELECT subject, error FROM mail_kit_sent_mail ORDER BY subject');
+        self::assertSame([
+            'Other'     => 'Relay refused for [redacted]',
+            'Shared'    => '550 5.1.1 <[redacted]>: Recipient address rejected',
+            'Unrelated' => '550 <agone@example.com> unknown',
+        ], $errors);
+    }
+
+    /**
      * Unlinking is exact too: an accent / look-alike co-recipient keeps its entry (accent-insensitive MySQL collations
      * only pre-filter).
      */

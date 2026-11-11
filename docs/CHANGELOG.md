@@ -62,13 +62,14 @@ All notable changes to this project are documented here. The format follows
 
 - **Behaviour change:** `SentMailErasureInterface::forgetAddress()` no longer deletes a row other people share. A row
   that still has another recipient is **unlinked**: the address is removed from `recipients` and `recipient_index`, a
-  matching sender becomes `[redacted]`, the address is masked in the subject and body; the row is deleted only when
+  matching sender becomes `[redacted]`, the address is masked in the subject, the delivery error and the body; the row is deleted only when
   no other recipient remains. The result gains an `unlinked` count (`['deleted', 'unlinked', 'redacted']`);
   `forgetRecipient()` returns deleted + unlinked rows; `nowo:mail-kit:log:forget` prints the three counts.
 - `SentMailErasureInterface::forgetAddress()` matches exactly: SQL only pre-filters, every row is re-checked in PHP
   against the normalised address (an accent-insensitive MySQL / MariaDB collation no longer erases `josé@` for
   `jose@`), rows are deleted by id in batches of 500, inside a transaction of its own (or the caller's). `redacted`
-  counts only rows whose subject or body really changed. Masking replaces whole addresses only: erasing
+  counts only rows whose subject, delivery error or body really changed; the stored delivery error (SMTP bounce)
+  is masked too. Masking replaces whole addresses only: erasing
   `na@example.com` no longer masks part of `ana@example.com` or `na@example.com.au` in other rows.
 
 ## [1.6.0] - 2026-11-11

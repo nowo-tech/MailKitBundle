@@ -28,6 +28,7 @@ use Nowo\MailKitBundle\Dsn\DsnHostGuard;
 use Nowo\MailKitBundle\Dsn\MailerDsnProviderInterface;
 use Nowo\MailKitBundle\Dsn\MailerDsnValidator;
 use Nowo\MailKitBundle\Dsn\SettingsMailerDsnProvider;
+use Nowo\MailKitBundle\EventListener\LegacyResendSettingsResetListener;
 use Nowo\MailKitBundle\EventListener\MailKitAccessListener;
 use Nowo\MailKitBundle\EventListener\SettingsChangedListener;
 use Nowo\MailKitBundle\Form\LegacyResendSettingsTypeExtension;
@@ -74,6 +75,7 @@ use Nowo\MailKitBundle\Validator\ResendApiKeyAcceptedValidator;
 use Nowo\OutboundUrlGuardBundle\Dns\HostnameDnsLookup;
 use Nowo\UserKitBundle\PersonalData\PersonalDataEraserInterface;
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
+use Symfony\Component\DependencyInjection\Argument\IteratorArgument;
 use Symfony\Component\DependencyInjection\Argument\ServiceClosureArgument;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -111,6 +113,22 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
 
     /** Container parameter: true when the configuration is read from Instance Settings (1.6). */
     public const INSTANCE_SETTINGS_PARAMETER = 'nowo_mail_kit.instance_settings';
+
+    /**
+     * Unit-of-work boundaries of the {@see LegacyResendSettings} memo: event name => [listener method, priority].
+     * Messenger and console events by name, so both components stay optional (REQ-RUNTIME-002).
+     *
+     * @var array<string, array{0: string, 1: int}>
+     */
+    public const LEGACY_RESEND_RESET_EVENTS = [
+        'kernel.request'                                                   => ['onRequest', 4096],
+        'kernel.terminate'                                                 => ['reset', -1024],
+        'Symfony\\Component\\Messenger\\Event\\WorkerMessageReceivedEvent' => ['reset', 4096],
+        'Symfony\\Component\\Messenger\\Event\\WorkerMessageHandledEvent'  => ['reset', -1024],
+        'Symfony\\Component\\Messenger\\Event\\WorkerMessageFailedEvent'   => ['reset', -1024],
+        'console.command'                                                  => ['reset', 4096],
+        'console.terminate'                                                => ['reset', -1024],
+    ];
 
     /**
      * `nowo_mail_kit`.
@@ -317,6 +335,15 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
                 new ServiceClosureArgument(new Reference(SettingsSectionRegistry::class)),
             ]))
                 ->addTag('kernel.reset', ['method' => 'reset']));
+            // ... and at every request / message / command boundary (REQ-RUNTIME-002), event names as strings so
+            // Messenger and Console stay optional; only an already-built memo is reset.
+            $resetListener = new Definition(LegacyResendSettingsResetListener::class, [
+                new IteratorArgument([new Reference(LegacyResendSettings::class, ContainerInterface::IGNORE_ON_UNINITIALIZED_REFERENCE)]),
+            ]);
+            foreach (self::LEGACY_RESEND_RESET_EVENTS as $event => [$method, $priority]) {
+                $resetListener->addTag('kernel.event_listener', ['event' => $event, 'method' => $method, 'priority' => $priority]);
+            }
+            $container->setDefinition(LegacyResendSettingsResetListener::class, $resetListener);
             // The mailer page shows the live 1.2 Resend values until they are migrated (pre-selected provider, kept key).
             $container->setDefinition(LegacyResendSettingsTypeExtension::class, (new Definition(LegacyResendSettingsTypeExtension::class, [
                 new Reference(MailSettings::class),

@@ -40,6 +40,39 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+Next patch: 1.7.1.
+
+### Fixed
+
+- **Legacy Resend rows kept from before another worker's edit (REQ-RUNTIME-002).** `LegacyResendSettings` memoises
+  the MailKit 1.2 `resend` rows (enabled flag, API key, sender) that `MailSettings` still reads until they are seeded
+  into the `mailer` section; only `kernel.reset` forgot them. Where the services resetter does not run between units
+  of work (a host that removes, replaces or bypasses `services_resetter` or drives `http_kernel` directly, a consumer
+  started with `messenger:consume --no-reset`, or a long-running process that runs several console commands), a
+  worker kept sending with the rows it read first after another worker migrated, purged or edited them (old sender,
+  revoked key). New `LegacyResendSettingsResetListener` forgets the memo at the start of every main request, at
+  `kernel.terminate`, `WorkerMessageReceivedEvent`, `WorkerMessageHandledEvent`, `WorkerMessageFailedEvent`,
+  `console.command` and `console.terminate` (event names as strings; Messenger and Console stay optional). The memo
+  is kept within a unit of work because one send reads it several times. The listener receives the memo as an
+  iterator of `IGNORE_ON_UNINITIALIZED_REFERENCE` references, so a boundary never builds it; `ResetInterface` /
+  `kernel.reset` are kept. Affected: 1.3.0 to 1.7.0, only with `resend.enabled: true`, 1.2 `resend` rows still
+  stored, and one of those paths.
+
+### Tests
+
+- `tests/Integration/Settings/LegacyResendBoundariesTest.php`: one booted kernel, services resetter never called;
+  500 HTTP requests through `http_kernel` (with a sub-request), 500 messages through a real Messenger `Worker` without
+  `ResetServicesListener` (every 7th fails) and 500 console `Application` runs; before each unit another worker
+  alternates the legacy sender between tenant A's and tenant B's address; asserts each unit reads the stored sender
+  and memory grows less than 1 MiB after a 50-unit warm-up. Listener wiring test (only with `resend.enabled`, on every
+  boundary) and a direct `reset()` unit test.
+
+### Documentation
+
+- `docs/FRANKENPHP-WORKER-AUDIT.md`: precise precondition (`FRANKENPHP_RESET_KERNEL=false` still runs the resetter
+  with the stock kernel), the legacy Resend memo and its boundaries, the worker tests, and the host rule for Doctrine
+  entity managers; the Messenger recommendation no longer assumes `kernel.reset` runs between messages.
+
 ## [1.7.0] - 2026-11-11
 
 ### Added

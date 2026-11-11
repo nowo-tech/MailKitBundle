@@ -82,6 +82,7 @@
         "nowo-tech/auth-kit-bundle": "^1.31",
         "nowo-tech/brand-contracts": "^1.0",
         "nowo-tech/phpstan-frankenphp": "^1.0",
+        "nowo-tech/user-kit-bundle": "^1.14",
         "phpstan/extension-installer": "^1.4",
         "phpstan/phpstan": "^2.0",
         "phpstan/phpstan-phpunit": "^2.0",
@@ -102,11 +103,13 @@
         "symfony/yaml": "^7.4 || ^8.0"
     },
     "conflict": {
-        "nowo-tech/brand-contracts": "<1.0 || >=2.0"
+        "nowo-tech/brand-contracts": "<1.0 || >=2.0",
+        "nowo-tech/user-kit-bundle": "<1.12"
     },
     "suggest": {
         "nowo-tech/auth-kit-bundle": "Gate magic-login / password-reset UI on a deliverable mailer (OutboundMailReadyCheckerInterface adapter)",
         "nowo-tech/brand-contracts": "^1.0 — brand name, colours and logo (CID) of the optional branded e-mail layout from a BrandProviderInterface service (nowo_mail_kit.brand, spec 220)",
+        "nowo-tech/user-kit-bundle": "GDPR export / erasure: registers the emails_received eraser and export section (personal_data.enabled, 1.7)",
         "symfony/flex": "For automatic recipe installation",
         "symfony/resend-mailer": "Required for resend+api:// DSNs and the optional Resend settings section",
         "symfony/security-bundle": "Required for the admin UI unless security.allow_unauthenticated is true (dev / demo only)"

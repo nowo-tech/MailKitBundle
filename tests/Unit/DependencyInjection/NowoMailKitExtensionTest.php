@@ -9,6 +9,14 @@ use Nowo\InstanceSettingsBundle\Settings\InstanceSettingsInterface;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\MailerIntegrationPass;
 use Nowo\MailKitBundle\DependencyInjection\NowoMailKitExtension;
 use Nowo\MailKitBundle\Dsn\MailerDsnProviderInterface;
+use Nowo\MailKitBundle\Integration\UserKit\EmailsReceivedPersonalDataEraser;
+use Nowo\MailKitBundle\Integration\UserKit\EmailsReceivedPersonalDataExportProvider;
+use Nowo\MailKitBundle\Log\DefaultSentMailPersonalDataSubjectResolver;
+use Nowo\MailKitBundle\Log\NullSentMailErasure;
+use Nowo\MailKitBundle\Log\NullSentMailPersonalDataExporter;
+use Nowo\MailKitBundle\Log\SentMailPersonalDataEraserInterface;
+use Nowo\MailKitBundle\Log\SentMailPersonalDataExporterInterface;
+use Nowo\MailKitBundle\Log\SentMailPersonalDataSubjectResolverInterface;
 use Nowo\MailKitBundle\Log\SentMailRecorder;
 use Nowo\MailKitBundle\Mailer\RuntimeTransport;
 use Nowo\MailKitBundle\NowoMailKitBundle;
@@ -157,6 +165,51 @@ final class NowoMailKitExtensionTest extends TestCase
         $container->setDefinition(InstanceSettingsInterface::class, new Definition('stdClass'));
         $this->expectExceptionMessage('requires the framework mailer');
         (new MailerIntegrationPass())->process($container);
+    }
+
+    /**
+     * 1.7: the UserKit eraser / export provider are registered only on opt-in (personal_data.enabled: true, LY-L1)
+     * with UserKit installed (dev dependency here) and the log entities mapped; the ports and the resolver SPI always.
+     */
+    public function testUserKitPersonalDataBridgeRegistration(): void
+    {
+        $byDefault = $this->container(['doctrine']);
+        (new NowoMailKitExtension())->load([[]], $byDefault);
+        self::assertFalse($byDefault->hasDefinition(EmailsReceivedPersonalDataEraser::class));
+        self::assertFalse($byDefault->hasDefinition(EmailsReceivedPersonalDataExportProvider::class));
+        self::assertSame(SentMailRecorder::class, (string) $byDefault->getAlias(SentMailPersonalDataEraserInterface::class));
+
+        $default = $this->container(['doctrine']);
+        (new NowoMailKitExtension())->load([['personal_data' => ['enabled' => true]]], $default);
+        self::assertSame(SentMailRecorder::class, (string) $default->getAlias(SentMailPersonalDataExporterInterface::class));
+        self::assertSame(SentMailRecorder::class, (string) $default->getAlias(SentMailPersonalDataEraserInterface::class));
+        self::assertSame(DefaultSentMailPersonalDataSubjectResolver::class, (string) $default->getAlias(SentMailPersonalDataSubjectResolverInterface::class));
+        self::assertSame('event_dispatcher', (string) $default->getDefinition(SentMailRecorder::class)->getArgument(7));
+        self::assertSame([['priority' => EmailsReceivedPersonalDataEraser::PRIORITY]], $default->getDefinition(EmailsReceivedPersonalDataEraser::class)->getTag('nowo_user_kit.personal_data.eraser'));
+        self::assertGreaterThanOrEqual(100, EmailsReceivedPersonalDataEraser::PRIORITY);
+        self::assertSame([['priority' => EmailsReceivedPersonalDataExportProvider::PRIORITY]], $default->getDefinition(EmailsReceivedPersonalDataExportProvider::class)->getTag('nowo_user_kit.personal_data.export_provider'));
+        self::assertSame([SentMailPersonalDataEraserInterface::class, SentMailPersonalDataSubjectResolverInterface::class], array_map('strval', $default->getDefinition(EmailsReceivedPersonalDataEraser::class)->getArguments()));
+        self::assertSame([SentMailPersonalDataExporterInterface::class, SentMailPersonalDataSubjectResolverInterface::class], array_map('strval', $default->getDefinition(EmailsReceivedPersonalDataExportProvider::class)->getArguments()));
+
+        $custom = $this->container(['doctrine']);
+        (new NowoMailKitExtension())->load([['personal_data' => ['enabled' => true, 'subject_resolver' => 'app.mail_subjects']]], $custom);
+        self::assertSame('app.mail_subjects', (string) $custom->getAlias(SentMailPersonalDataSubjectResolverInterface::class));
+
+        $off = $this->container(['doctrine']);
+        (new NowoMailKitExtension())->load([['personal_data' => ['enabled' => false]]], $off);
+        self::assertFalse($off->hasDefinition(EmailsReceivedPersonalDataEraser::class));
+        self::assertFalse($off->hasDefinition(EmailsReceivedPersonalDataExportProvider::class));
+        self::assertTrue($off->hasAlias(SentMailPersonalDataExporterInterface::class));
+
+        $unmapped = $this->container(['doctrine']);
+        (new NowoMailKitExtension())->load([['log' => ['enabled' => false, 'map_entities' => false], 'personal_data' => ['enabled' => true]]], $unmapped);
+        self::assertFalse($unmapped->hasDefinition(EmailsReceivedPersonalDataEraser::class));
+
+        $noDoctrine = $this->container([]);
+        (new NowoMailKitExtension())->load([['log' => ['enabled' => false], 'personal_data' => ['enabled' => true]]], $noDoctrine);
+        self::assertSame(NullSentMailPersonalDataExporter::class, (string) $noDoctrine->getAlias(SentMailPersonalDataExporterInterface::class));
+        self::assertSame(NullSentMailErasure::class, (string) $noDoctrine->getAlias(SentMailPersonalDataEraserInterface::class));
+        self::assertFalse($noDoctrine->hasDefinition(EmailsReceivedPersonalDataEraser::class));
     }
 
     public function testLoadNeedsInstanceSettings(): void

@@ -7,19 +7,27 @@ namespace Nowo\MailKitBundle\Log;
 use DateTimeImmutable;
 
 /**
- * {@see SentMailErasureInterface} on a host without Doctrine (the log requires it): the bundle cannot have stored
+ * {@see SentMailErasureInterface} and {@see SentMailPersonalDataEraserInterface} (1.7) on a host without Doctrine (the log requires it): the bundle cannot have stored
  * anything, so there is nothing to erase. With Doctrine registered the port is always {@see SentMailRecorder}.
  */
-final readonly class NullSentMailErasure implements SentMailErasureInterface
+final readonly class NullSentMailErasure implements SentMailErasureInterface, SentMailPersonalDataEraserInterface
 {
     /**
      * Nothing stored.
      *
-     * @return array{deleted: int, redacted: int}
+     * @return array{deleted: int, unlinked: int, redacted: int}
      */
     public function forgetAddress(string $email): array
     {
-        return ['deleted' => 0, 'redacted' => 0];
+        return ['deleted' => 0, 'unlinked' => 0, 'redacted' => 0];
+    }
+
+    /**
+     * Nothing stored.
+     */
+    public function erase(SentMailPersonalDataSubject $subject): SentMailErasureResult
+    {
+        return new SentMailErasureResult();
     }
 
     /**

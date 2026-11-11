@@ -21,6 +21,36 @@
 
 ## Unreleased
 
+Target **1.7.0** (next minor), from **1.6.0**: `composer update nowo-tech/mail-kit-bundle`. **Nothing to change**,
+but read item 4: `forgetAddress()` keeps shared rows for the other recipients now. With UserKit installed, MailKit
+1.7 needs UserKit >= 1.12 (`conflict`).
+
+1. **GDPR ports.** `Log\SentMailPersonalDataExporterInterface` (new) exports the log rows of one address;
+   `Log\SentMailPersonalDataEraserInterface` (new) erases them for a `SentMailPersonalDataSubject` and returns a
+   `SentMailErasureResult` (`forgetAddress()` stays). If
+   your application reads `mail_kit_sent_mail` itself for a GDPR export (e.g. with `SentMailRecorder::forms()` /
+   `likeEscape()`), call the port instead. See [USAGE — GDPR erasure and export](USAGE.md#gdpr-erasure-and-export).
+2. **UserKit bridge (opt-in).** Nothing registers by default (`nowo_mail_kit.personal_data.enabled: false`). To let
+   UserKit erase and export the log, set it to `true` (UserKit >= 1.12, log entities mapped): the eraser and the
+   export section `emails_received` register. **Before you turn it on, delete your own `emails_received` export
+   provider** for these tables: UserKit's `PersonalDataExporter` throws a `LogicException` ("Duplicate personal data
+   export section") on two sections with the same key, which makes the whole GDPR export fail. Two erasers with the
+   same key both run (the second finds nothing), but remove yours too. Keep the bridge off if you must retain the
+   log (GDPR art. 17(3)).
+3. **Exact erasure.** `forgetAddress()` re-checks every row in PHP: on MySQL / MariaDB with an accent-insensitive
+   collation an address no longer erases its accent variants (`jose@` vs `josé@`). Case variants are still one
+   address (the log stores addresses in lower case). It now runs in its own transaction, or joins yours, and
+   dispatches `SentMailPersonalDataErasedEvent` after its own commit. `redacted` counts only rows that really
+   changed, and masking replaces whole addresses only (`na@` no longer masks part of `ana@`).
+4. **Behaviour change: shared rows are unlinked, not deleted.** In 1.6 `forgetAddress()` deleted every row the address
+   received or sent, also when the message went to other people. In 1.7 a row that still has another recipient is
+   kept: the address is removed from `recipients` and `recipient_index`, a matching sender becomes `[redacted]`, and
+   the address is masked in the subject and the stored body. Only a row with no other recipient left is deleted. The
+   result has a new key, `['deleted' => n, 'unlinked' => n, 'redacted' => n]` (also on
+   `SentMailPersonalDataErasedEvent::$unlinked` and `SentMailErasureResult::$unlinked`); `forgetRecipient()` returns
+   deleted + unlinked rows. If your code compares the whole array, add `unlinked`. If the site's `default_from` is a
+   person's own mailbox, erasing that person no longer wipes the log of what was sent to everybody else.
+
 ## To 1.6.0
 
 Target **1.6.0**, from **1.5.0**: `composer update nowo-tech/mail-kit-bundle`. **Standard hosts: nothing to change**

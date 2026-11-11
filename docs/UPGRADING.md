@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+  - [To 1.6.0](#to-160)
 - [To 1.5.0](#to-150)
   - [To 1.5.0](#to-150-1)
 - [To 1.4.0](#to-140)
@@ -20,6 +21,26 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+### To 1.6.0
+
+Target **1.6.0**, from **1.5.0**: `composer update nowo-tech/mail-kit-bundle`. **Standard hosts: nothing to change**
+(Instance Settings registered → same services, same defaults).
+
+1. **Without Instance Settings (opt-in, DDD hosts).** Set both `nowo_mail_kit.mailer.dsn_provider` and
+   `nowo_mail_kit.mailer.sender_provider` to your own services and leave `NowoInstanceSettingsBundle` out of
+   `config/bundles.php`. Keep `resend.enabled: false`. With `log.enabled: false` you can leave DoctrineBundle and
+   DoctrineEncrypt out too. The settings actions disappear (there is no settings page); `nowo:mail-kit:send-test`
+   uses your sender port.
+2. **`log.enabled: false` no longer maps the log entities.** If your migrations or `doctrine:schema:update` still
+   track `mail_kit_sent_mail` / `mail_kit_sent_mail_body`, the next diff proposes dropping them: drop them (they were
+   not written with the log off) or exclude them with `doctrine.dbal.schema_filter`. Hosts with the log on (default)
+   are not affected.
+3. **New ports (optional).** Prefer `OutboundMailReadinessInterface` over `OutboundMailReadiness`, and
+   `SentMailErasureInterface` over an optional `SentMailRecorder` for erasure / retention.
+4. **Deprecation notice.** Instance Settings, DoctrineEncrypt and the ORM stay in `require` in 1.x; 2.0 moves them to
+   `suggest`. If your application uses Instance Settings itself, require `nowo-tech/instance-settings-bundle`
+   explicitly now instead of relying on MailKit to install it.
 
 ## To 1.5.0
 

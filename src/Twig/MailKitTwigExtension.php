@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Nowo\MailKitBundle\Twig;
 
 use Nowo\MailKitBundle\Readiness\MailStatus;
-use Nowo\MailKitBundle\Readiness\OutboundMailReadiness;
+use Nowo\MailKitBundle\Readiness\OutboundMailReadinessInterface;
 use Twig\Extension\AbstractExtension;
 use Twig\TwigFunction;
 
@@ -16,10 +16,10 @@ use Twig\TwigFunction;
 final class MailKitTwigExtension extends AbstractExtension
 {
     /**
-     * @param OutboundMailReadiness $readiness MailKit readiness
+     * @param OutboundMailReadinessInterface $readiness MailKit readiness
      */
     public function __construct(
-        private readonly OutboundMailReadiness $readiness,
+        private readonly OutboundMailReadinessInterface $readiness,
     ) {
     }
 

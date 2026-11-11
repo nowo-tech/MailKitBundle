@@ -22,7 +22,7 @@ use function substr;
  * the framework transport counts only when `mailer.fallback_counts_as_ready` is true (MAILER_DSN cannot be inspected
  * through the framework transports). No DNS lookup here (see {@see self::status()}).
  */
-final readonly class OutboundMailReadiness
+final readonly class OutboundMailReadiness implements OutboundMailReadinessInterface
 {
     /**
      * @param bool $fallbackCountsAsReady `nowo_mail_kit.mailer.fallback_counts_as_ready`

@@ -489,6 +489,33 @@ final readonly class SymfonyInvitationNotifier implements InvitationNotifier
 | `Nowo\MailKitBundle\Security\MailKitAccessCheckerInterface` | Who opens the admin UI; `canAccess(?object $user): bool` | `nowo_mail_kit.security.access_checker` |
 | `Nowo\Brand\Contract\BrandProviderInterface` / `BrandAssetReaderInterface` (optional) | Brand of the branded layout | `nowo_mail_kit.brand: auto` |
 
+**Without Instance Settings and without the ORM (1.6)**
+
+Standard path (default): register `NowoInstanceSettingsBundle`; the DSN, sender, test recipient and Resend key are
+fields of its `mailer` section, edited at runtime. DDD path (opt-in): give MailKit its configuration through the two
+ports and leave Instance Settings (and, with the log off, Doctrine) out of the kernel:
+
+```yaml
+# config/packages/nowo_mail_kit.yaml — config/bundles.php has no NowoInstanceSettingsBundle
+nowo_mail_kit:
+    mailer:
+        dsn_provider: App\Infrastructure\Mail\VaultMailerDsnProvider       # MailerDsnProviderInterface
+        sender_provider: App\Infrastructure\Mail\TenantSenderProvider      # SenderProviderInterface
+    log:
+        enabled: false   # no DoctrineBundle needed; keep it true to have the sent-mail log (needs the ORM)
+```
+
+Both providers are read on every send, so per-tenant or per-request values work in a kept-alive worker (keep no
+state in them). Without either provider the build fails and names the missing option; `resend.enabled` needs
+Instance Settings. The settings actions are not registered (no settings page); the log pages, readiness, Twig
+functions, the AuthKit adapter and `nowo:mail-kit:send-test` (sender from your port) keep working.
+
+**Sending inside a transaction**
+
+The mailer sends when you call it. Send after your unit of work commits — from a domain-event subscriber that runs
+after commit, or through Messenger (`framework.messenger.routing` of `SendEmailMessage` to an async transport) — so a
+rolled-back use case never sends an e-mail. MailKit never flushes or commits your EntityManager (the log uses DBAL).
+
 **Reacting to deliveries (1.5)**
 
 `RuntimeTransport` dispatches id-only PSR-14 events after each send, once the sent-mail log row is written:
@@ -510,26 +537,26 @@ about a failing transport cannot recurse through the same transport.
 
 **Services and value objects your adapters can use**
 
-- `OutboundMailReadiness::isOutboundMailReady()` / `status(): MailStatus` (scalars only: source, redacted label, ready,
-  error key, missing fields). AuthKit gets it automatically through `OutboundMailReadyCheckerInterface`.
-- `SentMailRecorder::forgetAddress($email)` (`['deleted' => n, 'redacted' => n]`) from your account-deletion use case;
-  the service exists only with `log.enabled: true`, so inject it as optional.
+- `OutboundMailReadinessInterface::isOutboundMailReady()` / `status(): MailStatus` (1.6 port of
+  `OutboundMailReadiness`; scalars only: source, redacted label, ready, error key, missing fields). AuthKit gets it
+  automatically through `OutboundMailReadyCheckerInterface`.
+- `SentMailErasureInterface::forgetAddress($email)` (`['deleted' => n, 'redacted' => n]`) and `purgeBefore()` (1.6)
+  from your account-deletion / retention use case; always registered (a no-op with `log.enabled: false`).
 - `RuntimeDsn`, `MailStatus`, `TestMailResult`, `SentMailFilters` are immutable value objects.
 
 **Persistence**
 
 `SentMail` and `SentMailBody` are bundle-owned, read-only mapped entities with no relations: no
-`resolve_target_entities`, nothing to extend. Their mapping is added to the default ORM mapping list; with several
-entity managers, add the `NowoMailKitBundle` mapping to the manager you name in `doctrine.entity_manager`.
+`resolve_target_entities`, nothing to extend. Their mapping is added to the default ORM mapping list only with
+`log.enabled: true` (1.6); with several entity managers, add the `NowoMailKitBundle` mapping to the manager you name
+in `doctrine.entity_manager`.
 
 **Known limitations**
 
-- Instance Settings stays a required dependency (the `mailer` settings section, the test e-mail and the admin
-  pages are built on it), even when both `mailer.dsn_provider` and `mailer.sender_provider` point to your own
-  services.
-- `OutboundMailReadiness`, `SentMailRecorder` and `SentMailRepository` are final classes without interfaces: wrap them
-  in your own port if your application layer must not depend on them.
-- The log tables are mapped even with `log.enabled: false`.
+- Instance Settings, DoctrineEncrypt and the ORM stay in composer `require` in 1.x (installed, not registered); 2.0
+  moves them to `suggest`.
+- `SentMailRepository` returns the `SentMail` entity (admin read model): wrap it in your own query port if your
+  application layer must not depend on it.
 
 ## Admin UI
 

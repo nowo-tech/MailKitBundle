@@ -70,7 +70,7 @@ use const JSON_UNESCAPED_UNICODE;
  * Privacy: envelope data only by default (subject, sender, recipients); bodies only with `log.store_bodies`, with the
  * {@see MailHeaders::REDACT} values masked. Errors are scrubbed of credentials ({@see ErrorScrubber}).
  */
-final readonly class SentMailRecorder
+final readonly class SentMailRecorder implements SentMailErasureInterface
 {
     /** Separator of the recipient index (unit separator: refused in addresses). */
     public const SEPARATOR = "\x1F";

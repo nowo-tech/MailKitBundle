@@ -14,7 +14,7 @@ use Nowo\MailKitBundle\Log\SentMailCsvExporter;
 use Nowo\MailKitBundle\Log\SentMailFilters;
 use Nowo\MailKitBundle\Log\SentMailRepository;
 use Nowo\MailKitBundle\NowoMailKitBundle;
-use Nowo\MailKitBundle\Readiness\OutboundMailReadiness;
+use Nowo\MailKitBundle\Readiness\OutboundMailReadinessInterface;
 use Nowo\MailKitBundle\Resend\ResendApiChecker;
 use Nowo\MailKitBundle\Security\AccessGuard;
 use Nowo\MailKitBundle\Settings\MailerSettingsSection;
@@ -74,10 +74,10 @@ final class MailKitController extends AbstractController
         private readonly CsrfOnlyFormFactory $csrfForms,
         private readonly MailKitPages $pages,
         private readonly AdminPages $adminPages,
-        private readonly OutboundMailReadiness $readiness,
+        private readonly OutboundMailReadinessInterface $readiness,
         private readonly TestMailSender $testMail,
         private readonly TestMailGuard $testMailGuard,
-        private readonly MailSettings $settings,
+        private readonly ?MailSettings $settings,
         private readonly ?SentMailRepository $repository = null,
         private readonly ?ResendApiChecker $resendChecker = null,
         private readonly int $pageSize = 25,
@@ -202,7 +202,7 @@ final class MailKitController extends AbstractController
 
             return $this->backTo(MailerSettingsSection::NAME);
         }
-        $key = $this->settings->resendApiKey();
+        $key = $this->settings?->resendApiKey();
         if ($key === null || !$this->resendChecker instanceof ResendApiChecker) {
             $this->addFlash('error', $this->trans('resend.check.no_key'));
 

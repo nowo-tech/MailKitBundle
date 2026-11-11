@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Nowo\MailKitBundle\Integration\AuthKit;
 
 use Nowo\AuthKitBundle\Mailer\OutboundMailReadyCheckerInterface;
-use Nowo\MailKitBundle\Readiness\OutboundMailReadiness;
+use Nowo\MailKitBundle\Readiness\OutboundMailReadinessInterface;
 
 /**
  * AuthKit adapter: AuthKit shows magic-login and password-reset only when MailKit can deliver mail. Registered as
@@ -15,10 +15,10 @@ use Nowo\MailKitBundle\Readiness\OutboundMailReadiness;
 final readonly class MailKitOutboundMailReadyChecker implements OutboundMailReadyCheckerInterface
 {
     /**
-     * @param OutboundMailReadiness $readiness MailKit readiness
+     * @param OutboundMailReadinessInterface $readiness MailKit readiness
      */
     public function __construct(
-        private OutboundMailReadiness $readiness,
+        private OutboundMailReadinessInterface $readiness,
     ) {
     }
 

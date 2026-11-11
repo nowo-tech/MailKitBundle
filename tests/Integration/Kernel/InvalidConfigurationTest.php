@@ -35,7 +35,10 @@ final class InvalidConfigurationTest extends KernelTestCase
         yield 'env placeholder export switch' => [['web_ui' => ['export' => ['enabled' => '%env(bool:MAIL_KIT_EXPORT)%']]], [], false, InvalidConfigurationException::class, 'web_ui.export.enabled must be a literal boolean'];
         yield 'env placeholder switch' => [['log' => ['store_bodies' => '%env(bool:MAIL_KIT_BODIES)%']], [], false, InvalidConfigurationException::class, 'must be a literal boolean'];
         yield 'unauthenticated outside debug' => [['security' => ['allow_unauthenticated' => true]], [], false, InvalidConfigurationException::class, 'only allowed when kernel.debug is true'];
-        yield 'no instance settings' => [[], ['instance_settings'], false, LogicException::class, 'requires nowo-tech/instance-settings-bundle'];
+        yield 'no instance settings' => [[], ['instance_settings'], false, LogicException::class, 'register Nowo\\InstanceSettingsBundle\\NowoInstanceSettingsBundle in config/bundles.php, or set nowo_mail_kit.mailer.dsn_provider and nowo_mail_kit.mailer.sender_provider'];
+        yield 'no instance settings, sender from settings' => [['mailer' => ['dsn_provider' => 'host.dsn']], ['instance_settings'], false, LogicException::class, 'or set nowo_mail_kit.mailer.sender_provider to your own'];
+        yield 'no instance settings, resend on' => [['mailer' => ['dsn_provider' => 'host.dsn', 'sender_provider' => 'host.sender'], 'resend' => ['enabled' => true]], ['instance_settings'], false, LogicException::class, 'resend.enabled requires nowo-tech/instance-settings-bundle'];
+        yield 'log without doctrine' => [['mailer' => ['dsn_provider' => 'host.dsn', 'sender_provider' => 'host.sender']], ['instance_settings', 'doctrine'], false, LogicException::class, 'the sent-mail log (nowo_mail_kit.log.enabled, default true) requires doctrine/doctrine-bundle'];
         yield 'no mailer' => [[], ['mailer'], false, LogicException::class, 'requires the framework mailer'];
     }
 

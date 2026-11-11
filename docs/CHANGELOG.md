@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+  - [Target 1.6.0](#target-160)
 - [[1.5.0] - 2026-11-10](#150---2026-11-10)
 - [[1.4.0] - 2026-11-09](#140---2026-11-09)
 - [[1.3.0] - 2026-11-02](#130---2026-11-02)
@@ -15,6 +16,40 @@ All notable changes to this project are documented here. The format follows
 - [[1.0.0] - 2026-10-31](#100---2026-10-31)
 
 ## [Unreleased]
+
+### Target 1.6.0
+
+Architecture bar W2 (standard Symfony by default, strict DDD opt-in): rule 8 (configuration through provider ports)
+and rule 1 (ports for the services used as API).
+
+#### Added
+
+- Instance Settings is optional when the host provides both configuration ports: with
+  `nowo_mail_kit.mailer.dsn_provider` **and** `nowo_mail_kit.mailer.sender_provider` set to host services and no
+  `NowoInstanceSettingsBundle` registered, the bundle boots without it. The `mailer` settings section, its
+  `SettingsChangedEvent` listener and the settings actions (`/actions/...` routes) are then not registered; the
+  mailer decorators, readiness, the CLI test e-mail (sender from the host port) and the log pages keep working.
+  Without either provider the build fails and names the missing option(s); `resend.enabled` needs Instance Settings.
+- With `log.enabled: false` the bundle needs no Doctrine either (no ORM, no DoctrineEncrypt registered). With the log
+  on and no DoctrineBundle the build now fails with a clear message instead of a missing-service error.
+- `Readiness\OutboundMailReadinessInterface` (`isOutboundMailReady()`, `status()`, `missingFields()`), aliased to
+  `OutboundMailReadiness`; the Twig extension, the AuthKit adapter, the settings listener and the controller depend on
+  the interface.
+- `Log\SentMailErasureInterface` (`forgetAddress()`, `purgeBefore()`), always registered: `SentMailRecorder` with the
+  log on, `Log\NullSentMailErasure` (no-op) with the log off — an account-deletion use case can depend on it whatever
+  the configuration.
+- Container parameter `nowo_mail_kit.instance_settings` (whether the configuration is read from Instance Settings).
+
+#### Changed
+
+- The Doctrine mapping of `SentMail` / `SentMailBody` is no longer prepended with `log.enabled: false` (the tables were
+  never written then). See UPGRADING if your schema tooling still manages those tables.
+- `TestMailSender` takes `?MailSettings` and an optional trailing `?SenderProviderInterface`; `MailKitController`
+  takes `?MailSettings`; `MailKitRouteLoader` takes an optional trailing `$settingsActions` flag. Existing callers keep
+  working.
+- `MailerIntegrationPass` checks for the Instance Settings store only when the configuration is read from it.
+- `composer.json` keeps `nowo-tech/instance-settings-bundle`, `nowo-tech/doctrine-encrypt-bundle` and `doctrine/orm`
+  in `require` until 2.0 (they move to `suggest` then); the code paths are optional now.
 
 ## [1.5.0] - 2026-11-10
 

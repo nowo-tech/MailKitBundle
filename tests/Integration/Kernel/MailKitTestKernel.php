@@ -40,7 +40,8 @@ final class MailKitTestKernel extends Kernel
     /**
      * @param Closure(ContainerConfigurator): void $services extension configs and services
      * @param Closure(RoutingConfigurator): void $routes routes
-     * @param list<string> $without bundles / features to leave out (security, instance_settings, mailer, messenger)
+     * @param list<string> $without bundles / features to leave out (security, instance_settings, mailer, messenger,
+     *                              doctrine: DoctrineBundle and DoctrineEncrypt, i.e. no ORM)
      */
     public function __construct(
         private readonly string $id,
@@ -60,8 +61,10 @@ final class MailKitTestKernel extends Kernel
         }
         yield new TwigBundle();
         yield new TwigExtraBundle();
-        yield new DoctrineBundle();
-        yield new NowoDoctrineEncryptBundle();
+        if (!in_array('doctrine', $this->without, true)) {
+            yield new DoctrineBundle();
+            yield new NowoDoctrineEncryptBundle();
+        }
         yield new NowoFormKitBundle();
         yield new NowoUiKitBundle();
         if (!in_array('instance_settings', $this->without, true)) {
@@ -138,18 +141,20 @@ final class MailKitTestKernel extends Kernel
         }
         $container->extension('framework', $framework);
         $container->extension('twig', ['strict_variables' => true]);
-        $container->extension('doctrine', [
-            // CI runs the log tests on MySQL, MariaDB and PostgreSQL too (CA L2): MAIL_KIT_TEST_DATABASE_URL.
-            'dbal' => ['url' => self::databaseUrl()],
-            'orm'  => [],
-        ]);
-        $container->extension('nowo_doctrine_encrypt', [
-            'default_profile'      => 'default',
-            'secret_permissions'   => ['enabled' => false],
-            'generate_missing_key' => true,
-            'on_decrypt_failure'   => 'null',
-            'profiles'             => ['default' => ['encryptor_class' => 'Halite', 'secret_directory_path' => self::baseDir() . '/' . $this->id . '/keys']],
-        ]);
+        if (!in_array('doctrine', $this->without, true)) {
+            $container->extension('doctrine', [
+                // CI runs the log tests on MySQL, MariaDB and PostgreSQL too (CA L2): MAIL_KIT_TEST_DATABASE_URL.
+                'dbal' => ['url' => self::databaseUrl()],
+                'orm'  => [],
+            ]);
+            $container->extension('nowo_doctrine_encrypt', [
+                'default_profile'      => 'default',
+                'secret_permissions'   => ['enabled' => false],
+                'generate_missing_key' => true,
+                'on_decrypt_failure'   => 'null',
+                'profiles'             => ['default' => ['encryptor_class' => 'Halite', 'secret_directory_path' => self::baseDir() . '/' . $this->id . '/keys']],
+            ]);
+        }
         if (!in_array('security', $this->without, true)) {
             $container->extension('security', [
                 'password_hashers' => ['Symfony\Component\Security\Core\User\InMemoryUser' => 'plaintext'],

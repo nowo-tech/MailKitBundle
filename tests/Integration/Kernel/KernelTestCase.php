@@ -79,6 +79,9 @@ abstract class KernelTestCase extends TestCase
         $this->kernels[] = $kernel;
         $kernel->boot();
 
+        if (in_array('doctrine', $without, true)) {
+            return $kernel;
+        }
         $doctrine = $kernel->getContainer()->get('doctrine');
         self::assertInstanceOf(ManagerRegistry::class, $doctrine);
         $entityManager = $doctrine->getManager();

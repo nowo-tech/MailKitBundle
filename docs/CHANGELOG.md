@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[1.7.1] - 2026-11-11](#171---2026-11-11)
+  - [Fixed](#fixed)
+  - [Tests](#tests)
+  - [Documentation](#documentation)
 - [[1.7.0] - 2026-11-11](#170---2026-11-11)
   - [Added](#added)
   - [Changed](#changed)
@@ -25,11 +29,11 @@ All notable changes to this project are documented here. The format follows
 - [[1.2.0] - 2026-11-02](#120---2026-11-02)
   - [Added](#added-5)
   - [Changed](#changed-4)
-  - [Fixed](#fixed)
+  - [Fixed](#fixed-1)
 - [[1.1.1] - 2026-11-01](#111---2026-11-01)
   - [Security](#security-2)
   - [Changed](#changed-5)
-  - [Fixed](#fixed-1)
+  - [Fixed](#fixed-2)
 - [[1.1.0] - 2026-11-01](#110---2026-11-01)
   - [Added](#added-6)
   - [Changed](#changed-6)
@@ -39,6 +43,8 @@ All notable changes to this project are documented here. The format follows
   - [Security (re-verification follow-ups)](#security-re-verification-follow-ups)
 
 ## [Unreleased]
+
+## [1.7.1] - 2026-11-11
 
 Next patch: 1.7.1.
 

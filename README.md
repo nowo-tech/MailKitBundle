@@ -10,7 +10,7 @@
 
 This bundle is **FrankenPHP worker mode friendly**.
 
-The transport built from the stored DSN is cached per DSN and dropped on `kernel.reset` and on `SettingsChangedEvent`; the DSN itself is read on every send, so a change saved in one worker is used by every worker on its next message. See [docs/FRANKENPHP-WORKER-AUDIT.md](docs/FRANKENPHP-WORKER-AUDIT.md).
+The transport built from the stored DSN is cached per DSN and dropped on `kernel.reset` and on `SettingsChangedEvent`; the DSN itself is read on every send, so a change saved in one worker is used by every worker on its next message. See [docs/FRANKENPHP-WORKER-AUDIT.md](docs/FRANKENPHP-WORKER-AUDIT.md). If your worker runs without `kernel.reset` (services resetter off), note that Symfony's own `mailer.message_logger_listener` keeps every sent message until a reset (about 3 KB per mail): reset it yourself, or remove it in prod (for example a compiler pass calling `$container->removeDefinition('mailer.message_logger_listener')` when the profiler is off).
 
 ## Screenshots
 

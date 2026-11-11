@@ -113,12 +113,12 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
     }
 
     /**
-     * Prepends the Doctrine mapping of the log entities (only with the log on, 1.6), the FormKit profile and the
-     * AuthKit mail-ready checker.
+     * Prepends the Doctrine mapping of the log entities (unless `log.map_entities: false`, 1.6), the FormKit profile and
+     * the AuthKit mail-ready checker.
      */
     public function prepend(ContainerBuilder $container): void
     {
-        if ($container->hasExtension('doctrine') && $this->logEnabledInRawConfig($container)) {
+        if ($container->hasExtension('doctrine') && $this->mapEntitiesInRawConfig($container)) {
             $container->prependExtensionConfig('doctrine', [
                 'orm' => [
                     'mappings' => [
@@ -144,19 +144,20 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
     }
 
     /**
-     * `log.enabled` of the unprocessed configuration (last value wins; default true). The prepend runs before the
-     * configuration is processed, and the switch must be a literal boolean ({@see self::assertLiteralBooleans()}).
+     * `log.map_entities` of the unprocessed configuration (last value wins; default true, also with `log.enabled:
+     * false`, so tables written while the log was on stay mapped). The prepend runs before the configuration is
+     * processed; a non-literal value keeps the mapping and is rejected later ({@see self::assertLiteralBooleans()}).
      */
-    private function logEnabledInRawConfig(ContainerBuilder $container): bool
+    private function mapEntitiesInRawConfig(ContainerBuilder $container): bool
     {
-        $enabled = true;
+        $map = true;
         foreach ($container->getExtensionConfig(Configuration::ALIAS) as $config) {
-            if (is_array($config['log'] ?? null) && array_key_exists('enabled', $config['log']) && is_bool($config['log']['enabled'])) {
-                $enabled = $config['log']['enabled'];
+            if (is_array($config['log'] ?? null) && array_key_exists('map_entities', $config['log']) && is_bool($config['log']['map_entities'])) {
+                $map = $config['log']['map_entities'];
             }
         }
 
-        return $enabled;
+        return $map;
     }
 
     /**
@@ -215,7 +216,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             $this->registerSettings($container, $config);
         }
         $this->registerValidation($container, $config['dsn']);
-        $this->registerLog($container, $config['log'], $config['doctrine']);
+        $this->registerLog($container, $config['log'], $config['doctrine'], $this->hasBundle($container, 'DoctrineBundle') || $container->hasExtension('doctrine'));
         $this->registerMailer($container, $config, $settings);
         $this->registerTestMail($container, $config, $settings);
         $this->registerWebUi($container, $config, $settings);
@@ -365,15 +366,20 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
     }
 
     /**
+     * The recorder (erasure, retention and the forget / purge commands) is registered whenever Doctrine is: with
+     * `log.enabled: false` it records nothing but still erases and purges the rows written while the log was on (1.6,
+     * LL-MK-M1). Only without Doctrine is the erasure port a no-op.
+     *
      * @param array{enabled: bool, store_bodies: bool, retention_days: int, purge_batch_size: int} $log
      * @param array{table_prefix: string, entity_manager: string|null} $doctrine
+     * @param bool $hasDoctrine DoctrineBundle registered
      */
-    private function registerLog(ContainerBuilder $container, array $log, array $doctrine): void
+    private function registerLog(ContainerBuilder $container, array $log, array $doctrine, bool $hasDoctrine): void
     {
         $container->setDefinition(TablePrefixListener::class, (new Definition(TablePrefixListener::class, [$doctrine['table_prefix']]))
             ->addTag('doctrine.event_listener', ['event' => 'loadClassMetadata']));
 
-        if (!$log['enabled']) {
+        if (!$log['enabled'] && !$hasDoctrine) {
             $container->setDefinition(NullSentMailErasure::class, new Definition(NullSentMailErasure::class));
             $container->setAlias(SentMailErasureInterface::class, NullSentMailErasure::class)->setPublic(true);
 
@@ -389,10 +395,12 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE),
             new Reference('clock', ContainerInterface::NULL_ON_INVALID_REFERENCE),
         ]))->setPublic(true));
-        $container->setDefinition(SentMailRepository::class, (new Definition(SentMailRepository::class, [
-            new Reference('doctrine'),
-            $doctrine['entity_manager'],
-        ]))->setPublic(true));
+        if ($log['enabled']) {
+            $container->setDefinition(SentMailRepository::class, (new Definition(SentMailRepository::class, [
+                new Reference('doctrine'),
+                $doctrine['entity_manager'],
+            ]))->setPublic(true));
+        }
 
         $container->setDefinition(PurgeSentMailLogCommand::class, (new Definition(PurgeSentMailLogCommand::class, [
             new Reference(SentMailRecorder::class),
@@ -481,14 +489,16 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
      */
     private function registerTestMail(ContainerBuilder $container, array $config, bool $settings): void
     {
-        /* @var array{test_email: array{rate_limit: int, rate_interval: string}, sender: array{require_public_domain: bool}, resend: array{enabled: bool, api_timeout: float}} $config */
+        /** @var array{mailer: array{sender_provider: string|null}, test_email: array{rate_limit: int, rate_interval: string}, sender: array{require_public_domain: bool}, resend: array{enabled: bool, api_timeout: float}} $config */
+        $hostSender = is_string($config['mailer']['sender_provider']) && $config['mailer']['sender_provider'] !== '';
         $container->setDefinition(TestMailSender::class, (new Definition(TestMailSender::class, [
             new Reference(RuntimeTransport::class),
             $settings ? new Reference(MailSettings::class) : null,
             new Reference('translator', ContainerInterface::NULL_ON_INVALID_REFERENCE),
             $config['sender']['require_public_domain'],
             new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE),
-            $settings ? null : new Reference(SenderProviderInterface::class),
+            // The test e-mail uses the same sender as real mail (LL-MK-L2): the host port when one is set.
+            !$settings || $hostSender ? new Reference(SenderProviderInterface::class) : null,
         ]))->setPublic(true));
 
         $container->setDefinition(self::LIMITER_ID, new Definition(RateLimiterFactory::class, [
@@ -661,6 +671,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             'dsn.allow_insecure_tls'         => $config['dsn']['allow_insecure_tls'] ?? null,
             'resend.enabled'                 => $config['resend']['enabled'] ?? null,
             'log.enabled'                    => $config['log']['enabled'] ?? null,
+            'log.map_entities'               => $config['log']['map_entities'] ?? null,
             'log.store_bodies'               => $config['log']['store_bodies'] ?? null,
             'web_ui.enabled'                 => $config['web_ui']['enabled'] ?? null,
             'web_ui.export.enabled'          => $config['web_ui']['export']['enabled'] ?? null,

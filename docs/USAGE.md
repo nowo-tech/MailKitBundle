@@ -541,14 +541,16 @@ about a failing transport cannot recurse through the same transport.
   `OutboundMailReadiness`; scalars only: source, redacted label, ready, error key, missing fields). AuthKit gets it
   automatically through `OutboundMailReadyCheckerInterface`.
 - `SentMailErasureInterface::forgetAddress($email)` (`['deleted' => n, 'redacted' => n]`) and `purgeBefore()` (1.6)
-  from your account-deletion / retention use case; always registered (a no-op with `log.enabled: false`).
+  from your account-deletion / retention use case; always registered. With Doctrine it really erases, also with
+  `log.enabled: false` (rows from when the log was on); it is a no-op only without Doctrine (nothing can be stored).
 - `RuntimeDsn`, `MailStatus`, `TestMailResult`, `SentMailFilters` are immutable value objects.
 
 **Persistence**
 
 `SentMail` and `SentMailBody` are bundle-owned, read-only mapped entities with no relations: no
-`resolve_target_entities`, nothing to extend. Their mapping is added to the default ORM mapping list only with
-`log.enabled: true` (1.6); with several entity managers, add the `NowoMailKitBundle` mapping to the manager you name
+`resolve_target_entities`, nothing to extend. Their mapping is added to the default ORM mapping list (also with
+`log.enabled: false`, so existing tables are not dropped by your schema tooling; set `log.map_entities: false`, only
+with the log off, to keep them out of an XML-only entity manager); with several entity managers, add the `NowoMailKitBundle` mapping to the manager you name
 in `doctrine.entity_manager`.
 
 **Known limitations**

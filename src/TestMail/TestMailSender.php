@@ -38,8 +38,9 @@ use const FILTER_VALIDATE_EMAIL;
  * Recipient: the explicit address, else `mailer.test_recipient`, else the e-mail of the user (a `getEmail()`
  * method, or an identifier that is an address).
  *
- * Without Instance Settings (1.6, host providers only) `$settings` is null: the sender comes from the host
- * {@see SenderProviderInterface}, there is no stored test recipient and no Resend test.
+ * Sender of the mailer test: the host {@see SenderProviderInterface} when `mailer.sender_provider` is set (the same
+ * sender as real mail, 1.6), else the `mailer` settings. Without Instance Settings `$settings` is null: no stored
+ * test recipient and no Resend test.
  */
 final readonly class TestMailSender
 {
@@ -49,7 +50,7 @@ final readonly class TestMailSender
     /**
      * @param MailSettings|null $settings the `mailer` settings; null without Instance Settings (host providers)
      * @param bool $requirePublicDomain `sender.require_public_domain`
-     * @param SenderProviderInterface|null $senderProvider sender of the mailer test when `$settings` is null
+     * @param SenderProviderInterface|null $senderProvider host sender port (`mailer.sender_provider`); wins over the settings
      */
     public function __construct(
         private RuntimeTransport $transport,
@@ -66,7 +67,8 @@ final readonly class TestMailSender
      */
     public function sendMailer(?string $to = null, ?object $user = null): TestMailResult
     {
-        $from = $this->settings instanceof MailSettings ? $this->settings->from() : $this->senderProvider?->from();
+        // The host sender port when one is wired (same sender as real mail), else the `mailer` settings.
+        $from = $this->senderProvider instanceof SenderProviderInterface ? $this->senderProvider->from() : $this->settings?->from();
 
         return $this->send('mailer', $from, $to, $user);
     }

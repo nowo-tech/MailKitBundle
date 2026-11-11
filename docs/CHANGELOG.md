@@ -35,15 +35,19 @@ and rule 1 (ports for the services used as API).
 - `Readiness\OutboundMailReadinessInterface` (`isOutboundMailReady()`, `status()`, `missingFields()`), aliased to
   `OutboundMailReadiness`; the Twig extension, the AuthKit adapter, the settings listener and the controller depend on
   the interface.
-- `Log\SentMailErasureInterface` (`forgetAddress()`, `purgeBefore()`), always registered: `SentMailRecorder` with the
-  log on, `Log\NullSentMailErasure` (no-op) with the log off — an account-deletion use case can depend on it whatever
-  the configuration.
+- `Log\SentMailErasureInterface` (`forgetAddress()`, `purgeBefore()`), always registered: `SentMailRecorder` whenever
+  Doctrine is registered — also with `log.enabled: false`, so rows written while the log was on are really erased and
+  purged (and `nowo:mail-kit:log:forget` / `log:purge` stay available) — and `Log\NullSentMailErasure` (no-op) only on
+  a host without Doctrine, where nothing can be stored. The recorder returns zero when the log tables do not exist.
+- `log.map_entities` (default `true`): `false` (only with `log.enabled: false`) keeps the `SentMail` / `SentMailBody`
+  mapping out of your entity manager, for XML-mapping-only hosts. Deprecation notice: in 2.0 the default follows
+  `log.enabled`.
+- With a host `mailer.sender_provider`, the test e-mail (CLI and admin action) now uses that port, the same sender as
+  real mail, also when Instance Settings is registered (it read the `mailer` settings before, LL-MK-L2).
 - Container parameter `nowo_mail_kit.instance_settings` (whether the configuration is read from Instance Settings).
 
 #### Changed
 
-- The Doctrine mapping of `SentMail` / `SentMailBody` is no longer prepended with `log.enabled: false` (the tables were
-  never written then). See UPGRADING if your schema tooling still manages those tables.
 - `TestMailSender` takes `?MailSettings` and an optional trailing `?SenderProviderInterface`; `MailKitController`
   takes `?MailSettings`; `MailKitRouteLoader` takes an optional trailing `$settingsActions` flag. Existing callers keep
   working.

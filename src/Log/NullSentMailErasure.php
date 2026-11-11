@@ -7,7 +7,8 @@ namespace Nowo\MailKitBundle\Log;
 use DateTimeImmutable;
 
 /**
- * {@see SentMailErasureInterface} with `log.enabled: false`: the bundle stores nothing, so there is nothing to erase.
+ * {@see SentMailErasureInterface} on a host without Doctrine (the log requires it): the bundle cannot have stored
+ * anything, so there is nothing to erase. With Doctrine registered the port is always {@see SentMailRecorder}.
  */
 final readonly class NullSentMailErasure implements SentMailErasureInterface
 {

@@ -6,6 +6,7 @@ namespace Nowo\MailKitBundle\Tests\Integration\Ddd;
 
 use DateTimeImmutable;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\Tools\SchemaTool;
 use Nowo\InstanceSettingsBundle\Settings\InstanceSettingsInterface;
 use Nowo\MailKitBundle\DependencyInjection\NowoMailKitExtension;
 use Nowo\MailKitBundle\Entity\SentMail;
@@ -23,6 +24,7 @@ use Nowo\MailKitBundle\Tests\Integration\Kernel\MailKitTestKernel;
 use Nowo\MailKitBundle\Tests\Support\RequestTenantSenderProvider;
 use Nowo\MailKitBundle\Tests\Support\SendMailController;
 use Nowo\MailKitBundle\Tests\Support\StaticDsnProvider;
+use Nowo\MailKitBundle\Tests\Support\StaticSenderProvider;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\HttpKernel;
@@ -124,18 +126,61 @@ final class HostProvidersKernelTest extends KernelTestCase
         self::assertSame('cli@example.com', $message->getFrom()[0]->getAddress());
     }
 
-    public function testStandardHostWithTheLogOffDoesNotMapTheLogEntities(): void
+    /**
+     * LL-MK-M1: a host that turns the log off after it was on keeps its tables (no schema diff against 1.5.0) and its
+     * erasure / retention really delete the rows written while the log was on.
+     */
+    public function testStandardHostWithTheLogOffKeepsTheMappingAndReallyErases(): void
     {
         $kernel  = $this->bootKernel(['log' => ['enabled' => false]]);
-        $manager = $this->container($kernel)->get('doctrine.orm.entity_manager');
-        self::assertInstanceOf(EntityManagerInterface::class, $manager);
-        $classes = [];
-        foreach ($manager->getMetadataFactory()->getAllMetadata() as $metadata) {
-            $classes[] = $metadata->getName();
-        }
-        self::assertNotContains(SentMail::class, $classes);
-        self::assertInstanceOf(NullSentMailErasure::class, $this->service($kernel, SentMailErasureInterface::class));
+        $manager = $this->entityManager($kernel);
+        self::assertContains(SentMail::class, $this->mappedClasses($manager));
+        self::assertSame([], (new SchemaTool($manager))->getUpdateSchemaSql($manager->getMetadataFactory()->getAllMetadata()));
         self::assertTrue($this->container($kernel)->getParameter(NowoMailKitExtension::INSTANCE_SETTINGS_PARAMETER));
+
+        // Rows from when the log was on.
+        $recorder = $this->service($kernel, SentMailRecorder::class);
+        $recorder->sent(null, (new Email())->from('ops@example.com')->to('victim@example.net')->subject('Hi')->text('Hi'), 'memory', null, 10);
+        $recorder->sent(null, (new Email())->from('ops@example.com')->to('other@example.net')->subject('Hi')->text('Hi'), 'memory', null, 10);
+        $connection = $this->connection($kernel);
+        self::assertSame(2, (int) $connection->fetchOne('SELECT COUNT(*) FROM mail_kit_sent_mail'));
+
+        // The log is off: a send records nothing.
+        $this->mailer($kernel)->send((new Email())->from('ops@example.com')->to('victim@example.net')->subject('Hi')->text('Hi'));
+        self::assertSame(2, (int) $connection->fetchOne('SELECT COUNT(*) FROM mail_kit_sent_mail'));
+
+        $erasure = $this->service($kernel, SentMailErasureInterface::class);
+        self::assertSame($recorder, $erasure);
+        self::assertSame(['deleted' => 1, 'redacted' => 0], $erasure->forgetAddress('victim@example.net'));
+        self::assertSame(1, $erasure->purgeBefore(new DateTimeImmutable('+1 day')));
+        self::assertSame(0, (int) $connection->fetchOne('SELECT COUNT(*) FROM mail_kit_sent_mail'));
+    }
+
+    public function testMapEntitiesOffKeepsTheLogOutOfTheEntityManager(): void
+    {
+        $kernel  = $this->bootKernel(['log' => ['enabled' => false, 'map_entities' => false]]);
+        $manager = $this->entityManager($kernel);
+        self::assertNotContains(SentMail::class, $this->mappedClasses($manager));
+
+        // No log tables: nothing stored, nothing to erase (no SQL error).
+        $erasure = $this->service($kernel, SentMailErasureInterface::class);
+        self::assertSame(['deleted' => 0, 'redacted' => 0], $erasure->forgetAddress('victim@example.net'));
+        self::assertSame(0, $erasure->purgeBefore(new DateTimeImmutable('+1 day')));
+    }
+
+    /**
+     * LL-MK-L2: with Instance Settings and a host sender port, the test e-mail uses the port, like real mail.
+     */
+    public function testTheTestEmailUsesTheHostSenderPortWithInstanceSettings(): void
+    {
+        $kernel = $this->bootKernel(['mailer' => ['sender_provider' => StaticSenderProvider::class]], extra: static function (ContainerConfigurator $container): void {
+            $container->services()->set(StaticSenderProvider::class);
+        });
+
+        self::assertSame(TestMailOutcome::Sent, $this->service($kernel, TestMailSender::class)->sendMailer('ops@example.net')->outcome);
+        $message = $this->store($kernel)->sentVia('fallback')[0]->getOriginalMessage();
+        self::assertInstanceOf(Email::class, $message);
+        self::assertSame('tenant@example.com', $message->getFrom()[0]->getAddress());
     }
 
     public function testStandardHostWithTheLogOnErasesThroughThePort(): void
@@ -144,6 +189,27 @@ final class HostProvidersKernelTest extends KernelTestCase
         self::assertInstanceOf(SentMailRecorder::class, $this->service($kernel, SentMailErasureInterface::class));
         $this->mailer($kernel)->send((new Email())->from('ops@example.com')->to('a@example.net')->subject('Hi')->text('Hi'));
         self::assertSame(['deleted' => 1, 'redacted' => 0], $this->service($kernel, SentMailErasureInterface::class)->forgetAddress('a@example.net'));
+    }
+
+    private function entityManager(MailKitTestKernel $kernel): EntityManagerInterface
+    {
+        $manager = $this->container($kernel)->get('doctrine.orm.entity_manager');
+        self::assertInstanceOf(EntityManagerInterface::class, $manager);
+
+        return $manager;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function mappedClasses(EntityManagerInterface $manager): array
+    {
+        $classes = [];
+        foreach ($manager->getMetadataFactory()->getAllMetadata() as $metadata) {
+            $classes[] = $metadata->getName();
+        }
+
+        return $classes;
     }
 
     private function bootHost(): MailKitTestKernel

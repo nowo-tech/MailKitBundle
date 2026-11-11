@@ -134,13 +134,17 @@ final readonly class SentMailRecorder implements SentMailErasureInterface
     }
 
     /**
-     * Deletes rows queued before the date in keyset batches; returns the number of deleted rows.
+     * Deletes rows queued before the date in keyset batches; returns the number of deleted rows (0 when the log table
+     * does not exist).
      */
     public function purgeBefore(DateTimeImmutable $before, int $batch = 1000): int
     {
         $batch      = max(1, $batch);
         $connection = $this->connection();
-        $deleted    = 0;
+        if (!$this->hasTables($connection)) {
+            return 0;
+        }
+        $deleted = 0;
         do {
             $ids = $connection->fetchFirstColumn(
                 'SELECT id FROM ' . $this->table() . ' WHERE queued_at < ? ORDER BY queued_at, id LIMIT ' . $batch,
@@ -164,19 +168,20 @@ final readonly class SentMailRecorder implements SentMailErasureInterface
     /**
      * Right to erasure (GDPR art. 17) for one address: deletes every row (and body) the address sent or received
      * (to, cc, bcc — normalised index, no JSON matching) and masks the address in the subjects and stored bodies of the
-     * remaining rows. Works the same on SQLite, MySQL / MariaDB and PostgreSQL.
+     * remaining rows. Works the same on SQLite, MySQL / MariaDB and PostgreSQL. Also with `log.enabled: false` (1.6):
+     * rows written while the log was on stay erasable. Nothing to do when the log tables do not exist.
      *
      * @return array{deleted: int, redacted: int}
      */
     public function forgetAddress(string $email): array
     {
-        $forms = self::forms($email);
-        if ($forms === []) {
+        $forms      = self::forms($email);
+        $connection = $this->connection();
+        if ($forms === [] || !$this->hasTables($connection)) {
             return ['deleted' => 0, 'redacted' => 0];
         }
-        $connection = $this->connection();
-        $where      = [];
-        $params     = [];
+        $where  = [];
+        $params = [];
         foreach ($forms as $form) {
             $where[]  = "recipient_index LIKE ? ESCAPE '!'";
             $params[] = '%' . self::likeEscape(self::SEPARATOR . $form . self::SEPARATOR) . '%';
@@ -424,6 +429,14 @@ final readonly class SentMailRecorder implements SentMailErasureInterface
         }
 
         return (string) preg_replace('/' . implode('|', $alternatives) . '/iu', self::REDACTED, $text);
+    }
+
+    /**
+     * Whether both log tables exist (they may not on a host that never created them, e.g. `log.map_entities: false`).
+     */
+    private function hasTables(Connection $connection): bool
+    {
+        return $connection->createSchemaManager()->tablesExist([$this->table(), $this->bodyTable()]);
     }
 
     private function connection(): Connection

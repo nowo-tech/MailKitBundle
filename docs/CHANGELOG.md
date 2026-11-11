@@ -40,12 +40,10 @@ All notable changes to this project are documented here. The format follows
 
 Instance Settings and the ORM are optional when the host provides the configuration ports; real GDPR erasure also with the log off; test e-mail uses the host sender port. See [UPGRADING](https://github.com/nowo-tech/MailKitBundle/blob/v1.6.0/docs/UPGRADING.md#to-160).
 
-### Target 1.6.0
-
 Architecture bar W2 (standard Symfony by default, strict DDD opt-in): rule 8 (configuration through provider ports)
 and rule 1 (ports for the services used as API).
 
-#### Added
+### Added
 
 - Instance Settings is optional when the host provides both configuration ports: with
   `nowo_mail_kit.mailer.dsn_provider` **and** `nowo_mail_kit.mailer.sender_provider` set to host services and no
@@ -73,7 +71,7 @@ and rule 1 (ports for the services used as API).
   real mail, also when Instance Settings is registered (it read the `mailer` settings before, LL-MK-L2).
 - Container parameter `nowo_mail_kit.instance_settings` (whether the configuration is read from Instance Settings).
 
-#### Changed
+### Changed
 
 - `TestMailSender` takes `?MailSettings` and an optional trailing `?SenderProviderInterface`; `MailKitController`
   takes `?MailSettings`; `MailKitRouteLoader` takes an optional trailing `$settingsActions` flag. Existing callers keep

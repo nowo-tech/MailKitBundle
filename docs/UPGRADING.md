@@ -5,7 +5,6 @@
 - [Unreleased](#unreleased)
 - [To 1.6.0](#to-160)
 - [To 1.5.0](#to-150)
-  - [To 1.5.0](#to-150-1)
 - [To 1.4.0](#to-140)
 - [To 1.3.0](#to-130)
   - [To 1.3.0](#to-130-1)
@@ -53,9 +52,7 @@ From **1.4.0**:
 composer update nowo-tech/mail-kit-bundle
 ```
 
-### To 1.5.0
-
-Target **1.5.0**, from **1.4.0**: `composer update nowo-tech/mail-kit-bundle`. Nothing to change by default.
+Nothing to change by default.
 
 1. **Sender port (optional).** To take the default `From` / `Reply-To` from your own context instead of the
    Instance Settings `mailer` section, implement `Nowo\MailKitBundle\Sender\SenderProviderInterface` and set

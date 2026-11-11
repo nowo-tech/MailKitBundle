@@ -110,7 +110,7 @@ final class SentMailLogTest extends KernelTestCase
         $forget = new CommandTester($application->find('nowo:mail-kit:log:forget'));
         self::assertSame(2, $forget->execute(['email' => 'not-an-address']));
         self::assertSame(0, $forget->execute(['email' => 'gone@example.com']));
-        self::assertStringContainsString('1 row(s) deleted, 0 row(s) redacted', $forget->getDisplay());
+        self::assertStringContainsString('1 row(s) deleted, 0 row(s) unlinked, 0 row(s) redacted', $forget->getDisplay());
 
         $send = new CommandTester($application->find('nowo:mail-kit:send-test'));
         self::assertSame(1, $send->execute([]));

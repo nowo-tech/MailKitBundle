@@ -46,19 +46,25 @@ All notable changes to this project are documented here. The format follows
   `subject`, `queued_at` / `sent_at` / `failed_at` (ATOM). Envelope only: no bodies, other recipients, transport,
   provider id or error. Backed by `SentMailRecorder` (Doctrine registered) or `NullSentMailPersonalDataExporter`.
 - **GDPR erasure port keyed by a subject**: `Log\SentMailPersonalDataEraserInterface::erase(SentMailPersonalDataSubject)`
-  returns a `Log\SentMailErasureResult` (`deleted`, `redacted`, `toArray()`, `total()`); it delegates to
-  `forgetAddress()` (unchanged, BC). Backed by `SentMailRecorder` or `NullSentMailErasure`.
+  returns a `Log\SentMailErasureResult` (`deleted`, `unlinked`, `redacted`, `toArray()`, `total()`); it delegates
+  to `forgetAddress()`. Backed by `SentMailRecorder` or `NullSentMailErasure`.
 - `Log\SentMailPersonalDataSubject` (address value object, the log's own normalisation: trim, NFC, lower-case, IDN)
   and the `Log\SentMailPersonalDataSubjectResolverInterface` SPI with `DefaultSentMailPersonalDataSubjectResolver`.
-- `Event\SentMailPersonalDataErasedEvent` (address + counts), dispatched after `forgetAddress()` committed its own
+- `Event\SentMailPersonalDataErasedEvent` (address + `deleted` / `unlinked` / `redacted` counts), dispatched after `forgetAddress()` committed its own
   transaction; not dispatched inside a caller's transaction.
-- **UserKit bridge**: with `nowo-tech/user-kit-bundle` >= 1.12 installed and the log entities mapped, the eraser
-  `emails_received` (priority 110: original identifier, `getEmail()`, `context['previous_email']`) and the export
-  section `emails_received` register automatically. New config node `personal_data` (`enabled: true`,
-  `subject_resolver: null`).
+- **UserKit bridge (opt-in)**: with `nowo_mail_kit.personal_data.enabled: true`, `nowo-tech/user-kit-bundle`
+  >= 1.12 installed and the log entities mapped, the eraser `emails_received` (priority 110: original identifier,
+  `getEmail()`, `context['previous_email']`) and the export section `emails_received` register. New config node
+  `personal_data` (`enabled: false`, `subject_resolver: null`). Off by default so an upgrade never starts erasing a
+  log the host must keep (GDPR art. 17(3)) or clashes with the host's own `emails_received` export section.
 
 ### Changed
 
+- **Behaviour change:** `SentMailErasureInterface::forgetAddress()` no longer deletes a row other people share. A row
+  that still has another recipient is **unlinked**: the address is removed from `recipients` and `recipient_index`, a
+  matching sender becomes `[redacted]`, the address is masked in the subject and body; the row is deleted only when
+  no other recipient remains. The result gains an `unlinked` count (`['deleted', 'unlinked', 'redacted']`);
+  `forgetRecipient()` returns deleted + unlinked rows; `nowo:mail-kit:log:forget` prints the three counts.
 - `SentMailErasureInterface::forgetAddress()` matches exactly: SQL only pre-filters, every row is re-checked in PHP
   against the normalised address (an accent-insensitive MySQL / MariaDB collation no longer erases `josé@` for
   `jose@`), rows are deleted by id in batches of 500, inside a transaction of its own (or the caller's). `redacted`

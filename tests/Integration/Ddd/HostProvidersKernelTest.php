@@ -78,7 +78,7 @@ final class HostProvidersKernelTest extends KernelTestCase
 
         $erasure = $this->service($kernel, SentMailErasureInterface::class);
         self::assertInstanceOf(NullSentMailErasure::class, $erasure);
-        self::assertSame(['deleted' => 0, 'redacted' => 0], $erasure->forgetAddress('a@example.net'));
+        self::assertSame(['deleted' => 0, 'unlinked' => 0, 'redacted' => 0], $erasure->forgetAddress('a@example.net'));
         self::assertSame(0, $erasure->purgeBefore(new DateTimeImmutable('+1 day')));
 
         // The CLI / programmatic test e-mail uses the host sender; no Resend without the settings.
@@ -154,7 +154,7 @@ final class HostProvidersKernelTest extends KernelTestCase
 
         $erasure = $this->service($kernel, SentMailErasureInterface::class);
         self::assertSame($recorder, $erasure);
-        self::assertSame(['deleted' => 1, 'redacted' => 0], $erasure->forgetAddress('victim@example.net'));
+        self::assertSame(['deleted' => 1, 'unlinked' => 0, 'redacted' => 0], $erasure->forgetAddress('victim@example.net'));
         self::assertSame(1, $erasure->purgeBefore(new DateTimeImmutable('+1 day')));
         self::assertSame(0, (int) $connection->fetchOne('SELECT COUNT(*) FROM mail_kit_sent_mail'));
     }
@@ -167,7 +167,7 @@ final class HostProvidersKernelTest extends KernelTestCase
 
         // No log tables: nothing stored, nothing to erase (no SQL error).
         $erasure = $this->service($kernel, SentMailErasureInterface::class);
-        self::assertSame(['deleted' => 0, 'redacted' => 0], $erasure->forgetAddress('victim@example.net'));
+        self::assertSame(['deleted' => 0, 'unlinked' => 0, 'redacted' => 0], $erasure->forgetAddress('victim@example.net'));
         self::assertSame(0, $erasure->purgeBefore(new DateTimeImmutable('+1 day')));
     }
 
@@ -251,7 +251,7 @@ final class HostProvidersKernelTest extends KernelTestCase
         $kernel = $this->bootKernel();
         self::assertInstanceOf(SentMailRecorder::class, $this->service($kernel, SentMailErasureInterface::class));
         $this->mailer($kernel)->send((new Email())->from('ops@example.com')->to('a@example.net')->subject('Hi')->text('Hi'));
-        self::assertSame(['deleted' => 1, 'redacted' => 0], $this->service($kernel, SentMailErasureInterface::class)->forgetAddress('a@example.net'));
+        self::assertSame(['deleted' => 1, 'unlinked' => 0, 'redacted' => 0], $this->service($kernel, SentMailErasureInterface::class)->forgetAddress('a@example.net'));
     }
 
     private function entityManager(MailKitTestKernel $kernel): EntityManagerInterface

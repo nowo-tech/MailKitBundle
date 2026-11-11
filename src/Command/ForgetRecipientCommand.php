@@ -19,11 +19,12 @@ use function is_string;
 use function sprintf;
 
 /**
- * `nowo:mail-kit:log:forget <email>`: deletes every sent-mail log row (and stored body) sent to or by an
- * address and masks it in the remaining subjects / bodies — the right to erasure (GDPR art. 17). Internationalised
+ * `nowo:mail-kit:log:forget <email>`: erases an address from the sent-mail log — the right to erasure (GDPR art. 17):
+ * rows it sent or received are deleted, or unlinked when other recipients remain (1.7), and the address is masked in
+ * the remaining subjects / bodies ({@see SentMailRecorder::forgetAddress()}). Internationalised
  * addresses are accepted. The address is not logged.
  */
-#[AsCommand(name: self::NAME, description: 'Delete every sent-mail log row addressed to an e-mail address (right to erasure).')]
+#[AsCommand(name: self::NAME, description: 'Erase an e-mail address from the sent-mail log: its rows deleted, shared rows unlinked (right to erasure).')]
 final class ForgetRecipientCommand extends Command
 {
     /** Command name. */
@@ -61,7 +62,7 @@ final class ForgetRecipientCommand extends Command
         }
         $result = $this->recorder->forgetAddress($email);
         $this->logger?->info('Sent-mail log rows of one address erased.', ['bundle' => 'NowoMailKitBundle'] + $result);
-        $io->success(sprintf('Sent-mail log: %d row(s) deleted, %d row(s) redacted.', $result['deleted'], $result['redacted']));
+        $io->success(sprintf('Sent-mail log: %d row(s) deleted, %d row(s) unlinked, %d row(s) redacted.', $result['deleted'], $result['unlinked'], $result['redacted']));
 
         return Command::SUCCESS;
     }

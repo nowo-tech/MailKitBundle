@@ -15,11 +15,11 @@ final readonly class NullSentMailErasure implements SentMailErasureInterface, Se
     /**
      * Nothing stored.
      *
-     * @return array{deleted: int, redacted: int}
+     * @return array{deleted: int, unlinked: int, redacted: int}
      */
     public function forgetAddress(string $email): array
     {
-        return ['deleted' => 0, 'redacted' => 0];
+        return ['deleted' => 0, 'unlinked' => 0, 'redacted' => 0];
     }
 
     /**

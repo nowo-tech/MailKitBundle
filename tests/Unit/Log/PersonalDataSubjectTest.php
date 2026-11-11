@@ -87,18 +87,19 @@ final class PersonalDataSubjectTest extends TestCase
     public function testNullExporterAndEvent(): void
     {
         self::assertSame([], (new NullSentMailPersonalDataExporter())->export(SentMailPersonalDataSubject::fromEmail('a@example.com')));
-        $event = new SentMailPersonalDataErasedEvent('a@example.com', 2, 1);
-        self::assertSame(['deleted' => 2, 'redacted' => 1], $event->toArray());
+        self::assertSame(['deleted' => 2, 'unlinked' => 0, 'redacted' => 1], (new SentMailPersonalDataErasedEvent('a@example.com', 2, 1))->toArray());
+        $event = new SentMailPersonalDataErasedEvent('a@example.com', 2, 1, 3);
+        self::assertSame(['deleted' => 2, 'unlinked' => 3, 'redacted' => 1], $event->toArray());
         self::assertSame('a@example.com', $event->email);
     }
 
     public function testErasureResultAndNullEraser(): void
     {
-        $result = new SentMailErasureResult(3, 2);
-        self::assertSame(['deleted' => 3, 'redacted' => 2], $result->toArray());
-        self::assertSame(5, $result->total());
+        $result = new SentMailErasureResult(3, 2, 4);
+        self::assertSame(['deleted' => 3, 'unlinked' => 4, 'redacted' => 2], $result->toArray());
+        self::assertSame(9, $result->total());
         $none = (new NullSentMailErasure())->erase(SentMailPersonalDataSubject::fromEmail('a@example.com'));
-        self::assertSame(['deleted' => 0, 'redacted' => 0], $none->toArray());
+        self::assertSame(['deleted' => 0, 'unlinked' => 0, 'redacted' => 0], $none->toArray());
         self::assertSame(0, $none->total());
     }
 }

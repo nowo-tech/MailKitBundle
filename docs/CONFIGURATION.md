@@ -60,7 +60,7 @@ nowo_mail_kit:
         retention_days: 30             # nowo:mail-kit:log:purge default (1 … 3650)
         purge_batch_size: 1000         # rows per DELETE (1 … 100000)
     personal_data:                     # 1.7: GDPR bridge for nowo-tech/user-kit-bundle
-        enabled: true                  # register the emails_received eraser + export section (UserKit installed, log mapped)
+        enabled: false                 # opt-in: register the emails_received eraser + export section (UserKit installed, log mapped)
         subject_resolver: null         # service id implementing Log\SentMailPersonalDataSubjectResolverInterface
     brand:                             # 1.4, spec 220: optional branded e-mail layout ("auto" / "off" shorthand)
         mode: auto                     # auto = read a brand-contracts BrandProviderInterface when one exists; off = ignore it
@@ -172,7 +172,7 @@ always registered; this node only drives the UserKit bridge. See [USAGE — GDPR
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `enabled` | `true` | With `nowo-tech/user-kit-bundle` installed and the log entities mapped (`log.map_entities: true`, Doctrine registered), register the UserKit eraser `emails_received` (priority 110, before the host identity eraser) and the export section `emails_received`. Set `false` when your application already erases / exports the log tables. Literal boolean. |
+| `enabled` | `false` | Opt-in. `true`: with `nowo-tech/user-kit-bundle` installed and the log entities mapped (`log.map_entities: true`, Doctrine registered), register the UserKit eraser `emails_received` (priority 110, before the host identity eraser) and the export section `emails_received`. Remove your own `emails_received` export provider first: UserKit throws a `LogicException` on a duplicate section key. Keep `false` when your application erases / exports the log tables itself or must retain the log. Literal boolean. |
 | `subject_resolver` | `null` | Service id implementing `Log\SentMailPersonalDataSubjectResolverInterface` (the addresses of a user). `null` = the original user identifier when it is an e-mail, plus `getEmail()`. |
 
 ## brand

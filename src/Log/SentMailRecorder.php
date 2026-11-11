@@ -31,6 +31,7 @@ use Throwable;
 use function array_chunk;
 use function array_fill;
 use function array_filter;
+use function array_intersect;
 use function array_keys;
 use function array_map;
 use function array_merge;
@@ -44,7 +45,9 @@ use function idn_to_ascii;
 use function idn_to_utf8;
 use function implode;
 use function in_array;
+use function is_array;
 use function is_string;
+use function json_decode;
 use function json_encode;
 use function max;
 use function mb_strcut;
@@ -186,18 +189,25 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
     }
 
     /**
-     * Deletes every row addressed to the e-mail (to, cc or bcc) — right to erasure; returns the number of rows.
+     * Right to erasure for one address ({@see self::forgetAddress()}); returns the number of rows the address was
+     * removed from (rows deleted plus rows unlinked, 1.7).
      */
     public function forgetRecipient(string $email): int
     {
-        return $this->forgetAddress($email)['deleted'];
+        $result = $this->forgetAddress($email);
+
+        return $result['deleted'] + $result['unlinked'];
     }
 
     /**
-     * Right to erasure (GDPR art. 17) for one address: deletes every row (and body) the address sent or received
-     * (to, cc, bcc — normalised index, no JSON matching) and masks the address in the subjects and stored bodies of the
-     * remaining rows. Works the same on SQLite, MySQL / MariaDB and PostgreSQL. Also with `log.enabled: false` (1.6):
-     * rows written while the log was on stay erasable. Idempotent: a second run returns zero counts.
+     * Right to erasure (GDPR art. 17) for one address, in every row the address sent or received (to, cc, bcc —
+     * normalised index, no JSON matching). 1.7 (behaviour change, shared rows): a row that still has another recipient
+     * is kept and **unlinked** — the address is removed from the recipient list and index, a matching sender is
+     * replaced by {@see self::REDACTED}, the address is masked in the subject — and only a row with no other recipient
+     * left is **deleted** (with its body). The address is also masked in the subjects and stored bodies of every
+     * remaining row (`redacted`). Works the same on SQLite, MySQL / MariaDB and PostgreSQL. Also with
+     * `log.enabled: false` (1.6): rows written while the log was on stay erasable. Idempotent: a second run returns
+     * zero counts.
      *
      * 1.7: exact match — SQL only pre-filters, every row is re-checked in PHP against the normalised address (an
      * accent-insensitive MySQL collation must not erase `josé@` for `jose@`), then deleted by id in batches of
@@ -208,18 +218,18 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
      * @throws SentMailLogTableMissingException when a log table is missing and the entities are mapped (rows of the
      *                                          main table are erased first when only the body table is missing)
      *
-     * @return array{deleted: int, redacted: int}
+     * @return array{deleted: int, unlinked: int, redacted: int}
      */
     public function forgetAddress(string $email): array
     {
         $forms = self::forms($email);
         if ($forms === []) {
-            return ['deleted' => 0, 'redacted' => 0];
+            return ['deleted' => 0, 'unlinked' => 0, 'redacted' => 0];
         }
         $connection    = $this->connection();
         [$main, $body] = $this->tables($connection);
         if (!$main) {
-            return ['deleted' => 0, 'redacted' => 0];
+            return ['deleted' => 0, 'unlinked' => 0, 'redacted' => 0];
         }
 
         if ($connection->isTransactionActive()) {
@@ -228,7 +238,7 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
         } else {
             // @igor-ignore - Closure runs synchronously inside transactional(); it is not stored on the service.
             $result = $connection->transactional(fn (Connection $connection): array => $this->eraseRows($connection, $forms, $body));
-            $this->dispatcher?->dispatch(new SentMailPersonalDataErasedEvent($forms[0], $result['deleted'], $result['redacted']));
+            $this->dispatcher?->dispatch(new SentMailPersonalDataErasedEvent($forms[0], $result['deleted'], $result['redacted'], $result['unlinked']));
         }
         $this->assertBodyTable($body, $result['deleted'], $result['redacted']);
 
@@ -244,7 +254,7 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
     {
         $result = $this->forgetAddress($subject->email);
 
-        return new SentMailErasureResult($result['deleted'], $result['redacted']);
+        return new SentMailErasureResult($result['deleted'], $result['redacted'], $result['unlinked']);
     }
 
     /**
@@ -370,17 +380,34 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
     }
 
     /**
-     * Deletes the rows of the address and masks it elsewhere (inside the transaction of {@see self::forgetAddress()}).
+     * Unlinks the address from the rows other people still share, deletes the rows nobody else is left in, and masks
+     * the address elsewhere (inside the transaction of {@see self::forgetAddress()}).
      *
      * @param list<string> $forms
      *
-     * @return array{deleted: int, redacted: int}
+     * @return array{deleted: int, unlinked: int, redacted: int}
      */
     private function eraseRows(Connection $connection, array $forms, bool $body): array
     {
-        $ids = [];
-        foreach ($this->rowsOf($connection, $forms) as [$row]) {
-            $ids[] = (string) $row['id'];
+        $ids      = [];
+        $unlinked = 0;
+        foreach ($this->rowsOf($connection, $forms, ', recipients, subject') as [$row, $roles]) {
+            $recipients = $this->withoutAddress($this->decodeRecipients($row['recipients']), $forms);
+            if ($recipients === []) {
+                // Nobody else is left in this row (sole recipient, or own message to self): delete it.
+                $ids[] = (string) $row['id'];
+
+                continue;
+            }
+            $values = [
+                'recipients'      => json_encode($recipients, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                'recipient_index' => self::recipientIndex($recipients),
+                'subject'         => $this->mask((string) $row['subject'], $forms),
+            ];
+            if (in_array('sender', $roles, true)) {
+                $values['sender'] = self::REDACTED;
+            }
+            $unlinked += (int) $connection->update($this->table(), $values, ['id' => $row['id']]);
         }
         $deleted = 0;
         foreach (array_chunk($ids, self::PERSONAL_DATA_BATCH) as $batch) {
@@ -407,7 +434,45 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
             }
         }
 
-        return ['deleted' => $deleted, 'redacted' => $redacted];
+        return ['deleted' => $deleted, 'unlinked' => $unlinked, 'redacted' => $redacted];
+    }
+
+    /**
+     * Stored recipient lists (`{"to": [...], "cc": [...], "bcc": [...]}`, normalised addresses); empty when unreadable.
+     *
+     * @return array{to?: list<string>, cc?: list<string>, bcc?: list<string>}
+     */
+    private function decodeRecipients(mixed $json): array
+    {
+        $decoded    = is_string($json) ? json_decode($json, true) : null;
+        $recipients = [];
+        foreach (['to', 'cc', 'bcc'] as $kind) {
+            $list = is_array($decoded) ? ($decoded[$kind] ?? null) : null;
+            if (is_array($list)) {
+                $recipients[$kind] = array_values(array_filter($list, is_string(...)));
+            }
+        }
+
+        return $recipients;
+    }
+
+    /**
+     * The recipient lists without the address (exact: an entry goes only when one of its forms is one of the
+     * address's forms), empty lists dropped as on write.
+     *
+     * @param array{to?: list<string>, cc?: list<string>, bcc?: list<string>} $recipients
+     * @param list<string> $forms
+     *
+     * @return array{to?: list<string>, cc?: list<string>, bcc?: list<string>}
+     */
+    private function withoutAddress(array $recipients, array $forms): array
+    {
+        $kept = [];
+        foreach ($recipients as $kind => $list) {
+            $kept[$kind] = array_values(array_filter($list, static fn (string $address): bool => array_intersect(self::forms($address), $forms) === []));
+        }
+
+        return array_filter($kept);
     }
 
     /**

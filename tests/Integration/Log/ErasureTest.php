@@ -32,13 +32,14 @@ final class ErasureTest extends KernelTestCase
         $db = $this->connection($kernel);
         self::assertSame(SentMailRecorder::SEPARATOR . 'ana/lopez@example.com' . SentMailRecorder::SEPARATOR, $db->fetchOne("SELECT recipient_index FROM mail_kit_sent_mail WHERE subject = 'Hi' AND recipient_index LIKE '%ana%'"));
 
-        self::assertSame(['deleted' => 1, 'redacted' => 0], $recorder->forgetAddress('ana/lopez@example.com'));
-        self::assertSame(['deleted' => 2, 'redacted' => 2], $recorder->forgetAddress(' José@Ejemplo.es '));
+        self::assertSame(['deleted' => 1, 'unlinked' => 0, 'redacted' => 0], $recorder->forgetAddress('ana/lopez@example.com'));
+        // 1.7: the message José sent to ops@ stays for ops@, with the sender masked.
+        self::assertSame(['deleted' => 1, 'unlinked' => 1, 'redacted' => 2], $recorder->forgetAddress(' José@Ejemplo.es '));
         self::assertSame(1, $recorder->forgetRecipient('user@bücher.de'));
-        self::assertSame(['deleted' => 0, 'redacted' => 0], $recorder->forgetAddress(''));
+        self::assertSame(['deleted' => 0, 'unlinked' => 0, 'redacted' => 0], $recorder->forgetAddress(''));
 
-        self::assertSame('About [redacted]', $db->fetchOne('SELECT subject FROM mail_kit_sent_mail'));
-        $body = $db->fetchAssociative('SELECT html_body, text_body FROM mail_kit_sent_mail_body');
+        self::assertSame([['About [redacted]', 'app@example.com'], ['From José', '[redacted]']], array_map(array_values(...), $db->fetchAllAssociative('SELECT subject, sender FROM mail_kit_sent_mail ORDER BY subject')));
+        $body = $db->fetchAssociative("SELECT b.html_body, b.text_body FROM mail_kit_sent_mail_body b JOIN mail_kit_sent_mail m ON m.id = b.id WHERE m.subject = 'About [redacted]'");
         self::assertIsArray($body);
         self::assertSame('<p>[redacted]</p>', $body['html_body']);
         self::assertSame('Contact: [redacted] / [redacted]', $body['text_body']);
@@ -55,7 +56,7 @@ final class ErasureTest extends KernelTestCase
             $recorder->sent(null, (new Email())->from('app@example.com')->to($to)->subject('Hi')->text('t'), 'smtp', null, null);
         }
 
-        self::assertSame(['deleted' => 0, 'redacted' => 0], $recorder->forgetAddress('bob@example.com'));
+        self::assertSame(['deleted' => 0, 'unlinked' => 0, 'redacted' => 0], $recorder->forgetAddress('bob@example.com'));
         self::assertSame(1, $recorder->forgetAddress('A|BOB@example.com')['deleted']);
         self::assertSame(1, $recorder->forgetAddress('user@xn--bcher-kva.de')['deleted']);
         self::assertSame(1, $recorder->forgetAddress('josé@example.com')['deleted']);
@@ -86,6 +87,6 @@ final class ErasureTest extends KernelTestCase
 
         $command = new CommandTester((new Application($kernel))->find('nowo:mail-kit:log:forget'));
         self::assertSame(0, $command->execute(['email' => 'josé@ejemplo.es']));
-        self::assertStringContainsString('1 row(s) deleted, 0 row(s) redacted', $command->getDisplay());
+        self::assertStringContainsString('1 row(s) deleted, 0 row(s) unlinked, 0 row(s) redacted', $command->getDisplay());
     }
 }

@@ -98,7 +98,8 @@ when not every admin may change the transport.
   default** (`log.store_bodies: false`); when on, use `MailHeaders::redact()` for one-time links and codes.
 - Retention: `nowo:mail-kit:log:purge` (default `log.retention_days: 30`) — schedule it.
 - Erasure: `nowo:mail-kit:log:forget <email>` / `SentMailRecorder::forgetAddress()` deletes every row (and body) the
-  person sent or received (to, cc, bcc, sender — matched on a normalised `recipient_index` column, so it works the same
+  person sent or received — since 1.7 a row that other recipients share is unlinked instead (address removed, sender
+  masked) — (to, cc, bcc, sender — matched on a normalised `recipient_index` column, so it works the same
   on SQLite, MySQL / MariaDB and PostgreSQL, also for addresses with `/` or non-ASCII characters) and masks the address
   in the subjects and stored bodies of the other rows (also URL-encoded). Internationalised addresses are accepted.
   Call it from your account-deletion flow. Not covered: copies outside the log (provider dashboards, mailboxes).

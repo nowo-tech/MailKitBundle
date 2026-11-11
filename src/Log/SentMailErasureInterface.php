@@ -16,11 +16,14 @@ use DateTimeImmutable;
 interface SentMailErasureInterface
 {
     /**
-     * Deletes every row (and body) the address sent or received and masks it in the remaining subjects and bodies.
+     * Erases the address from every row it sent or received. 1.7 (behaviour change): a row that still has another
+     * recipient is kept and unlinked (address removed from the recipients, a matching sender replaced by
+     * `[redacted]`, the address masked in the subject); a row with no other recipient left is deleted with its body.
+     * The address is masked in the subjects and stored bodies of the remaining rows.
      *
      * @throws SentMailLogTableMissingException when a log table is missing while the entities are mapped
      *
-     * @return array{deleted: int, redacted: int}
+     * @return array{deleted: int, unlinked: int, redacted: int}
      */
     public function forgetAddress(string $email): array;
 

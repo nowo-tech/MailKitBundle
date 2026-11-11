@@ -11,30 +11,33 @@ namespace Nowo\MailKitBundle\Log;
 final readonly class SentMailErasureResult
 {
     /**
-     * @param int $deleted log rows deleted (with their bodies): rows the address received (to, cc, bcc) or sent
-     * @param int $redacted subjects and stored bodies of other rows where the address was masked
+     * @param int $deleted log rows deleted (with their bodies): rows of the address with no other recipient left
+     * @param int $redacted subjects of other rows and stored bodies where the address was masked
+     * @param int $unlinked rows kept for their other recipients, with the address removed from the recipients and
+     *                      the sender and masked in the subject
      */
     public function __construct(
         public int $deleted = 0,
         public int $redacted = 0,
+        public int $unlinked = 0,
     ) {
     }
 
     /**
      * Counts per kind, the shape of {@see SentMailErasureInterface::forgetAddress()}.
      *
-     * @return array{deleted: int, redacted: int}
+     * @return array{deleted: int, unlinked: int, redacted: int}
      */
     public function toArray(): array
     {
-        return ['deleted' => $this->deleted, 'redacted' => $this->redacted];
+        return ['deleted' => $this->deleted, 'unlinked' => $this->unlinked, 'redacted' => $this->redacted];
     }
 
     /**
-     * Rows deleted plus rows masked.
+     * Rows deleted, unlinked and masked.
      */
     public function total(): int
     {
-        return $this->deleted + $this->redacted;
+        return $this->deleted + $this->unlinked + $this->redacted;
     }
 }

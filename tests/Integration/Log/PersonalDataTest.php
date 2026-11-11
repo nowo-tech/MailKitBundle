@@ -86,8 +86,8 @@ final class PersonalDataTest extends KernelTestCase
 
         $erasure = $this->service($kernel, SentMailErasureInterface::class);
         // Only jose@'s row goes and only JOSE@ is masked; josé@'s row and subject stay (an accent-insensitive LIKE only pre-filters).
-        self::assertSame(['deleted' => 1, 'redacted' => 1], $erasure->forgetAddress('jose@ejemplo.es'));
-        self::assertSame(['deleted' => 0, 'redacted' => 0], $erasure->forgetAddress('jose@ejemplo.es'));
+        self::assertSame(['deleted' => 1, 'unlinked' => 0, 'redacted' => 1], $erasure->forgetAddress('jose@ejemplo.es'));
+        self::assertSame(['deleted' => 0, 'unlinked' => 0, 'redacted' => 0], $erasure->forgetAddress('jose@ejemplo.es'));
         $db = $this->connection($kernel);
         self::assertSame(['About [redacted]', 'Hola josé@ejemplo.es'], $db->fetchFirstColumn('SELECT subject FROM mail_kit_sent_mail ORDER BY subject'));
         self::assertCount(1, $recorder->export(SentMailPersonalDataSubject::fromEmail('josé@ejemplo.es')));
@@ -107,7 +107,7 @@ final class PersonalDataTest extends KernelTestCase
         $eraser = $this->service($kernel, SentMailPersonalDataEraserInterface::class);
         self::assertSame($recorder, $eraser);
         $result = $eraser->erase(SentMailPersonalDataSubject::fromEmail('NA@example.com'));
-        self::assertSame(['deleted' => 1, 'redacted' => 2], $result->toArray());
+        self::assertSame(['deleted' => 1, 'unlinked' => 0, 'redacted' => 2], $result->toArray());
         self::assertSame(0, $eraser->erase(SentMailPersonalDataSubject::fromEmail('na@example.com'))->total());
 
         $db = $this->connection($kernel);
@@ -119,22 +119,93 @@ final class PersonalDataTest extends KernelTestCase
     }
 
     /**
-     * A message to several people is one log row: erasing one recipient deletes the row (it records a delivery to the
-     * erased address); the other recipient's export no longer lists it, and never listed the erased address.
+     * 1.7 (owner decision LY-M3): a message to several people is one log row shared by them. Erasing one recipient
+     * unlinks that address and keeps the row for the others; the row goes only with its last recipient.
      */
-    public function testSharedMessages(): void
+    public function testSharedMessagesAreUnlinkedNotDeleted(): void
+    {
+        $kernel   = $this->bootKernel(['log' => ['store_bodies' => true]]);
+        $recorder = $this->service($kernel, SentMailRecorder::class);
+        $recorder->sent(null, (new Email())->from('app@example.com')->to('a@example.com', 'b@example.com')->cc('A@Example.com')->bcc('c@example.com')->subject('Team, incl. a@example.com')->text('Hi a@example.com and b@example.com'), 'smtp', null, null);
+
+        $result = $recorder->erase(SentMailPersonalDataSubject::fromEmail('a@example.com'));
+        self::assertSame(['deleted' => 0, 'unlinked' => 1, 'redacted' => 1], $result->toArray());
+        self::assertSame(0, $recorder->erase(SentMailPersonalDataSubject::fromEmail('a@example.com'))->total());
+
+        // b@ and c@ still see the row and their own data; a@ appears nowhere.
+        foreach (['b@example.com', 'c@example.com'] as $other) {
+            $rows = $recorder->export(SentMailPersonalDataSubject::fromEmail($other));
+            self::assertCount(1, $rows);
+            self::assertSame(['recipient'], $rows[0]['roles']);
+            self::assertSame('Team, incl. [redacted]', $rows[0]['subject']);
+        }
+        self::assertSame([], $recorder->export(SentMailPersonalDataSubject::fromEmail('a@example.com')));
+        $db  = $this->connection($kernel);
+        $row = $db->fetchAssociative('SELECT m.recipients, m.recipient_index, m.subject, m.sender, b.text_body FROM mail_kit_sent_mail m JOIN mail_kit_sent_mail_body b ON b.id = m.id');
+        self::assertIsArray($row);
+        self::assertSame(['to' => ['b@example.com'], 'bcc' => ['c@example.com']], json_decode((string) $row['recipients'], true));
+        self::assertSame(SentMailRecorder::recipientIndex(['to' => ['b@example.com'], 'bcc' => ['c@example.com']]), $row['recipient_index']);
+        self::assertSame('Hi [redacted] and b@example.com', $row['text_body']);
+        self::assertStringNotContainsStringIgnoringCase('a@example.com', (string) json_encode($row));
+
+        // The last recipients: the row goes with the last one.
+        self::assertSame(['deleted' => 0, 'unlinked' => 1, 'redacted' => 1], $recorder->forgetAddress('b@example.com'));
+        self::assertSame(['deleted' => 1, 'unlinked' => 0, 'redacted' => 0], $recorder->forgetAddress('c@example.com'));
+        self::assertSame(0, (int) $db->fetchOne('SELECT COUNT(*) FROM mail_kit_sent_mail'));
+        self::assertSame(0, (int) $db->fetchOne('SELECT COUNT(*) FROM mail_kit_sent_mail_body'));
+    }
+
+    /**
+     * The erased address is the sender: rows that went to other people stay with the sender masked; a message to
+     * oneself goes. This covers a site whose `default_from` is the person's own mailbox: erasing that person does not
+     * wipe the log of what the site sent to everybody else.
+     */
+    public function testSenderIsMaskedWhenOthersReceivedTheMessage(): void
+    {
+        $kernel   = $this->bootKernel(['sender' => ['default_from' => 'owner@shop.example']]);
+        $recorder = $this->service($kernel, SentMailRecorder::class);
+        foreach (['client1@example.com', 'client2@example.com', 'owner@shop.example'] as $to) {
+            $recorder->sent(null, (new Email())->from('owner@shop.example')->to($to)->subject('Order for ' . $to)->text('t'), 'smtp', null, null);
+        }
+
+        self::assertSame(['deleted' => 1, 'unlinked' => 2, 'redacted' => 0], $recorder->forgetAddress('Owner@Shop.example'));
+        self::assertSame(['deleted' => 0, 'unlinked' => 0, 'redacted' => 0], $recorder->forgetAddress('owner@shop.example'));
+        $db = $this->connection($kernel);
+        self::assertSame([['Order for client1@example.com', '[redacted]'], ['Order for client2@example.com', '[redacted]']], array_map(array_values(...), $db->fetchAllAssociative('SELECT subject, sender FROM mail_kit_sent_mail ORDER BY subject')));
+        self::assertSame([], $recorder->export(SentMailPersonalDataSubject::fromEmail('owner@shop.example')));
+        self::assertSame(['Order for client1@example.com'], array_column($recorder->export(SentMailPersonalDataSubject::fromEmail('client1@example.com')), 'subject'));
+    }
+
+    /**
+     * Unlinking is exact too: an accent / look-alike co-recipient keeps its entry (accent-insensitive MySQL collations
+     * only pre-filter).
+     */
+    public function testUnlinkingIsExact(): void
     {
         $kernel   = $this->bootKernel();
         $recorder = $this->service($kernel, SentMailRecorder::class);
-        $recorder->sent(null, (new Email())->from('app@example.com')->to('a@example.com', 'b@example.com')->bcc('c@example.com')->subject('Team')->text('t'), 'smtp', null, null);
+        $recorder->sent(null, (new Email())->from('josé@ejemplo.es')->to('jose@ejemplo.es', 'josé@ejemplo.es', 'ajose@ejemplo.es')->subject('S')->text('t'), 'smtp', null, null);
 
-        $b = $recorder->export(SentMailPersonalDataSubject::fromEmail('b@example.com'));
-        self::assertCount(1, $b);
-        self::assertStringNotContainsString('a@example.com', (string) json_encode($b));
-        self::assertStringNotContainsString('c@example.com', (string) json_encode($b));
+        self::assertSame(['deleted' => 0, 'unlinked' => 1, 'redacted' => 0], $recorder->forgetAddress('jose@ejemplo.es'));
+        $row = $this->connection($kernel)->fetchAssociative('SELECT recipients, sender FROM mail_kit_sent_mail');
+        self::assertIsArray($row);
+        self::assertSame([['to' => ['josé@ejemplo.es', 'ajose@ejemplo.es']], 'josé@ejemplo.es'], [json_decode((string) $row['recipients'], true), $row['sender']]);
+        self::assertSame(['recipient', 'sender'], $recorder->export(SentMailPersonalDataSubject::fromEmail('josé@ejemplo.es'))[0]['roles']);
+    }
 
-        self::assertSame(1, $recorder->erase(SentMailPersonalDataSubject::fromEmail('a@example.com'))->deleted);
-        self::assertSame([], $recorder->export(SentMailPersonalDataSubject::fromEmail('b@example.com')));
+    /**
+     * A row whose stored recipient list cannot be read is deleted rather than kept with the address in it.
+     */
+    public function testUnreadableRecipientListIsDeleted(): void
+    {
+        if (!str_starts_with(MailKitTestKernel::databaseUrl(), 'sqlite')) {
+            self::markTestSkipped('MySQL and PostgreSQL JSON columns refuse invalid JSON.');
+        }
+        $kernel = $this->bootKernel();
+        $this->insert($kernel, 'x@example.com', 'Broken');
+        $this->connection($kernel)->executeStatement("UPDATE mail_kit_sent_mail SET recipients = 'not json'");
+
+        self::assertSame(['deleted' => 1, 'unlinked' => 0, 'redacted' => 0], $this->service($kernel, SentMailRecorder::class)->forgetAddress('x@example.com'));
     }
 
     public function testLargeMailboxesArePagedAndOthersSurvive(): void
@@ -155,7 +226,7 @@ final class PersonalDataTest extends KernelTestCase
         $rows     = $recorder->export(SentMailPersonalDataSubject::fromEmail('bulk@example.com'));
         self::assertCount($total, $rows);
         self::assertCount($total, array_unique(array_column($rows, 'id')));
-        self::assertSame(['deleted' => $total, 'redacted' => 0], $recorder->forgetAddress('bulk@example.com'));
+        self::assertSame(['deleted' => $total, 'unlinked' => 0, 'redacted' => 0], $recorder->forgetAddress('bulk@example.com'));
         self::assertSame(11, (int) $db->fetchOne('SELECT COUNT(*) FROM mail_kit_sent_mail'));
     }
 
@@ -177,15 +248,15 @@ final class PersonalDataTest extends KernelTestCase
 
         // Inside the caller's transaction: joined, no event, a rollback undoes it.
         $db->beginTransaction();
-        self::assertSame(['deleted' => 2, 'redacted' => 0], $recorder->forgetAddress('A@example.com'));
+        self::assertSame(['deleted' => 2, 'unlinked' => 0, 'redacted' => 0], $recorder->forgetAddress('A@example.com'));
         self::assertTrue($db->isTransactionActive());
         $db->rollBack();
         self::assertSame([], $events->getArrayCopy());
         self::assertSame(3, (int) $db->fetchOne('SELECT COUNT(*) FROM mail_kit_sent_mail'));
 
         // Own transaction: committed, then one event (outside any transaction), also for a no-op run.
-        self::assertSame(['deleted' => 2, 'redacted' => 0], $recorder->forgetAddress('A@example.com'));
-        self::assertSame(['deleted' => 0, 'redacted' => 0], $recorder->forgetAddress('a@example.com'));
+        self::assertSame(['deleted' => 2, 'unlinked' => 0, 'redacted' => 0], $recorder->forgetAddress('A@example.com'));
+        self::assertSame(['deleted' => 0, 'unlinked' => 0, 'redacted' => 0], $recorder->forgetAddress('a@example.com'));
         self::assertSame([['a@example.com', 2, 0, false], ['a@example.com', 0, 0, false]], $events->getArrayCopy());
         self::assertSame(1, (int) $db->fetchOne('SELECT COUNT(*) FROM mail_kit_sent_mail'));
     }
@@ -225,10 +296,10 @@ final class PersonalDataTest extends KernelTestCase
             $rowsB = $exporter->export($b);
             self::assertSame(['A ' . $i], array_column($rowsA, 'subject'));
             self::assertSame(['B ' . $i], array_column($rowsB, 'subject'));
-            self::assertSame(['deleted' => 1, 'redacted' => 0], $erasure->forgetAddress($a->email));
+            self::assertSame(['deleted' => 1, 'unlinked' => 0, 'redacted' => 0], $erasure->forgetAddress($a->email));
             self::assertSame([], $exporter->export($a));
             self::assertSame(['B ' . $i], array_column($exporter->export($b), 'subject'));
-            self::assertSame(['deleted' => 1, 'redacted' => 0], $erasure->forgetAddress($b->email));
+            self::assertSame(['deleted' => 1, 'unlinked' => 0, 'redacted' => 0], $erasure->forgetAddress($b->email));
 
             if ($i === 50) {
                 gc_collect_cycles();

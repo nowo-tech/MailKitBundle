@@ -21,7 +21,7 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\NullOutput;
 use Symfony\Component\Console\Output\OutputInterface;
-use Symfony\Component\EventDispatcher\EventDispatcher;
+use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\HttpKernelInterface;
@@ -194,7 +194,7 @@ final class LegacyResendBoundariesTest extends KernelTestCase
         $kernel = $this->bootKernel(['resend' => ['enabled' => true]]);
         self::assertInstanceOf(LegacyResendSettingsResetListener::class, $this->container($kernel)->get(LegacyResendSettingsResetListener::class));
         $dispatcher = $kernel->getContainer()->get('event_dispatcher');
-        self::assertInstanceOf(EventDispatcher::class, $dispatcher);
+        self::assertInstanceOf(EventDispatcherInterface::class, $dispatcher);
         foreach (['kernel.request', 'kernel.terminate', 'Symfony\\Component\\Messenger\\Event\\WorkerMessageReceivedEvent', 'Symfony\\Component\\Messenger\\Event\\WorkerMessageHandledEvent', 'Symfony\\Component\\Messenger\\Event\\WorkerMessageFailedEvent', 'console.command', 'console.terminate'] as $event) {
             $found = false;
             foreach ($dispatcher->getListeners($event) as $listener) {
@@ -208,7 +208,7 @@ final class LegacyResendBoundariesTest extends KernelTestCase
     }
 
     /**
-     * @return array{0: MailKitTestKernel, 1: LegacyResendSettings, 2: EventDispatcher}
+     * @return array{0: MailKitTestKernel, 1: LegacyResendSettings, 2: EventDispatcherInterface}
      */
     private function boot(): array
     {
@@ -223,7 +223,7 @@ final class LegacyResendBoundariesTest extends KernelTestCase
         $legacy = $this->container($kernel)->get(LegacyResendSettings::class);
         self::assertInstanceOf(LegacyResendSettings::class, $legacy);
         $dispatcher = $kernel->getContainer()->get('event_dispatcher');
-        self::assertInstanceOf(EventDispatcher::class, $dispatcher);
+        self::assertInstanceOf(EventDispatcherInterface::class, $dispatcher);
         $this->leaks          = [];
         $this->memoryAtWarmup = 0;
         $this->memoryAtEnd    = 0;

@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.9.1](#to-191)
 - [To 1.9.0](#to-190)
 - [To 1.8.0](#to-180)
 - [To 1.7.1](#to-171)
@@ -24,6 +25,25 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+## To 1.9.1
+
+From **1.9.0** (patch, no configuration change):
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
+
+`RuntimeTransport` no longer removes MailKit's internal headers (`X-Mail-Kit-Log-Id`, `-Tag`, `-Redact`) from **your**
+message object, only from the copy it delivers, so a Messenger retry keeps its sent-mail log row, its tag and its
+redaction values. If you inspected the message after `send()` and relied on those headers being gone, read the
+delivered message from the `SentMessage` instead.
+
+**If you ran with `log.store_bodies: true` and asynchronous mail with retries** (1.0.0 – 1.9.0), a retried message
+that used `MailHeaders::redact()` may have a stored body with the one-time value in clear. The affected rows are the
+extra rows written by a retry: no tag, `attempts = 1`, and a twin row (same subject and recipients, status `failed`)
+written just before. Run `nowo:mail-kit:log:purge` with a short `--older-than-days`, or delete the bodies of those rows
+(`<prefix>mail_kit_sent_mail_body`), and treat any link or code still valid in them as exposed to log readers.
 
 ## To 1.9.0
 

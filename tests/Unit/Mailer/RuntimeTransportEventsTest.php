@@ -72,7 +72,10 @@ final class RuntimeTransportEventsTest extends TestCase
         self::assertNotNull($event->providerMessageId);
         self::assertGreaterThan(0, $event->size);
         self::assertEquals(new DateTimeImmutable('2026-11-10 09:00:00'), $event->occurredAt);
-        self::assertFalse($email->getHeaders()->has(MailHeaders::TAG), 'still stripped before delivery');
+        $delivered = $this->store->sentVia('one')[0]->getOriginalMessage();
+        self::assertInstanceOf(Email::class, $delivered);
+        self::assertFalse($delivered->getHeaders()->has(MailHeaders::TAG), 'still stripped before delivery');
+        self::assertTrue($email->getHeaders()->has(MailHeaders::TAG), 'from the delivered copy only (1.9.1)');
     }
 
     public function testFailedCarriesTheReference(): void

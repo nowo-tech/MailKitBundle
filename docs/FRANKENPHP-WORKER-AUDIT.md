@@ -45,6 +45,7 @@ A bundle safe under **B** is safe under **A**, classic mode and PHP-FPM.
 | Resources held open | ✅ | An SMTP transport may keep its connection between sends (Symfony behaviour, ping threshold); dropped on reset |
 | Memory growth across requests | ✅ | One cached transport at most; nothing appended per request |
 | Branded e-mails (1.4) | ✅ | `BrandedEmailHelper` is `readonly` with no memo: the brand provider and asset reader are asked on every `apply()` / `embed()`, image bytes live only in the e-mail being built |
+| Microsoft Graph (1.8) | ✅ | `GraphTokenProvider`, `GraphApiClient`, `GraphMailSender`, `ConfiguredGraphMailboxProvider`, `GraphTransport(Factory)` are immutable: the mailbox comes from the port and the token from the PSR-6 pool on every send; attachment files are opened and closed within the send |
 | Output, headers, `exit` | ✅ | Responses / console output only |
 | PHPStan FrankenPHP rulesets / Igor | ✅ | 0 errors / 0 KO (annotated: bundle extension cache, compile-time DI calls, route loader flag) |
 
@@ -61,6 +62,7 @@ A bundle safe under **B** is safe under **A**, classic mode and PHP-FPM.
 | `TestMailSender`, `TestMailGuard` (limiter state lives in `cache.app`), `ResendApiChecker` | none | ✅ | ✅ |
 | `MailKitController`, `AdminPages`, `MailKitPages`, `SettingsActions`, form types, sections | none (forms and view models built per call) | ✅ | ✅ |
 | `AccessGuard`, `MailKitAccessListener`, access checkers, `SettingsChangedListener`, Twig extension, commands | none | ✅ | ✅ |
+| `GraphTokenProvider`, `GraphApiClient`, `GraphMailSender`, `ConfiguredGraphMailboxProvider`, `GraphTransportFactory`, `GraphTransport` (1.8, `graph.enabled`) | none (readonly; tokens in the PSR-6 pool keyed per tenant / client / secret; mailbox resolved per send; files opened and closed per attachment) | ✅ | ✅ |
 
 ## Findings
 
@@ -98,9 +100,10 @@ the cached transport is rebuilt because its DSN no longer matches.
 
 - `tests/Integration/Settings/LegacyResendBoundariesTest.php` (1.7.1) boots **one** kernel and never calls `services_resetter`: 500 HTTP requests through the `http_kernel` service (not `Kernel::handle()`; each with a sub-request), 500 messages through a real `Symfony\Component\Messenger\Worker` on the kernel's dispatcher without `ResetServicesListener` (as `--no-reset`; every 7th handler fails), and 500 console `Application::run()` calls. Before each unit another worker alternates the legacy sender between tenant A's and tenant B's address; each unit must read the stored one. Memory margin: less than 1 MiB growth after a 50-unit warm-up. Without the 1.7.1 listener all three paths fail.
 - `tests/Integration/Ddd/HostProvidersKernelTest.php::testKeptAliveKernelServesManyTenantsWithoutLeakingState`: 600 requests through `http_kernel` for two tenants (host DSN / sender ports), sender of each tenant checked, memory under 2 MiB.
+- `tests/Integration/Graph/GraphKernelTest.php::testDddHostWithItsOwnMailboxPortAndManyRequestsInOneWorker` (1.8): one kernel, no services resetter, 600 requests through `http_kernel` alternating two organizations (two tenants, two apps, two mailboxes) on the Graph sender with a host mailbox port; each request must create its draft in its own mailbox with its own tenant's token and Reply-To (the simulated Graph answers 401 otherwise), exactly one token per tenant is requested over the run, memory under 2 MiB after a 100-request warm-up.
 - `reset()` is tested directly: `tests/Unit/Settings/LegacyResendSettingsTest.php`, `tests/Unit/EventListener/LegacyResendSettingsResetListenerTest.php`.
 
-Static checks: `composer igor` (90 service files, 0 KO, 0 WARN) and PHPStan with the FrankenPHP rulesets pass.
+Static checks: `composer igor` (107 service files in 1.8, 0 KO, 0 WARN) and PHPStan with the FrankenPHP rulesets pass.
 
 ## Host rule: entity managers
 

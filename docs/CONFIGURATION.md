@@ -12,6 +12,7 @@
 - [log](#log)
 - [personal_data](#personal_data)
 - [brand](#brand)
+- [graph](#graph)
 - [doctrine](#doctrine)
 - [web_ui](#web_ui)
   - [Layout and CSS stack (UiKit)](#layout-and-css-stack-uikit)
@@ -76,6 +77,19 @@ nowo_mail_kit:
         max_image_bytes: 524288        # largest brand image attached to one e-mail (1 KiB … 2 MiB)
         max_total_bytes: 1048576       # all brand images of one e-mail (1 KiB … 5 MiB, ≥ max_image_bytes)
         max_image_side: 4096           # longest image side in pixels, from the image header (16 … 8192)
+    graph:                             # 1.8, spec 229: Microsoft Graph sending from shared mailboxes (opt-in)
+        enabled: false                 # register GraphMailSender and the microsoft+graph://<profile> transport factory
+        mailbox_provider: null         # service id implementing Graph\GraphMailboxProviderInterface; null = profiles below
+        default_profile: default       # profile used when the caller names none
+        profiles: {}                   # name => { tenant_id, client_id, client_secret, mailbox } (use %env()%)
+        http_client: http_client       # keep the decorated client so HttpLog records the calls
+        token_cache: cache.app         # PSR-6 pool of the app-only tokens
+        timeout: 30.0                  # idle deadline of one Graph / token call, seconds (1 … 300)
+        upload_hosts: [outlook.office.com, outlook.office365.com]  # accepted upload session hosts (HTTPS)
+        limits:
+            max_attachments: 50        # attachments per e-mail (0 … 250)
+            max_attachment_bytes: 36700160  # one attachment (≤ 150 MiB, the Graph maximum)
+            max_message_bytes: 36700160     # attachments + bodies of one e-mail
     doctrine:
         table_prefix: ''               # 'app_' => app_mail_kit_sent_mail
         entity_manager: null           # ORM entity manager name (null = default)
@@ -97,7 +111,7 @@ nowo_mail_kit:
         allow_unauthenticated: false   # DEV / DEMO only; refused unless kernel.debug is true
 ```
 
-Unknown keys are rejected. Switches (`mailer.decorate`, `dsn.allow_private_hosts`, `dsn.allow_insecure_tls`, `resend.enabled`, `log.enabled`, `log.map_entities`, `log.store_bodies`, `personal_data.enabled`, `web_ui.enabled`, `web_ui.export.enabled`, `web_ui.export.include_bodies`, `security.allow_unauthenticated`) must be literal booleans: `%env(bool:…)%` placeholders are refused because they would read as `true` while the container is built.
+Unknown keys are rejected. Switches (`mailer.decorate`, `dsn.allow_private_hosts`, `dsn.allow_insecure_tls`, `resend.enabled`, `log.enabled`, `log.map_entities`, `log.store_bodies`, `personal_data.enabled`, `graph.enabled`, `web_ui.enabled`, `web_ui.export.enabled`, `web_ui.export.include_bodies`, `security.allow_unauthenticated`) must be literal booleans: `%env(bool:…)%` placeholders are refused because they would read as `true` while the container is built.
 
 ## mailer
 
@@ -190,6 +204,32 @@ that do not use them.
 | `max_total_bytes` | `1048576` | Largest total of the brand images of one e-mail. 1 KiB … 5 MiB; must be ≥ `max_image_bytes`. |
 | `max_image_side` | `4096` | Longest side, in pixels, read from the image header; a larger image is left out. 16 … 8192. |
 
+## graph
+
+Since 1.8 (Beacon spec 229). Opt-in: with `enabled: false` (default) no Graph service is registered and nothing
+changes. Microsoft 365 setup: [MICROSOFT-GRAPH-SETUP.md](MICROSOFT-GRAPH-SETUP.md); code:
+[USAGE — Microsoft Graph](USAGE.md#microsoft-graph-shared-mailbox).
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `enabled` | `false` | Registers `Graph\Send\GraphMailSender` (public), the token provider, the Graph client and the `microsoft+graph` mailer transport factory (`mailer.transport_factory` tag). Literal boolean. |
+| `mailbox_provider` | `null` | Service id implementing `Graph\GraphMailboxProviderInterface` (tenant, client id, secret and mailbox per profile, e.g. from encrypted host settings). When set, `profiles` and `default_profile` are not used. |
+| `default_profile` | `default` | Profile of `microsoft+graph://default` and of `GraphMailSender::send($mail)` without a profile. Must exist in `profiles` when no provider is set. |
+| `profiles.<name>.tenant_id` | — | Entra tenant id (GUID) or verified domain. Required. |
+| `profiles.<name>.client_id` | — | Application (client) id (GUID). Required. |
+| `profiles.<name>.client_secret` | — | Client secret. Required. Use `%env(…)%` (resolved at runtime); never commit it. |
+| `profiles.<name>.mailbox` | — | Shared mailbox address; the From of every message. Required. |
+| `http_client` | `http_client` | HTTP client service. Keep the default (decorated by HttpLog when installed, so the calls appear under the `microsoft_graph` provider with redaction). Every call uses `max_redirects: 0` and the timeout below. |
+| `token_cache` | `cache.app` | PSR-6 pool of the access tokens, key = SHA-256 of tenant, client id and secret fingerprint; stored until 5 minutes before expiry (the expiry is also checked on read). Tokens are bearer credentials valid for about an hour: on a shared or persistent cache, use a pool with an encrypting marshaller (`SodiumMarshaller`) or `cache.adapter.array` per worker. |
+| `timeout` | `30.0` | Idle deadline of one call (the total per call is 4×, the token request 2×). 1 … 300 s. |
+| `upload_hosts` | `[outlook.office.com, outlook.office365.com]` | Hosts accepted in the upload session URL Graph returns (HTTPS, port 443, no user info, exact match, lower-cased). Any other URL is refused before a byte is sent (SSRF guard). |
+| `limits.max_attachments` | `50` | Attachments of one e-mail (0 … 250). |
+| `limits.max_attachment_bytes` | `36700160` (35 MiB) | Bytes of one attachment, at most 150 MiB (Graph). |
+| `limits.max_message_bytes` | `36700160` (35 MiB) | Bytes of all attachments plus the bodies. Exchange's own message size limit (35 MB by default, `Set-Mailbox -MaxSendSize`) applies on top. |
+
+Profile names: letters, digits, `_`, `.`, `-` (at most 64 characters). The container refuses to compile when
+`enabled` is true without `mailbox_provider` and without a profile named like `default_profile`.
+
 ## doctrine
 
 | Key | Default | Description |
@@ -277,6 +317,7 @@ MailKit requires `NowoInstanceSettingsBundle` (and its DoctrineEncrypt key for t
 | --- | --- | --- |
 | DNS lookup of a DSN host | 2 s | `dsn.dns_timeout` |
 | Resend key check | 10 s connect + total, no redirect | `resend.api_timeout` |
+| Microsoft Graph / token calls (1.8) | 30 s idle per call (total 4×, token 2×), no redirect | `graph.timeout` |
 | SMTP / provider delivery | Symfony mailer defaults (`timeout` DSN option, default `default_socket_timeout`) | add `?timeout=10` style options to the DSN when needed |
 | PHP `max_execution_time` | must be **greater** than the above | php.ini / FrankenPHP `php_ini` |
 | Proxy / Caddy write timeout | must be **greater** than PHP | demo `Caddyfile` |
@@ -285,13 +326,13 @@ The test e-mail and the key check run in the request: keep the operation deadlin
 
 ## Profiles
 
-REQ-CFG-001 does not apply: the bundle has one configuration tree. Variants (another DSN source) are a `mailer.dsn_provider` service, not named profiles.
+REQ-CFG-001 does not apply to the mailer: the bundle has one configuration tree. Variants (another DSN source) are a `mailer.dsn_provider` service, not named profiles. The Graph mailboxes (1.8) are named profiles in the REQ-CFG-001 shape under `graph`: `graph.default_profile` + `graph.profiles`.
 
 ## Container parameters and services
 
 Parameters: `nowo_mail_kit.doctrine.table_prefix`, `.web_ui.enabled`, `.web_ui.path_prefix`, `.log.enabled`, `.log.retention_days`, `.resend.enabled`, `.security.allow_unauthenticated`.
 
-Public services: `Nowo\MailKitBundle\Brand\BrandedEmailHelper` (1.4), `Nowo\MailKitBundle\Mailer\RuntimeTransport`, `Readiness\OutboundMailReadiness`, `Dsn\MailerDsnValidator`, `TestMail\TestMailSender`, `Log\SentMailRecorder` and `Log\SentMailRepository` (log on), `Resend\ResendApiChecker` (Resend on), `nowo_mail_kit.outbound_mail_ready_checker` (AuthKit installed). Interfaces: `Dsn\MailerDsnProviderInterface`, `Security\MailKitAccessCheckerInterface`, `Log\SentMailErasureInterface`, `Log\SentMailPersonalDataEraserInterface`, `Log\SentMailPersonalDataExporterInterface` and `Log\SentMailPersonalDataSubjectResolverInterface` (1.7). With UserKit: `Integration\UserKit\EmailsReceivedPersonalDataEraser` and `Integration\UserKit\EmailsReceivedPersonalDataExportProvider` (private, tagged).
+Public services: `Nowo\MailKitBundle\Brand\BrandedEmailHelper` (1.4), `Nowo\MailKitBundle\Mailer\RuntimeTransport`, `Readiness\OutboundMailReadiness`, `Dsn\MailerDsnValidator`, `TestMail\TestMailSender`, `Log\SentMailRecorder` and `Log\SentMailRepository` (log on), `Resend\ResendApiChecker` (Resend on), `nowo_mail_kit.outbound_mail_ready_checker` (AuthKit installed), `Graph\Send\GraphMailSender` and the `Graph\GraphMailboxProviderInterface` alias (`graph.enabled`, 1.8). Interfaces: `Dsn\MailerDsnProviderInterface`, `Security\MailKitAccessCheckerInterface`, `Log\SentMailErasureInterface`, `Log\SentMailPersonalDataEraserInterface`, `Log\SentMailPersonalDataExporterInterface` and `Log\SentMailPersonalDataSubjectResolverInterface` (1.7). With UserKit: `Integration\UserKit\EmailsReceivedPersonalDataEraser` and `Integration\UserKit\EmailsReceivedPersonalDataExportProvider` (private, tagged).
 
 ## Fail-closed checks
 
@@ -303,4 +344,5 @@ The container refuses to compile when:
 - `security.allow_unauthenticated: true` outside `kernel.debug`;
 - `dsn.allowed_schemes` contains `sendmail`, `sendmail+smtp`, `native` or `null`;
 - a switch is an env placeholder, a prefix / path / interval / template id is invalid;
+- `graph.enabled` is true without `graph.mailbox_provider` and without a profile named like `graph.default_profile`, or a profile name is invalid;
 - `brand.name` is blank, too long or contains control / bidi characters, a `brand.colors` value is not `#rrggbb`, or `brand.max_image_bytes` exceeds `brand.max_total_bytes`.

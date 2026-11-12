@@ -37,6 +37,11 @@ Out of scope for 1.0 (Beacon kit #3, `src/Shared/EmailTemplate/**`):
 
 ## Later candidates
 
+- 1.9: inbound mail from a Graph mailbox (Beacon spec 229 Block B) — change-notification webhook (validation token,
+  constant-time `clientState`, renewal), delta sweep with a stored delta token per mailbox, normalised message DTO
+  (sanitised HTML, attachments typed by content, plus-address tags, threading ids, SPF / DKIM / DMARC, forwarded
+  flag), host routing port (route / quarantine / discard), idempotency by internetMessageId in a bundle table.
+
 - Optional automatic purge (Scheduler message) instead of a cron line.
 - Provider webhooks (bounces, complaints) updating the log status.
 - `nowo-tech/runtime-env-bundle` DSN provider shipped as an optional integration.

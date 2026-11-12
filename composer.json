@@ -1,6 +1,6 @@
 {
     "name": "nowo-tech/mail-kit-bundle",
-    "description": "Runtime-configurable mailer for Symfony on top of Instance Settings: DSN and sender validation, SSRF-safe hosts, test e-mail, Resend key check, sent-mail log with retention and an AuthKit mail-ready adapter.",
+    "description": "Runtime-configurable mailer for Symfony on top of Instance Settings: DSN and sender validation, SSRF-safe hosts, test e-mail, Resend key check, sent-mail log with retention, an AuthKit mail-ready adapter and opt-in Microsoft Graph sending from shared mailboxes.",
     "type": "symfony-bundle",
     "license": "MIT",
     "keywords": [
@@ -11,6 +11,8 @@
         "email",
         "smtp",
         "resend",
+        "microsoft-graph",
+        "office365",
         "mailer-dsn",
         "email-log",
         "instance-settings",
@@ -47,6 +49,7 @@
         "nowo-tech/instance-settings-bundle": "^1.3.1",
         "nowo-tech/outbound-url-guard-bundle": "^1.3",
         "nowo-tech/ui-kit-bundle": "^2.23",
+        "psr/cache": "^2.0 || ^3.0",
         "psr/clock": "^1.0",
         "psr/log": "^2.0 || ^3.0",
         "symfony/clock": "^7.4 || ^8.0",

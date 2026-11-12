@@ -41,6 +41,7 @@ The transport built from the stored DSN is cached per DSN and dropped on `kernel
 - **GDPR ports** (1.7) — `SentMailPersonalDataEraserInterface` (and the 1.6 `SentMailErasureInterface`) / `SentMailPersonalDataExporterInterface` erase and export one address's log rows with exact matching (no SQL in your app); shared rows are unlinked, not deleted; with [UserKit](https://github.com/nowo-tech/UserKitBundle) installed, `personal_data.enabled: true` registers the `emails_received` eraser and export section.
 - **Readiness** — `OutboundMailReadiness::isOutboundMailReady()`, Twig `nowo_mail_kit_outbound_mail_ready()` / `nowo_mail_kit_status()`, and an **AuthKit** `OutboundMailReadyCheckerInterface` adapter wired automatically when AuthKit is installed.
 - **Branded e-mails** (1.4, optional) — `@NowoMailKit/email/branded_layout.html.twig` / `.txt.twig` with the brand name, colours and logo from a `nowo-tech/brand-contracts` provider (InstanceSettings 1.5 or your own), the logo attached as an inline **CID** part through `BrandAssetReaderInterface` (PNG / JPEG / WebP only, size-limited, never fetched); `BrandedEmailHelper::apply()` / `embed()`; configured fallback without a provider ([USAGE](docs/USAGE.md#branded-e-mails)).
+- **Microsoft Graph** (1.8, opt-in) — send from a Microsoft 365 shared mailbox with app-only credentials: `GraphMailSender` (plain value objects in, Graph id + internetMessageId out) or the `microsoft+graph://<profile>` mailer transport; own `Message-ID`, `In-Reply-To`, `References`, per-message (plus-address) Reply-To, streamed attachments with upload sessions above 3 MiB; tokens cached in PSR-6, nothing kept per worker; host mailbox port for DDD apps ([USAGE](docs/USAGE.md#microsoft-graph-shared-mailbox), [owner setup](docs/MICROSOFT-GRAPH-SETUP.md)).
 - **Fail-closed wiring** — the container refuses to compile without Instance Settings (unless both the DSN and sender providers are host services, 1.6) or the framework mailer, with the UI on but no form CSRF, with an empty role list, or with `allow_unauthenticated` outside `kernel.debug`.
 
 ## Installation
@@ -153,6 +154,7 @@ make release-check
 
 - [Templates (UiKit page contract)](docs/TEMPLATES.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [Microsoft 365 setup for Graph sending](docs/MICROSOFT-GRAPH-SETUP.md)
 - [Roadmap](docs/ROADMAP.md)
 - [PSR evaluation (REQ-CS-007)](docs/PSR.md)
 - [Demo (FrankenPHP)](docs/DEMO-FRANKENPHP.md)

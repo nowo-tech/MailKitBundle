@@ -10,6 +10,7 @@ Bundle-specific security analysis. The short GitHub reporting policy lives in [`
 - [Admin UI exposure and allow_unauthenticated](#admin-ui-exposure-and-allow_unauthenticated)
 - [Secrets and cryptography](#secrets-and-cryptography)
 - [Personal data (GDPR)](#personal-data-gdpr)
+- [E-mail open and click tracking (1.10)](#e-mail-open-and-click-tracking-110)
 - [Logging](#logging)
 - [Resource limits and timeouts](#resource-limits-and-timeouts)
 - [CSRF](#csrf)
@@ -47,6 +48,8 @@ transports and provider bridges, or the content of the messages your application
 | Graph mailbox credentials (1.8) | `GraphMailboxProviderInterface` (configured profiles from `%env()%`, or the host's port) | `GraphSecret` redacted in dumps, not serializable; never logged or put in an exception. |
 | Inbound webhook (1.9, `graph.inbound.enabled`) | `POST graph.inbound.webhook.path` (public, stateless) | Validation token echoed as `text/plain` only when 1–1024 printable ASCII characters (`nosniff`, `default-src 'none'`); notifications need a stored subscription id and its client state (SHA-256 digests, `hash_equals`); body / batch caps and a global rate limit; only enqueues ids. |
 | Inbound messages (1.9) | `GraphInboundProcessor` ← Graph message JSON and attachments | Untrusted sender content: capped JSON, sanitised HTML, attachments in capped temp streams with finfo-detected types and neutralised names; delta / next links followed only on Graph. |
+| Open pixel (1.10, `tracking.enabled`) | `GET\|HEAD tracking.path_prefix/{token}.gif` (public, stateless) | Always the same GIF (`no-store`), whatever the token; HMAC-SHA256 token (128-bit truncated MAC, constant-time, key derived from `tracking.secret` or `kernel.secret`, expiry = retention); a valid token only increments counters of an existing send with one indexed UPDATE; no session, cookie or user. |
+| Outgoing HTML (1.10, `tracking.enabled`) | `EmailTracker` ← host policy, link filter and link rewriter | Credential-bearing links are never handed to the rewriter (built-in rules, not configurable off); the rewriter's answer must be an absolute http(s) URL ≤ 2048 characters, HTML-escaped into the `href`; any failure keeps the original link. |
 | Configuration | `nowo_mail_kit.*` | Validated at compile time; switches must be literal booleans. |
 
 ## Threat model and mitigations
@@ -86,6 +89,9 @@ transports and provider bridges, or the content of the messages your application
 | **Spoofed sender verdicts** (1.9) | SPF / DKIM / DMARC are read from the first `Authentication-Results` header only when Exchange marked the message as received from outside (`X-MS-Exchange-Organization-AuthAs: Anonymous`); otherwise null. **Assumption:** Exchange Online Protection's header firewall strips `X-MS-Exchange-Organization-*` and its own `Authentication-Results` from incoming mail, so a sender cannot forge them; with hybrid / on-premises routing (mail entering through your servers first) that is not guaranteed and the verdicts are advisory only. They are a coarse spam signal, not a user authentication; neither is a plus-address tag (anyone can write to `projects+t-42@…`). Hosts decide with their own contact rules. |
 | **Oversized messages** (1.9) | Over `limits.max_message_bytes` the message is handed over without body or headers (`oversized`), so it is neither lost nor retried forever. |
 | **Duplicate processing / lost messages** (1.9) | Claims by SHA-256(profile, internetMessageId) in the bundle table (unique key; savepoint in an open host transaction); a host exception releases the claim; a crashed claim is taken over after `stale_claim_seconds`. |
+| **Tracking a security e-mail** (1.10) | Four independent layers: the `X-Mail-Kit-No-Track` header, `tracking.never_track_templates` (security defaults, before the host is asked), `skip_redacted` (any declared one-time value), and the host policy; credential-bearing links are never rewritten even inside a tracked e-mail. |
+| **Open redirect / link tampering through tracking** (1.10) | MailKit never redirects: it only replaces an allowed `href` with the URL the host rewriter returns (absolute http(s), ≤ 2048 characters, no white space or control characters, HTML-escaped). The redirect and its target checks belong to the rewriter's short-link service (Beacon: OutboundUrlGuard). |
+| **Pixel token forgery / enumeration** (1.10) | 128-bit random send ids, HMAC-SHA256 tokens (truncated to 128 bits), constant-time verification against every configured key, expiry; every outcome answers the same GIF. |
 | **Cross-request state leaks (FrankenPHP worker)** | Only the transport for the last DSN is kept, reset on `kernel.reset` and on settings changes; see [FRANKENPHP-WORKER-AUDIT.md](FRANKENPHP-WORKER-AUDIT.md). |
 
 ## Admin UI exposure and allow_unauthenticated
@@ -129,6 +135,46 @@ when not every admin may change the transport.
   retention purge and the erasure command. Limit it with `web_ui.export.access_roles`, keep `include_bodies` off, and
   record in your processing register who may export and how long files are kept. Bodies need three explicit opt-ins
   (`log.store_bodies`, `web_ui.export.include_bodies`, `?bodies=1`). Errors are scrubbed again on export.
+
+## E-mail open and click tracking (1.10)
+
+Opt-in (`tracking.enabled`, default `false`: nothing registered). Opens and clicks are personal data about the
+recipient's behaviour: enable it only with a legal basis, an opt-out for recipients, a privacy-policy entry and a
+processing-register entry (Beacon spec 230: on by default with opt-out, 90-day retention).
+
+- **What is stored** (`<prefix>mail_kit_tracking_send`): the opaque send id, template id, host recipient id, tenant, log
+  id, when it was sent, human and machine open counters with first / last time, the **truncated** address (IPv4 /24,
+  IPv6 /48) and the **user-agent family** of the last open. Never the address, subject, body, full IP or user agent.
+  Clicks are stored by the host's link rewriter (short links), not by MailKit.
+- **Token**: `base64url(send id ‖ issued-at ‖ HMAC-SHA256[0..16])`. Forging a token requires the secret; a token reveals
+  no address and no recipient id. A valid token can only increment the counters of its own send (inflation by anyone
+  who has the e-mail is possible and accepted: opens are a signal, not a proof). Rotate the secret with
+  `tracking.previous_secrets`. `tracking.secret: null` derives the key from `kernel.secret` (domain-separated HMAC):
+  rotating `APP_SECRET` then invalidates outstanding pixels.
+- **Never tracked**: messages with `X-Mail-Kit-No-Track`, several envelope recipients (opens could not be attributed and
+  one recipient's opt-out would not cover the others), a template id matching `tracking.never_track_templates`
+  (security defaults), declared redaction values (`skip_redacted`), or a policy answer `none()`. Nothing is stored for
+  them (opt-out = zero rows). The policy is the host's: keep its security list and opt-out check authoritative.
+- **Links never rewritten**: credential-bearing URLs (user info; `token`, `code`, `otp`, `signature`, `_hash`,
+  `X-Amz-*`… parameters, also in the fragment; `/reset…`, `/login…`, `/magic…`, `/verify…`, `/invitation…`, `/accept…`,
+  `/oauth…` path segments; any declared redaction value), anything not absolute `http(s)`, links outside the allow-list
+  (deny by default). A token embedded in a path without such a word is only caught by the allow-list and redaction
+  values: keep `links.allowed_path_prefixes` tight and keep magic / reset / one-time links out of tracked templates.
+- **Unsubscribe / preferences / legal links** are flagged `TrackedLink::$essential`: the rewriter must redirect them
+  unconditionally (no expiry, block or rate limit). An unsubscribe URL that carries a token parameter is **not**
+  rewritten at all (credential rule wins): it stays a direct link.
+- **Pixel endpoint**: public by design; answers the same GIF for every token (no oracle beyond timing of one HMAC per
+  configured key and, for valid tokens of known sends, one UPDATE). Exclude it from sessions (`security: false`
+  firewall) and keep it out of HttpLog / access logs that store full URLs if you treat tokens as personal data.
+  Configure `framework.trusted_proxies` to your proxies only: the client address (truncated, and matched against
+  `machine_opens.ip_ranges`) comes from `Request::getClientIp()`.
+- **Machine opens** (Apple Mail Privacy Protection `17.0.0.0/8`, scanners, empty user agent) are counted apart; a
+  machine open is not an open. The classification is heuristic.
+- **Retention and rights**: `nowo:mail-kit:tracking:purge` (default `P90D`); export / erasure per recipient id
+  (`EmailTrackingPersonalDataInterface`, UserKit `email_tracking` with `personal_data.enabled`), exact binary match.
+  Sends tracked without a recipient id are only removed by the purge.
+- **Failure mode**: a failing policy, store, filter or rewriter never blocks delivery: the e-mail (or the link) goes out
+  untracked and the failure is logged without content.
 
 ## Logging
 

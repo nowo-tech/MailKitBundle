@@ -29,6 +29,7 @@ use function implode;
 use function is_array;
 use function is_string;
 use function preg_match;
+use function rtrim;
 use function sprintf;
 use function str_starts_with;
 use function strtolower;
@@ -56,6 +57,18 @@ final class Configuration implements ConfigurationInterface
 
     /** brand.mode: ignore any brand provider. */
     public const BRAND_OFF = 'off';
+
+    /** Default `tracking.never_track_templates`: security e-mails are never tracked, whatever the policy says. */
+    public const NEVER_TRACK_TEMPLATES = ['*password*', '*reset*', '*magic*', '*login*', '*sign_in*', '*signin*', '*one_time*', '*otp*', '*code*', '*verif*', '*confirm*', '*security*', '*new_device*', '*email_change*', '*invitation*', '*invite*', '*2fa*', '*mfa*', '*token*'];
+
+    /** Default `tracking.links.essential_patterns`: tracked, never blocked. */
+    public const ESSENTIAL_LINK_PATTERNS = ['unsubscribe', 'preferences', 'privacy', 'legal', 'terms'];
+
+    /** Default `tracking.machine_opens.user_agents` (case-insensitive substrings). */
+    public const MACHINE_USER_AGENTS = ['bot', 'crawler', 'spider', 'preview', 'curl/', 'wget', 'python-requests', 'go-http-client', 'barracuda', 'mimecast', 'proofpoint', 'messagelabs', 'symantec', 'trendmicro', 'linkscanner', 'safelinks'];
+
+    /** Default `tracking.machine_opens.ip_ranges`: Apple (Mail Privacy Protection prefetches through Apple's proxies). */
+    public const MACHINE_IP_RANGES = ['17.0.0.0/8'];
 
     /** DSN schemes that run host processes or drop every message: never accepted from the settings. */
     public const FORBIDDEN_SCHEMES = ['sendmail', 'sendmail+smtp', 'native', 'null'];
@@ -245,6 +258,7 @@ final class Configuration implements ConfigurationInterface
                 ->end()
                 ->append($this->brandNode())
                 ->append($this->graphNode())
+                ->append($this->trackingNode())
                 ->arrayNode('doctrine')
                     ->addDefaultsIfNotSet()
                     ->children()
@@ -720,6 +734,147 @@ final class Configuration implements ConfigurationInterface
             ->end();
 
         return $node;
+    }
+
+    /**
+     * `tracking` (1.10, Beacon spec 230 block B): open pixel and click link rewriting. Off by default.
+     */
+    private function trackingNode(): ArrayNodeDefinition
+    {
+        $listOfStrings = static function (string $name, string $info, array $default): ArrayNodeDefinition {
+            /** @var ArrayNodeDefinition $node */
+            $node = (new TreeBuilder($name))->getRootNode();
+            $node->info($info)->scalarPrototype()->cannotBeEmpty()->end()->defaultValue($default);
+
+            return $node;
+        };
+        $days = static fn (mixed $v): bool => !is_string($v) || preg_match('/^P(\d{1,4})D\z/', $v, $m) !== 1 || (int) $m[1] < 1 || (int) $m[1] > 3650;
+
+        /** @var ArrayNodeDefinition $node */
+        $node = (new TreeBuilder('tracking'))->getRootNode();
+        $node
+            ->info('1.10: open pixel and click tracking of outgoing e-mail (host policy per template and recipient). Off by default: nothing is registered.')
+            ->addDefaultsIfNotSet()
+            ->children()
+                ->booleanNode('enabled')->defaultFalse()->end()
+                ->scalarNode('policy')
+                    ->info('Service id implementing Tracking\\EmailTrackingPolicyInterface (which templates and recipients are tracked). Required when enabled.')
+                    ->defaultNull()
+                ->end()
+                ->scalarNode('link_rewriter')
+                    ->info('Service id implementing Tracking\\EmailLinkRewriterInterface (e.g. short links of kind "email"); null = links are kept, only the pixel is added.')
+                    ->defaultNull()
+                ->end()
+                ->scalarNode('link_filter')
+                    ->info('Service id implementing Tracking\\TrackableLinkFilterInterface; null = the links.allowed_hosts / allowed_path_prefixes allow-list.')
+                    ->defaultNull()
+                ->end()
+                ->scalarNode('recipient_resolver')
+                    ->info('Service id implementing Tracking\\TrackingRecipientResolverInterface (recipient ids of a UserKit user, GDPR bridge); null = getId().')
+                    ->defaultNull()
+                ->end()
+                ->scalarNode('public_base_url')
+                    ->info('Absolute https URL of the application the pixel is served from (e.g. "https://app.example.com"); required when enabled (Messenger workers have no request).')
+                    ->defaultNull()
+                    ->validate()
+                        ->ifTrue(static fn (mixed $v): bool => $v !== null && (!is_string($v) || preg_match('#^https?://[^/\s?\#@]+(/[^\s?\#]*)?\z#', $v) !== 1))
+                        ->thenInvalid('nowo_mail_kit.tracking.public_base_url must be an absolute http(s) URL without user info, query or fragment, got %s.')
+                    ->end()
+                    ->validate()
+                        ->ifString()
+                        ->then(static fn (string $v): string => rtrim($v, '/'))
+                    ->end()
+                ->end()
+                ->scalarNode('path_prefix')
+                    ->info('Path prefix of the pixel route (loader type nowo_mail_kit_tracking): <prefix>/{token}.gif.')
+                    ->defaultValue('/e/o')
+                    ->validate()
+                        ->ifTrue(static fn (mixed $v): bool => !is_string($v) || preg_match('#^(/[A-Za-z0-9_.-]{1,64}){1,8}\z#', $v) !== 1)
+                        ->thenInvalid('nowo_mail_kit.tracking.path_prefix must be an absolute path such as "/e/o", got %s.')
+                    ->end()
+                ->end()
+                ->scalarNode('secret')
+                    ->info('HMAC secret of the pixel tokens (at least 32 bytes, e.g. "%env(MAIL_KIT_TRACKING_SECRET)%"); null = derived from kernel.secret.')
+                    ->defaultNull()
+                ->end()
+                ->arrayNode('previous_secrets')
+                    ->info('Secrets still accepted for verification while rotating tracking.secret.')
+                    ->scalarPrototype()->cannotBeEmpty()->end()
+                    ->defaultValue([])
+                ->end()
+                ->scalarNode('retention')
+                    ->info('ISO 8601 duration in days ("P90D"): rows older than this are deleted by nowo:mail-kit:tracking:purge, and older tokens are refused.')
+                    ->defaultValue('P90D')
+                    ->validate()
+                        ->ifTrue($days)
+                        ->thenInvalid('nowo_mail_kit.tracking.retention must be a duration in days between P1D and P3650D, got %s.')
+                    ->end()
+                ->end()
+                ->integerNode('purge_batch_size')->info('Rows deleted per statement by the purge.')->defaultValue(1000)->min(1)->max(100_000)->end()
+                ->scalarNode('connection')->info('DBAL connection of the tracking table (null = default).')->defaultNull()->end()
+                ->scalarNode('bus')->info('Messenger bus service id: the pixel only dispatches a RecordMailOpen message (route it to an async transport); null = one synchronous UPDATE.')->defaultNull()->end()
+                ->append($listOfStrings('never_track_templates', 'fnmatch patterns (case-insensitive) of template ids never tracked, before the policy is asked. Replacing the list drops the defaults: keep the security ones.', self::NEVER_TRACK_TEMPLATES))
+                ->booleanNode('skip_redacted')
+                    ->info('Never track an e-mail that declares redaction values (MailHeaders::redact(): one-time links and codes).')
+                    ->defaultTrue()
+                ->end()
+                ->integerNode('max_html_bytes')->info('Larger HTML bodies are sent untracked.')->defaultValue(2_097_152)->min(1024)->max(16_777_216)->end()
+                ->arrayNode('links')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->append($listOfStrings('allowed_hosts', 'Hosts whose links may be rewritten: exact, "*.example.com" (sub-domains) or "*" (any). Empty = no link is rewritten.', []))
+                        ->append($listOfStrings('allowed_path_prefixes', 'Path prefixes whose links may be rewritten ("/issues" matches /issues and /issues/...); empty = any path of an allowed host.', []))
+                        ->append($listOfStrings('credential_query_parameters', 'Extra query / fragment parameter names that mark a credential-bearing link (never rewritten), added to the built-in list.', []))
+                        ->append($listOfStrings('credential_path_segments', 'Extra leading words of a path segment that mark a credential-bearing link, added to the built-in list.', []))
+                        ->append($listOfStrings('essential_patterns', 'Substrings of the URL or label of links that are tracked but must never be blocked (unsubscribe, preferences, legal): passed as TrackedLink::$essential.', self::ESSENTIAL_LINK_PATTERNS))
+                        ->integerNode('max_links')->info('Links rewritten in one e-mail at most.')->defaultValue(100)->min(1)->max(1000)->end()
+                    ->end()
+                ->end()
+                ->arrayNode('machine_opens')
+                    ->info('Opens counted apart as machine opens (Apple Mail Privacy Protection, image proxies, scanners). An empty user agent is always a machine.')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->append($listOfStrings('user_agents', 'Case-insensitive user-agent substrings.', self::MACHINE_USER_AGENTS))
+                        ->arrayNode('ip_ranges')
+                            ->info('Client addresses or CIDR ranges (behind a proxy, configure framework.trusted_proxies).')
+                            ->scalarPrototype()->cannotBeEmpty()->end()
+                            ->defaultValue(self::MACHINE_IP_RANGES)
+                            ->validate()
+                                ->ifTrue(static function (array $v): bool {
+                                    foreach ($v as $range) {
+                                        if (!self::isIpRange((string) $range)) {
+                                            return true;
+                                        }
+                                    }
+
+                                    return false;
+                                })
+                                ->thenInvalid('nowo_mail_kit.tracking.machine_opens.ip_ranges must contain IP addresses or CIDR ranges.')
+                            ->end()
+                        ->end()
+                    ->end()
+                ->end()
+            ->end()
+            ->validate()
+                ->ifTrue(static fn (array $v): bool => ($v['enabled'] ?? false) === true && (!is_string($v['policy'] ?? null) || $v['policy'] === ''))
+                ->thenInvalid('nowo_mail_kit.tracking.enabled needs tracking.policy (your EmailTrackingPolicyInterface service).')
+            ->end()
+            ->validate()
+                ->ifTrue(static fn (array $v): bool => ($v['enabled'] ?? false) === true && !is_string($v['public_base_url'] ?? null))
+                ->thenInvalid('nowo_mail_kit.tracking.enabled needs tracking.public_base_url (absolute URL the pixel is served from).')
+            ->end();
+
+        return $node;
+    }
+
+    /**
+     * Seconds of a validated `PnD` duration.
+     */
+    public static function daysSeconds(string $duration): int
+    {
+        preg_match('/^P(\d+)D\z/', $duration, $m);
+
+        return (int) ($m[1] ?? 0) * 86_400;
     }
 
     /**

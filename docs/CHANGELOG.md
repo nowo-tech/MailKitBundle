@@ -6,54 +6,109 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
-- [[1.9.0] - 2026-11-12](#190---2026-11-12)
   - [Added](#added)
   - [Changed](#changed)
+  - [Tests](#tests)
+- [[1.9.0] - 2026-11-12](#190---2026-11-12)
+  - [Added](#added-1)
+  - [Changed](#changed-1)
   - [Audit NQ (before the 1.9.0 tag)](#audit-nq-before-the-190-tag)
   - [Audit NQ-v (verification, before the 1.9.0 tag)](#audit-nq-v-verification-before-the-190-tag)
   - [Security](#security)
-  - [Tests](#tests)
-- [[1.8.0] - 2026-11-12](#180---2026-11-12)
-  - [Added](#added-1)
-  - [Security](#security-1)
   - [Tests](#tests-1)
+- [[1.8.0] - 2026-11-12](#180---2026-11-12)
+  - [Added](#added-2)
+  - [Security](#security-1)
+  - [Tests](#tests-2)
 - [[1.7.1] - 2026-11-11](#171---2026-11-11)
   - [Fixed](#fixed)
-  - [Tests](#tests-2)
+  - [Tests](#tests-3)
   - [Documentation](#documentation)
 - [[1.7.0] - 2026-11-11](#170---2026-11-11)
-  - [Added](#added-2)
-  - [Changed](#changed-1)
-- [[1.6.0] - 2026-11-11](#160---2026-11-11)
   - [Added](#added-3)
   - [Changed](#changed-2)
-- [[1.5.0] - 2026-11-10](#150---2026-11-10)
+- [[1.6.0] - 2026-11-11](#160---2026-11-11)
   - [Added](#added-4)
   - [Changed](#changed-3)
-- [[1.4.0] - 2026-11-09](#140---2026-11-09)
+- [[1.5.0] - 2026-11-10](#150---2026-11-10)
   - [Added](#added-5)
+  - [Changed](#changed-4)
+- [[1.4.0] - 2026-11-09](#140---2026-11-09)
+  - [Added](#added-6)
   - [Security](#security-2)
 - [[1.3.0] - 2026-11-02](#130---2026-11-02)
-  - [Added](#added-6)
-  - [Changed](#changed-4)
-  - [Security](#security-3)
-- [[1.2.0] - 2026-11-02](#120---2026-11-02)
   - [Added](#added-7)
   - [Changed](#changed-5)
+  - [Security](#security-3)
+- [[1.2.0] - 2026-11-02](#120---2026-11-02)
+  - [Added](#added-8)
+  - [Changed](#changed-6)
   - [Fixed](#fixed-1)
 - [[1.1.1] - 2026-11-01](#111---2026-11-01)
   - [Security](#security-4)
-  - [Changed](#changed-6)
+  - [Changed](#changed-7)
   - [Fixed](#fixed-2)
 - [[1.1.0] - 2026-11-01](#110---2026-11-01)
-  - [Added](#added-8)
-  - [Changed](#changed-7)
-- [[1.0.0] - 2026-10-31](#100---2026-10-31)
   - [Added](#added-9)
+  - [Changed](#changed-8)
+- [[1.0.0] - 2026-10-31](#100---2026-10-31)
+  - [Added](#added-10)
   - [Security (independent audit, Appendix CA)](#security-independent-audit-appendix-ca)
   - [Security (re-verification follow-ups)](#security-re-verification-follow-ups)
 
 ## [Unreleased]
+
+Next minor: 1.10.0 (Beacon spec 230 block B, D-20261112-16: e-mail open and click tracking).
+
+### Added
+
+- **E-mail open and click tracking (opt-in, `tracking.enabled`, default `false`: nothing is registered and every e-mail
+  goes out as in 1.9; needs a DBAL connection).** Right before delivery the runtime transport asks
+  `Tracking\EmailTracker` for a tracked **copy** (the original message is never changed): an opaque send id (128
+  random bits), a 1×1 transparent GIF pixel and rewritten links. `MailDeliveredEvent::$trackingId` (new optional
+  trailing argument) carries the send id; a failed delivery forgets the send.
+- **Host ports (plain PHP, REQ-ARCH-001 rule 3):** `Tracking\EmailTrackingPolicyInterface` (required; decides per
+  `TrackingCandidate` — template id, the only recipient, recipient id / tenant hints — and returns a
+  `TrackingDecision`), `Tracking\EmailLinkRewriterInterface` (`TrackedLink`: send id, URL, label, position,
+  `essential`, template, recipient id, tenant; default `NullEmailLinkRewriter` keeps the links),
+  `Tracking\TrackableLinkFilterInterface` (default `ConfiguredTrackableLinkFilter`, deny by default:
+  `links.allowed_hosts` / `allowed_path_prefixes`), `Tracking\TrackingRecipientResolverInterface` (GDPR bridge).
+- **Never tracked:** `X-Mail-Kit-No-Track` (`MailHeaders::noTracking()`), several envelope recipients, no HTML body,
+  template ids matching `tracking.never_track_templates` (security defaults), declared redaction values
+  (`skip_redacted`), a policy answer `none()` — no pixel, links untouched, **no row**. Credential-bearing links
+  (`Tracking\CredentialLinkDetector`: user info, token / code / OTP / signature / `_hash` / pre-signed parameters,
+  reset / login / magic / verify / invitation / accept / OAuth path segments, redaction values) are never rewritten;
+  `mailto:`, `tel:`, anchors and relative links are never touched.
+- **Pixel endpoint** (route loader `nowo_mail_kit_tracking`, `GET|HEAD <tracking.path_prefix>/{token}.gif`, default
+  `/e/o/{token}.gif`, stateless): always the same 43-byte GIF with `Cache-Control: no-store` (valid, expired, forged or
+  unknown token); HMAC-SHA256 tokens (`tracking.secret` or derived from `kernel.secret`, rotation through
+  `previous_secrets`, expiry = `retention`); one indexed UPDATE per open, or a `RecordMailOpen` message with
+  `tracking.bus`; machine opens (empty user agent, `machine_opens.user_agents`, `machine_opens.ip_ranges`, default
+  Apple `17.0.0.0/8`) counted apart; IP truncated (/24, /48), user-agent family only.
+- **Store** `<prefix>mail_kit_tracking_send` (DBAL, bundle-owned, savepoint inside a host transaction, binary collation
+  of the id columns on MySQL / MariaDB, `postGenerateSchema` listener), read port `Tracking\EmailTrackingReaderInterface`
+  (`find()`, `findMany()` → `OpenStats`), GDPR port `Tracking\EmailTrackingPersonalDataInterface`
+  (`exportRecipient()`, `eraseRecipient()`, exact match) and, with `personal_data.enabled` and UserKit, the
+  `email_tracking` eraser and export section.
+- **Events** `MailOpenedEvent` / `MailMachineOpenedEvent` (send id and time only) after each counted open of a known send.
+- **Commands** `nowo:mail-kit:tracking:purge` (retention, default `P90D`) and `nowo:mail-kit:tracking:schema [--force]`.
+- `MailHeaders::template()`, `MailHeaders::trackingRecipient()`, `MailHeaders::noTracking()` (internal headers, removed
+  before delivery).
+
+### Changed
+
+- `MailHeaders::strip()` also removes the 1.10 internal headers (`X-Mail-Kit-Template`, `X-Mail-Kit-Recipient`,
+  `X-Mail-Kit-Tenant`, `X-Mail-Kit-No-Track`), with tracking on or off.
+- `RuntimeTransport` gets an optional trailing constructor argument (`?EmailTracker`); defaults unchanged.
+
+### Tests
+
+- HTML rewriting edge cases (malformed HTML, comments, `<script>` / `<style>`, Outlook VML buttons, entities, quoting,
+  labels, limits, `data-mail-kit-track="off"`, text part, PCRE failure), credential URLs, token forgery (every bit flip),
+  rotation, expiry and clock skew, unknown / forged tokens still answer the GIF, opt-out and security templates → zero
+  rows, machine-open classification, purge in batches, exact recipient ids, savepoint inside the host transaction
+  (also on MySQL, MariaDB and PostgreSQL in CI), lint:container, and a DDD host serving 1 000 pixel requests for two
+  tenants in one kept-alive kernel without the services resetter (flat memory, p95 < 20 ms).
 
 ## [1.9.0] - 2026-11-12
 

@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.10.0](#to-1100)
 - [To 1.9.0](#to-190)
 - [To 1.8.0](#to-180)
 - [To 1.7.1](#to-171)
@@ -24,6 +25,53 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+## To 1.10.0
+
+From **1.9.0**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
+
+Next minor: 1.10.0. **No change is needed**: e-mail open and click tracking is opt-in (`nowo_mail_kit.tracking.enabled`,
+default `false`); with it off no service, route, table, command or handler is added and every e-mail goes out exactly
+as in 1.9. Two small, compatible changes apply to everyone:
+
+- `MailHeaders::strip()` also removes the new internal headers `X-Mail-Kit-Template`, `X-Mail-Kit-Recipient`,
+  `X-Mail-Kit-Tenant` and `X-Mail-Kit-No-Track` before delivery (if your application sent headers with these exact
+  names to recipients, rename them).
+- `MailDeliveredEvent` and `RuntimeTransport` get an optional trailing constructor argument (`$trackingId`,
+  `$tracker`); code that builds them positionally keeps working.
+
+To track opens and clicks ([USAGE](USAGE.md#open-and-click-tracking), privacy notes in [SECURITY](SECURITY.md#e-mail-open-and-click-tracking-110)):
+
+1. Implement `Tracking\EmailTrackingPolicyInterface` (never the security templates, never an opted-out recipient;
+   return the recipient id and tenant to store) and, for clicks, `Tracking\EmailLinkRewriterInterface` (e.g. short
+   links of kind `email`; an `essential` link must always redirect).
+2. Tag your e-mails: `MailHeaders::template($email, 'issue_alert')`, `MailHeaders::trackingRecipient($email, $userId, $tenant)`,
+   and `MailHeaders::noTracking($email)` on security e-mails.
+3. Enable it:
+
+   ```yaml
+   nowo_mail_kit:
+       tracking:
+           enabled: true
+           policy: App\Mail\MailTrackingPolicy
+           link_rewriter: App\Mail\ShortLinkEmailRewriter
+           public_base_url: '%env(APP_PUBLIC_URL)%'
+           secret: '%env(MAIL_KIT_TRACKING_SECRET)%'   # ≥ 32 bytes; null = derived from kernel.secret
+           links:
+               allowed_hosts: [app.example.com]
+   ```
+
+4. Create the table: `doctrine:migrations:diff` (ORM hosts) or `nowo:mail-kit:tracking:schema` (prints the SQL).
+5. Import the pixel route (`type: nowo_mail_kit_tracking`) and exclude its prefix from sessions
+   (`firewalls: { mail_kit_pixel: { pattern: ^/e/o/, security: false } }`).
+6. Schedule `nowo:mail-kit:tracking:purge` daily; with `personal_data.enabled` the UserKit `email_tracking` eraser and
+   export section are registered (set `tracking.recipient_resolver` when your recipient ids are not `getId()`).
+7. Update your privacy policy and processing register (what is stored: send id, template, recipient id, tenant, open
+   counters, truncated IP and user-agent family of the last open; default retention 90 days).
 
 ## To 1.9.0
 

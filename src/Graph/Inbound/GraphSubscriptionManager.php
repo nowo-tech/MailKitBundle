@@ -9,6 +9,7 @@ use DateTimeZone;
 use Exception;
 use Nowo\MailKitBundle\Graph\GraphApiClient;
 use Nowo\MailKitBundle\Graph\GraphException;
+use Nowo\MailKitBundle\Graph\GraphMailbox;
 use Nowo\MailKitBundle\Graph\GraphMailboxProviderInterface;
 use Nowo\MailKitBundle\Graph\Inbound\Message\RenewGraphSubscriptions;
 use Nowo\MailKitBundle\Graph\Inbound\Store\GraphInboundStore;
@@ -45,6 +46,9 @@ final class GraphSubscriptionManager
     /** `ensure()` outcome: the subscription was reauthorized (lifecycle `reauthorizationRequired`). */
     public const REAUTHORIZED = 'reauthorized';
 
+    /** `ensure()` outcome: a lifecycle event named another subscription than the current one; ignored. */
+    public const STALE = 'stale';
+
     /** `ensure()` outcome: no notification URL configured. */
     public const DISABLED = 'disabled';
 
@@ -73,12 +77,14 @@ final class GraphSubscriptionManager
      * {@see RenewGraphSubscriptions::REMOVED} forgets the stored subscription and creates a new one.
      *
      * @param string|null $reason null, RenewGraphSubscriptions::REAUTHORIZE or ::REMOVED
+     * @param string|null $subscriptionId the subscription a lifecycle event names: the event is ignored (outcome
+     *                                    {@see STALE}) unless it is the profile's current subscription
      *
      * @throws GraphException
      *
      * @return string one of the outcome constants
      */
-    public function ensure(string $profile, ?string $reason = null): string
+    public function ensure(string $profile, ?string $reason = null, ?string $subscriptionId = null): string
     {
         if ($this->notificationUrl === null) {
             return self::DISABLED;
@@ -87,8 +93,15 @@ final class GraphSubscriptionManager
         $current = $this->store->subscription($profile);
         $mailbox = $this->mailboxes->mailbox($profile);
         $expiry  = $now + $this->lifetimeMinutes * 60;
+        if ($reason !== null && $subscriptionId !== null && $current !== null && $current['id'] !== $subscriptionId) {
+            // A lifecycle event about an older subscription (audit NQ-v L2): nothing to do.
+            $this->log($profile, self::STALE);
+
+            return self::STALE;
+        }
         if ($current !== null && $reason === RenewGraphSubscriptions::REMOVED) {
             $this->store->deleteSubscription($current['id']);
+            $this->deleteRemote($mailbox, $current['id']);
             $current = null;
         }
         if ($current !== null && $reason === RenewGraphSubscriptions::REAUTHORIZE) {
@@ -162,6 +175,18 @@ final class GraphSubscriptionManager
         $this->log($profile, 'removed');
 
         return true;
+    }
+
+    /**
+     * Best-effort DELETE of a replaced subscription on Graph (it may already be gone).
+     */
+    private function deleteRemote(GraphMailbox $mailbox, string $subscriptionId): void
+    {
+        try {
+            $this->api->call($mailbox, 'DELETE', '/subscriptions/' . rawurlencode($subscriptionId), [], [204, 404], 'delete subscription');
+        } catch (GraphException) {
+            // Graph expires it anyway.
+        }
     }
 
     private function log(string $profile, string $outcome): void

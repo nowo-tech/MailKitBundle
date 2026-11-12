@@ -23,6 +23,9 @@ final class InboundFileTypes
         'hta', 'exe', 'bat', 'cmd', 'com', 'ps1', 'psm1', 'psd1', 'scr', 'pif', 'jar', 'lnk', 'vbs', 'vbe', 'wsf', 'wsh',
         'msi', 'msp', 'mst', 'dll', 'cpl', 'reg', 'inf', 'scf', 'url', 'appref-ms', 'application', 'gadget', 'iso', 'img',
         'vhd', 'vhdx', 'chm', 'docm', 'dotm', 'xlsm', 'xltm', 'xlam', 'pptm', 'potm', 'ppam', 'ppsm', 'sldm',
+        'ps1xml', 'ps2', 'ps2xml', 'psc1', 'psc2', 'wsc', 'sct', 'ws', 'msc', 'msh', 'msh1', 'msh2', 'mshxml', 'msh1xml', 'msh2xml',
+        'xll', 'xla', 'mht', 'mhtml', 'jnlp', 'cab', 'settingcontent-ms', 'library-ms', 'search-ms', 'searchconnector-ms',
+        'ade', 'adp', 'mde', 'accde', 'mda', 'pyw', 'pyc', 'command', 'desktop', 'apk', 'dmg', 'pkg',
     ];
 
     /** Accepted extensions per detected content type; the first one is canonical. */

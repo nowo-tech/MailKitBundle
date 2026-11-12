@@ -21,7 +21,9 @@ use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use function array_diff;
 use function array_intersect;
 use function array_keys;
+use function array_pad;
 use function array_values;
+use function explode;
 use function filter_var;
 use function implode;
 use function is_array;
@@ -33,7 +35,10 @@ use function strtolower;
 use function strtotime;
 use function trim;
 
+use const FILTER_FLAG_IPV4;
+use const FILTER_FLAG_IPV6;
 use const FILTER_VALIDATE_EMAIL;
+use const FILTER_VALIDATE_IP;
 
 /**
  * Configuration tree of `nowo_mail_kit` (REQ-SF-006: strict nodes, safe defaults).
@@ -643,6 +648,18 @@ final class Configuration implements ConfigurationInterface
                             ->info('Optional source allow-list (addresses or CIDR ranges, e.g. the Microsoft 365 Graph change-notification ranges); empty = any. Behind a proxy, configure framework.trusted_proxies.')
                             ->scalarPrototype()->cannotBeEmpty()->end()
                             ->defaultValue([])
+                            ->validate()
+                                ->ifTrue(static function (array $v): bool {
+                                    foreach ($v as $range) {
+                                        if (!self::isIpRange((string) $range)) {
+                                            return true;
+                                        }
+                                    }
+
+                                    return false;
+                                })
+                                ->thenInvalid('nowo_mail_kit.graph.inbound.webhook.allowed_ips must contain IP addresses or CIDR ranges (e.g. "203.0.113.0/24", "2001:db8::/32").')
+                            ->end()
                         ->end()
                     ->end()
                 ->end()
@@ -703,6 +720,20 @@ final class Configuration implements ConfigurationInterface
             ->end();
 
         return $node;
+    }
+
+    /**
+     * True for an IPv4 / IPv6 address, optionally with a CIDR prefix length in range.
+     */
+    public static function isIpRange(string $range): bool
+    {
+        [$address, $bits] = array_pad(explode('/', $range, 2), 2, null);
+        $v4               = filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false;
+        if (!$v4 && filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) === false) {
+            return false;
+        }
+
+        return $bits === null || (preg_match('/^\d{1,3}\z/', $bits) === 1 && (int) $bits <= ($v4 ? 32 : 128));
     }
 
     /**

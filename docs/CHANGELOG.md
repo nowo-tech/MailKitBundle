@@ -9,6 +9,7 @@ All notable changes to this project are documented here. The format follows
   - [Added](#added)
   - [Changed](#changed)
   - [Audit NQ (before the 1.9.0 tag)](#audit-nq-before-the-190-tag)
+  - [Audit NQ-v (verification, before the 1.9.0 tag)](#audit-nq-v-verification-before-the-190-tag)
   - [Security](#security)
   - [Tests](#tests)
 - [[1.8.0] - 2026-11-12](#180---2026-11-12)
@@ -128,6 +129,28 @@ Next minor: 1.9.0 (Beacon spec 229 block B, D-20261112-09: inbound client e-mail
   mail-folder message delta (`users/{id}/…` or `users('{id}')/…` with `mailFolders` and `messages/delta`); an
   identifier other than the profile's address (Graph often uses the object id) is logged once per run and followed. I7: renewals purge old idempotency records too. I9: see the dependencies.
 
+
+### Audit NQ-v (verification, before the 1.9.0 tag)
+
+- M1: an exhausted per-client-IP bucket no longer refuses verifiable notifications (Graph shares Microsoft's egress
+  addresses): it narrows the request to a cheap path (the first unknown subscription ends it, else 429). IPv6 clients
+  are keyed by /64. Docs: `trusted_proxies` must list only your proxies.
+- L1: delta links must match exactly `/v1.0/users/{id}/mailFolders/{folder}/messages/delta` (or the `('…')` key
+  forms), with no `.` / `..` segment, `;` or stray quote even after a second URL-decoding; `{id}` is the profile's
+  address or a GUID (logged once per run).
+- L2: `RenewGraphSubscriptions::$subscriptionId`: lifecycle events act only on the profile's current subscription
+  (else `stale`); only `subscriptionRemoved` recreates (with a best-effort DELETE of the old one); unknown lifecycle
+  values are logged and ignored; rejected subscriptions are counted distinct and a request with valid items is never
+  refused for stale ones.
+- L3: with a clean-up bus, an ambiguous send whose message is still a draft fails with `ambiguous` (not retried) while
+  the delayed `DeleteGraphDraft` resolves it; a failing dispatch falls back to the immediate decision without
+  replacing the original error; the handler ignores malformed ids.
+- L4: oversized messages are handed over without attachments; an envelope over 256 KiB is read again without To / Cc.
+- I1: SECURITY / USAGE state the Exchange Online Protection header-firewall assumption and the hybrid caveat. I2:
+  `allowed_ips` validated at compile time. I3: IPv6 /64 keying. I5: attachment names lose `:` and trailing dots /
+  spaces; more dangerous extensions (`ps1xml`, `psc1`, `wsc`, `sct`, `ws`, `msc`, `msh*`, `xll`, `xla`, `mht`,
+  `mhtml`, `jnlp`, `cab`, `settingcontent-ms`, `library-ms`, `search-ms`, `ade`, `adp`, `mde`, `accde`, `pyw`,
+  `command`, `desktop`, `apk`, `dmg`, `pkg` …).
 ### Security
 
 - Untrusted inbound content: HTML through symfony/html-sanitizer (safe elements only, no script / style / iframe /

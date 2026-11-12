@@ -21,9 +21,12 @@ use Nowo\MailKitBundle\Tests\Support\GraphApiMock;
 use Nowo\MailKitBundle\Tests\Support\RecordingBus;
 use Nowo\MailKitBundle\Tests\Support\RecordingLogger;
 use PHPUnit\Framework\TestCase;
+use RuntimeException;
 use Symfony\Component\Cache\Adapter\ArrayAdapter;
 use Symfony\Component\HttpClient\Exception\TransportException;
 use Symfony\Component\HttpClient\Response\MockResponse;
+use Symfony\Component\Messenger\Envelope;
+use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\Messenger\Stamp\DelayStamp;
 
 use function base64_decode;
@@ -44,7 +47,7 @@ final class GraphMailSenderTest extends TestCase
 
     private RecordingLogger $logger;
 
-    private ?RecordingBus $cleanupBus = null;
+    private ?MessageBusInterface $cleanupBus = null;
 
     protected function setUp(): void
     {
@@ -330,19 +333,34 @@ final class GraphMailSenderTest extends TestCase
         $this->mock->requests    = [];
         $this->mock->draftStates = [];
         $this->mock->draftState  = true;
-        $this->assertFailure($this->mail(), GraphException::REASON_THROTTLED);
+        $this->assertFailure($this->mail(), GraphException::REASON_AMBIGUOUS);
         self::assertCount(0, $this->mock->matching('/messages/draft-', 'DELETE'));
         self::assertCount(1, $this->mock->matching('$select=isDraft', 'GET'));
         self::assertEquals([new DeleteGraphDraft('acme', 'draft-projects@example.com-4')], $bus->messages);
         self::assertEquals([new DelayStamp(5000)], $bus->stamps[0]);
+
+        // A failing dispatch never replaces the original error: the state is decided at once.
+        $this->cleanupBus = new class implements MessageBusInterface {
+            public function dispatch(object $message, array $stamps = []): Envelope
+            {
+                throw new RuntimeException('transport down');
+            }
+        };
+        $this->mock->requests    = [];
+        $this->mock->draftStates = [true, true];
+        $this->assertFailure($this->mail(), GraphException::REASON_THROTTLED);
+        self::assertCount(1, $this->mock->matching('/messages/draft-', 'DELETE'));
+        self::assertTrue($this->logger->has('clean-up could not be scheduled'));
         $this->mock->override = null;
 
-        // The delayed message deletes only a draft.
+        // The delayed message deletes only a draft, and ignores a malformed id.
         $handler                = new DeleteGraphDraftHandler($this->sender());
         $this->mock->requests   = [];
         $this->mock->draftState = false;
         $handler(new DeleteGraphDraft('acme', 'draft-x'));
         self::assertCount(0, $this->mock->matching('/messages/draft-x', 'DELETE'));
+        $handler(new DeleteGraphDraft('acme', '../bad id'));
+        self::assertCount(0, $this->mock->matching('bad'));
         $this->mock->draftState = true;
         self::assertTrue($this->sender()->deleteDraftIfStillDraft('acme', 'draft-x'));
         self::assertCount(1, $this->mock->matching('/messages/draft-x', 'DELETE'));

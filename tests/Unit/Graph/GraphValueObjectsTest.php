@@ -174,6 +174,9 @@ final class GraphValueObjectsTest extends TestCase
         self::assertSame('htaccess', AttachmentFilename::neutralise('..htaccess'));
         self::assertSame('report.pdf', AttachmentFilename::neutralise("re\u{202E}port\x00.pdf"));
         self::assertSame('a b.txt', AttachmentFilename::neutralise("a \t b.txt"));
+        self::assertSame('evil.exe', AttachmentFilename::neutralise('evil.exe. . '));
+        self::assertSame('reportpdf', AttachmentFilename::neutralise('report:pdf'));
+        self::assertSame('x.txtZone.Identifier', AttachmentFilename::neutralise('x.txt:Zone.Identifier'));
         self::assertSame(AttachmentFilename::FALLBACK, AttachmentFilename::neutralise(null));
         self::assertSame(AttachmentFilename::FALLBACK, AttachmentFilename::neutralise('dir/'));
         self::assertSame(AttachmentFilename::FALLBACK, AttachmentFilename::neutralise("\xff\xfe"));

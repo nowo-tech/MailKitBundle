@@ -722,13 +722,19 @@ in [CONFIGURATION.md](CONFIGURATION.md#graph). Nothing changes while `graph.enab
    upload session in 3.75 MiB chunks read from the stream).
 4. The draft is sent (`POST …/send`) and saved in Sent Items with the same immutable id. A failure in step 3, or a
    definite refusal of the send (4xx), deletes the draft. An ambiguous send failure (network error, timeout, 5xx,
-   429 / 503) reads `isDraft` first: still a draft → deleted, error rethrown (safe to retry); sent → success;
-   unknown → the draft is kept and the send fails with the non-retryable reason `ambiguous`. Since 1.9, with
-   `graph.draft_cleanup.bus` a delayed `DeleteGraphDraft` (default 5 s) deletes a still-draft message later instead
-   of deleting it at once (the worker never waits); without a bus the state is read once more at once (a send
-   Exchange completes after that read is still deleted with its draft: residual race). Route `DeleteGraphDraft` to a
-   transport that supports delays (Doctrine, Redis, AMQP) (the mailer transport
-   throws a Messenger `UnrecoverableExceptionInterface`, so the message is not sent twice).
+   429 / 503) reads `isDraft` first:
+   - sent → success;
+   - unknown → the draft is kept and the send fails with the non-retryable reason `ambiguous`;
+   - still a draft, **with** `graph.draft_cleanup.bus` (1.9) → a delayed `DeleteGraphDraft` (default 5 s) is
+     dispatched, which deletes the message later only if it is still a draft, and the send fails with `ambiguous`
+     (not retried: Exchange may still send it); the worker never waits. Route `DeleteGraphDraft` to a transport that
+     supports delays (Doctrine, Redis, AMQP; a `sync://` transport ignores the delay);
+   - still a draft, **without** a bus (or when the dispatch fails) → `isDraft` is read once more at once: still a
+     draft → deleted and the original (retryable) error rethrown; a send Exchange completes after that read is still
+     deleted with its draft (residual race).
+
+   The mailer transport turns `ambiguous` into a Messenger `UnrecoverableExceptionInterface`, so a queued e-mail is
+   not sent twice.
 
 The From address is always the mailbox (Graph sends as that mailbox); only its display name is yours.
 
@@ -904,8 +910,9 @@ URL): [MICROSOFT-GRAPH-SETUP.md](MICROSOFT-GRAPH-SETUP.md#webhook-url-requiremen
 1. **Webhook** — Graph POSTs a change notification to `graph.inbound.webhook.path`. MailKit checks the subscription
    (stored, unexpired, of an inbound profile) and its `clientState` (constant time), then only dispatches
    `FetchGraphMessage(profile, graphId)` and answers 202. Lifecycle events dispatch `RenewGraphSubscriptions` with a
-   reason (`reauthorize` → `POST /subscriptions/{id}/reauthorize`; `removed` → recreate) or `SweepGraphMailbox`
-   (missed).
+   reason and the subscription id (`reauthorize` → `POST /subscriptions/{id}/reauthorize`; `removed` → best-effort
+   delete and recreate; both only when the id is the profile's current subscription) or `SweepGraphMailbox`
+   (missed); unknown lifecycle values are logged and ignored.
 2. **Delta sweep** — `nowo:mail-kit:graph:sweep` (or `SweepGraphMailbox`) walks the folder's delta query from the stored
    link and dispatches the same `FetchGraphMessage` for every new message: missed notifications and hosts without a
    public URL. The first run reads back `sweep.initial_window` only.
@@ -994,8 +1001,8 @@ final class TaskMailInbound implements GraphInboundHandlerInterface
 | `subject`, `text` | Control characters removed; `text` is the text body, or the plain text of the sanitised HTML. |
 | `html` | Sanitised (see below), or null for a text-only message. Still render it in a sandboxed / CSP-restricted view. |
 | `internetMessageId`, `inReplyTo`, `references`, `conversationId` | Threading ids (no angle brackets; References oldest first, newest 100). |
-| `authentication` | `AuthenticationResults` (`spf`, `dkim`, `dmarc`, `aligned()`) of the **first** `Authentication-Results` header, only for mail Exchange received from outside (`X-MS-Exchange-Organization-AuthAs: Anonymous`), else null verdicts. A coarse spam signal for your quarantine rule — **not** a user authentication (neither is a plus-address tag: anyone can write to it). |
-| `oversized` | The message was over `limits.max_message_bytes`: subject, addresses and ids only (no body, headers, threading headers or verdicts). Quarantine it or fetch it yourself. |
+| `authentication` | `AuthenticationResults` (`spf`, `dkim`, `dmarc`, `aligned()`) of the **first** `Authentication-Results` header, only for mail Exchange received from outside (`X-MS-Exchange-Organization-AuthAs: Anonymous`), else null verdicts. This assumes Exchange Online Protection strips `X-MS-Exchange-Organization-*` and its own `Authentication-Results` from incoming mail (header firewall); in hybrid / on-premises routing (mail entering through your own servers) the first header may be another hop's — treat verdicts as advisory there. A coarse spam signal for your quarantine rule — **not** a user authentication (neither is a plus-address tag: anyone can write to it). |
+| `oversized` | The message was over `limits.max_message_bytes`: subject, sender and ids only — no body, headers, threading headers, verdicts or attachments, and no To / Cc when even the envelope is over 256 KiB. Quarantine it or fetch it yourself. |
 | `forwarded` | Subject prefix (`Fwd:`, `RV:`, `WG:` …), an attached e-mail, `Resent-From` / `X-Forwarded-*` headers or a forward marker in the text. |
 | `attachments` | `InboundAttachment`: neutralised `filename`, `safeFilename` (extension of the detected type — store and serve under this name), `declaredContentType` (informative), `contentType` **detected** with finfo, `size`, `inline` / `contentId` (for `cid:` images), `stream()` while your handler runs, or a `rejection` (`type`, `extension`, `size`, `count`, `total_size`, `unsupported`). Serve stored files with the detected type, `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`. |
 

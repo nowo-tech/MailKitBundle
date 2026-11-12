@@ -21,10 +21,13 @@ final class RenewGraphSubscriptions
     /**
      * @param string|null $profile mailbox profile, null for all
      * @param string|null $reason null (scheduled renewal), REAUTHORIZE or REMOVED
+     * @param string|null $subscriptionId subscription the lifecycle event is about (acted on only when it is the
+     *                                    profile's current one)
      */
     public function __construct(
         public readonly ?string $profile = null,
         public readonly ?string $reason = null,
+        public readonly ?string $subscriptionId = null,
     ) {
     }
 }

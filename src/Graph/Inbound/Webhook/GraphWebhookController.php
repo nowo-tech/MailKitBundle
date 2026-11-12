@@ -50,14 +50,15 @@ use const JSON_THROW_ON_ERROR;
  *   `default-src 'none'`), else 400.
  * - Notifications: `application/json`, at most `max_body_bytes` (read to the cap, whatever the stream's chunk size) and
  *   `max_notifications`, else 413 / 415 / 400; each subscription is verified once per request; after
- *   {@see MAX_REJECTED} rejected items the request stops with 403. 202 when at least one notification is valid.
+ *   {@see MAX_REJECTED} distinct rejected subscriptions no further one is looked up. 202 when at least one
+ *   notification is valid (stale or forged items never cause a 403 next to valid ones), else 403.
  */
 final class GraphWebhookController
 {
     /** Longest validation token echoed. */
     public const MAX_VALIDATION_TOKEN = 1024;
 
-    /** Rejected items after which a request stops (no more store look-ups). */
+    /** Distinct rejected subscriptions after which no further one is looked up in a request. */
     public const MAX_REJECTED = 5;
 
     /**
@@ -89,13 +90,21 @@ final class GraphWebhookController
         if ($this->allowedIps !== [] && !IpUtils::checkIp($ip, $this->allowedIps)) {
             return $this->plain('', 403);
         }
-        $client = $this->clientLimiter->create('graph-webhook-ip-' . hash('sha256', $ip));
-        if ($client->consume(0)->getRemainingTokens() <= 0) {
+        // IPv6 clients are keyed by their /64 (one host usually owns the whole prefix).
+        $client    = $this->clientLimiter->create('graph-webhook-ip-' . hash('sha256', IpUtils::anonymize($ip, 0, 8)));
+        $exhausted = $client->consume(0)->getRemainingTokens() <= 0;
+        if ($exhausted && $request->query->has('validationToken')) {
             return $this->plain('', 429);
         }
 
-        [$status, $content, $valid] = $this->handle($request);
-        if ($valid === []) {
+        // Graph shares Microsoft's egress addresses with every other tenant (audit NQ-v M1): an exhausted client bucket
+        // only narrows the request to a cheap path (the first unknown subscription ends it); a valid notification
+        // still goes through.
+        [$status, $content, $valid, $anyValid] = $this->handle($request, $exhausted ? 1 : self::MAX_REJECTED);
+        if (!$anyValid) {
+            if ($exhausted) {
+                return $this->plain('', 429);
+            }
             $client->consume();
 
             return $this->plain($content, $status);
@@ -114,67 +123,78 @@ final class GraphWebhookController
     }
 
     /**
-     * @return array{0: int, 1: string, 2: list<object>} status and content of an unverified answer, messages to dispatch
+     * @param int $maxRejected distinct rejected subscriptions after which no further one is looked up
+     *
+     * @return array{0: int, 1: string, 2: list<object>, 3: bool} status and content of an unverified answer, messages to
+     *                                                            dispatch, whether at least one notification was valid
      */
-    private function handle(Request $request): array
+    private function handle(Request $request, int $maxRejected): array
     {
         if ($request->query->has('validationToken')) {
             $token = $request->query->all()['validationToken'] ?? null;
             if (!is_string($token) || strlen($token) > self::MAX_VALIDATION_TOKEN || preg_match('/^[\x20-\x7E]+\z/', $token) !== 1) {
-                return [400, '', []];
+                return [400, '', [], false];
             }
 
-            return [200, $token, []];
+            return [200, $token, [], false];
         }
         if (!str_starts_with(strtolower((string) $request->headers->get('Content-Type')), 'application/json')) {
-            return [415, '', []];
+            return [415, '', [], false];
         }
         $length = $request->headers->get('Content-Length');
         if ($length !== null && (int) $length > $this->maxBodyBytes) {
-            return [413, '', []];
+            return [413, '', [], false];
         }
         $handle = $request->getContent(true);
         // Read to the cap: php://input hands out 8 KiB per fread() (audit NQ-M1).
         $body = is_resource($handle) ? (string) stream_get_contents($handle, max(1, $this->maxBodyBytes + 1)) : '';
         if (strlen($body) > $this->maxBodyBytes) {
-            return [413, '', []];
+            return [413, '', [], false];
         }
 
         try {
             $payload = json_decode($body, true, 16, JSON_THROW_ON_ERROR);
         } catch (JsonException) {
-            return [400, '', []];
+            return [400, '', [], false];
         }
         $items = is_array($payload) && is_array($payload['value'] ?? null) ? $payload['value'] : null;
         if ($items === null || $items === []) {
-            return [400, '', []];
+            return [400, '', [], false];
         }
         if (count($items) > $this->maxNotifications) {
-            return [413, '', []];
+            return [413, '', [], false];
         }
 
         $profiles = $this->profiles->inboundProfiles();
         $verified = [];
         $messages = [];
         $seen     = [];
-        $rejected = 0;
+        $rejected = [];
+        $anyValid = false;
         foreach ($items as $item) {
-            $profile = $this->verify($item, $verified, $profiles);
+            $profile = $this->verify($item, $verified, $profiles, count($rejected) < $maxRejected);
             if ($profile === null) {
-                if (++$rejected >= self::MAX_REJECTED) {
-                    break;
-                }
+                $rejected[is_array($item) && is_string($item['subscriptionId'] ?? null) ? $item['subscriptionId'] : '?'] = true;
 
                 continue;
             }
             /** @var array<string, mixed> $item */
+            $anyValid  = true;
             $lifecycle = is_string($item['lifecycleEvent'] ?? null) ? $item['lifecycleEvent'] : null;
             if ($lifecycle !== null) {
-                $messages[] = match ($lifecycle) {
+                $subscription = (string) $item['subscriptionId'];
+                $message      = match ($lifecycle) {
                     'missed'                  => new SweepGraphMailbox($profile),
-                    'reauthorizationRequired' => new RenewGraphSubscriptions($profile, RenewGraphSubscriptions::REAUTHORIZE),
-                    default                   => new RenewGraphSubscriptions($profile, RenewGraphSubscriptions::REMOVED),
+                    'reauthorizationRequired' => new RenewGraphSubscriptions($profile, RenewGraphSubscriptions::REAUTHORIZE, $subscription),
+                    'subscriptionRemoved'     => new RenewGraphSubscriptions($profile, RenewGraphSubscriptions::REMOVED, $subscription),
+                    default                   => null,
                 };
+                if ($message === null) {
+                    $this->logger?->notice('Microsoft Graph lifecycle event ignored (unknown).', ['bundle' => 'NowoMailKitBundle', 'profile' => $profile]);
+
+                    continue;
+                }
+                $messages[] = $message;
 
                 continue;
             }
@@ -185,18 +205,12 @@ final class GraphWebhookController
                 $messages[]                  = new FetchGraphMessage($profile, $id);
             }
         }
-        if ($rejected > 0) {
-            $this->logger?->notice('Microsoft Graph notifications rejected.', ['bundle' => 'NowoMailKitBundle', 'rejected' => $rejected]);
-        }
-        $anyValid = false;
-        foreach ($verified as $profile) {
-            $anyValid = $anyValid || $profile !== null;
-        }
-        if ($rejected >= self::MAX_REJECTED || !$anyValid) {
-            return [403, '', []];
+        if ($rejected !== []) {
+            $this->logger?->notice('Microsoft Graph notifications rejected.', ['bundle' => 'NowoMailKitBundle', 'subscriptions' => count($rejected)]);
         }
 
-        return [202, '', $messages];
+        // A request with valid items is never refused for its stale or forged ones (202 for the valid ones).
+        return $anyValid ? [202, '', $messages, true] : [403, '', [], false];
     }
 
     /**
@@ -205,8 +219,9 @@ final class GraphWebhookController
      *
      * @param array<string, string|null> $verified memo of this request
      * @param list<string> $profiles inbound profiles
+     * @param bool $lookup false once too many subscriptions were rejected: only already verified ones pass
      */
-    private function verify(mixed $item, array &$verified, array $profiles): ?string
+    private function verify(mixed $item, array &$verified, array $profiles, bool $lookup): ?string
     {
         if (!is_array($item)) {
             return null;
@@ -218,6 +233,9 @@ final class GraphWebhookController
         }
         $key = $subscription . "\n" . hash('sha256', $clientState);
         if (!array_key_exists($key, $verified)) {
+            if (!$lookup) {
+                return null;
+            }
             $profile        = $this->store->verifyNotification($subscription, $clientState);
             $verified[$key] = $profile !== null && in_array($profile, $profiles, true) ? $profile : null;
         }

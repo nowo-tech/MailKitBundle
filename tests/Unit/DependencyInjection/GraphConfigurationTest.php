@@ -70,6 +70,19 @@ final class GraphConfigurationTest extends TestCase
         self::assertSame([], $inbound['webhook']['allowed_ips']);
     }
 
+    public function testIpRanges(): void
+    {
+        foreach (['203.0.113.7', '203.0.113.0/24', '0.0.0.0/0', '2001:db8::/32', '2001:db8::1', '::/0'] as $range) {
+            self::assertTrue(Configuration::isIpRange($range), $range);
+        }
+        foreach (['203.0.113.0/33', '2001:db8::/129', 'x/24', '203.0.113.0/', '203.0.113.0/a'] as $range) {
+            self::assertFalse(Configuration::isIpRange($range), $range);
+        }
+        $inbound = $this->process(['inbound' => ['webhook' => ['allowed_ips' => ['203.0.113.0/24', '2001:db8::/32']]]])['inbound'];
+        self::assertIsArray($inbound);
+        self::assertSame(['203.0.113.0/24', '2001:db8::/32'], $inbound['webhook']['allowed_ips']);
+    }
+
     public function testRequireInterface(): void
     {
         NowoMailKitExtension::requireInterface(LoggerInterface::class, 'x');
@@ -106,6 +119,8 @@ final class GraphConfigurationTest extends TestCase
         yield 'notification url userinfo' => [['inbound' => ['webhook' => ['notification_url' => 'https://u:p@app.example.com/h']]], 'absolute https:// URL'];
         yield 'sweep window' => [['inbound' => ['sweep' => ['initial_window' => 'P1Y']]], 'initial_window'];
         yield 'retention shorter than the sweep window' => [['inbound' => ['retention_days' => 2, 'sweep' => ['initial_window' => 'P2DT1H']]], 'retention_days must exceed'];
+        yield 'allowed ip' => [['inbound' => ['webhook' => ['allowed_ips' => ['203.0.113.0/33']]]], 'allowed_ips must contain IP addresses or CIDR ranges'];
+        yield 'allowed ip name' => [['inbound' => ['webhook' => ['allowed_ips' => ['graph.microsoft.com']]]], 'allowed_ips must contain'];
         yield 'lifetime' => [['inbound' => ['subscriptions' => ['lifetime_minutes' => 20_000]]], 'lifetime_minutes'];
     }
 

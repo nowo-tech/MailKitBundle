@@ -53,6 +53,9 @@ final class GraphInboundProcessor
     /** Fields read from an oversized message (no body, no headers). */
     public const SELECT_OVERSIZED = 'id,internetMessageId,conversationId,subject,from,sender,replyTo,toRecipients,ccRecipients,receivedDateTime,hasAttachments';
 
+    /** Fields read when even the envelope of an oversized message is over its cap. */
+    public const SELECT_MINIMAL = 'id,internetMessageId,conversationId,subject,from,sender,receivedDateTime';
+
     /** Cap of the oversized message's envelope read. */
     private const MAX_OVERSIZED_BYTES = 262_144;
 
@@ -105,10 +108,20 @@ final class GraphInboundProcessor
                 throw $exception;
             }
             // Over limits.max_message_bytes (audit NQ-L6): hand the host the envelope without body or headers, flagged
-            // `oversized`, instead of failing (and retrying) forever.
-            $data = $this->api->call($mailbox, 'GET', $path . '?$select=' . self::SELECT_OVERSIZED, [
-                'headers' => ['Prefer' => 'IdType="ImmutableId"'],
-            ], [200], 'read message', self::MAX_OVERSIZED_BYTES);
+            // `oversized`, without attachments, instead of failing (and retrying) forever.
+            try {
+                $data = $this->api->call($mailbox, 'GET', $path . '?$select=' . self::SELECT_OVERSIZED, [
+                    'headers' => ['Prefer' => 'IdType="ImmutableId"'],
+                ], [200], 'read message', self::MAX_OVERSIZED_BYTES);
+            } catch (GraphException $envelope) {
+                if ($envelope->reason !== GraphException::REASON_TOO_LARGE) {
+                    throw $envelope;
+                }
+                // Even the envelope is huge (thousands of recipients): without the recipient lists.
+                $data = $this->api->call($mailbox, 'GET', $path . '?$select=' . self::SELECT_MINIMAL, [
+                    'headers' => ['Prefer' => 'IdType="ImmutableId"'],
+                ], [200], 'read message', self::MAX_OVERSIZED_BYTES);
+            }
             $oversized = true;
             $this->logger?->notice('Microsoft Graph inbound message over the size limit; handed over without its body.', ['bundle' => 'NowoMailKitBundle', 'profile' => $profile]);
         }
@@ -125,7 +138,7 @@ final class GraphInboundProcessor
 
         try {
             $attachedMessage = false;
-            if (($data['hasAttachments'] ?? false) === true) {
+            if (!$oversized && ($data['hasAttachments'] ?? false) === true) {
                 [$attachments, $attachedMessage] = $this->attachments($mailbox, $path);
             }
             $message  = $this->normalizer->normalize($profile, $mailbox->address, $data, $attachments, $attachedMessage, $oversized);

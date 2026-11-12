@@ -93,7 +93,7 @@ final class GraphWebhookControllerTest extends TestCase
      */
     private function notification(string $subscription, string $clientState, array $extra = []): array
     {
-        return ['subscriptionId' => $subscription, 'clientState' => $clientState, 'changeType' => 'created', 'resource' => 'Users/x/Messages/y', 'resourceData' => ['id' => 'AAMkMsg1=']] + $extra;
+        return $extra + ['subscriptionId' => $subscription, 'clientState' => $clientState, 'changeType' => 'created', 'resource' => 'Users/x/Messages/y', 'resourceData' => ['id' => 'AAMkMsg1=']];
     }
 
     private function assertPlain(Response $response, int $status): void
@@ -145,7 +145,7 @@ final class GraphWebhookControllerTest extends TestCase
         $this->assertPlain($controller($this->post(['value' => [$this->notification('sub-expired', $this->secret)]])), 403);
         $this->assertPlain($controller($this->post(['value' => [$this->notification('sub-old', $this->secret)]])), 403);
 
-        // Five rejected items stop the request, even when a valid one follows.
+        // After five distinct rejected subscriptions no further one is looked up: only forged items → 403.
         $items = [];
         for ($i = 0; $i < 5; ++$i) {
             $items[] = $this->notification('unknown-' . $i, $this->secret);
@@ -153,6 +153,15 @@ final class GraphWebhookControllerTest extends TestCase
         $items[] = $this->notification('sub-a', $this->secret);
         $this->assertPlain($controller($this->post(['value' => $items])), 403);
         self::assertSame([], $this->bus->messages);
+
+        // Valid items are never refused for stale ones next to them (≥ 5 stale items in a mixed batch).
+        $items = [$this->notification('sub-a', $this->secret)];
+        for ($i = 0; $i < 6; ++$i) {
+            $items[] = $this->notification('stale-' . $i, $this->secret);
+        }
+        $items[] = $this->notification('sub-a', $this->secret, ['resourceData' => ['id' => 'AAMkMsg2=']]);
+        $this->assertPlain($controller($this->post(['value' => $items])), 202);
+        self::assertEquals([new FetchGraphMessage('acme', 'AAMkMsg1='), new FetchGraphMessage('acme', 'AAMkMsg2=')], $this->bus->messages);
     }
 
     public function testLifecycleEvents(): void
@@ -161,12 +170,14 @@ final class GraphWebhookControllerTest extends TestCase
             ['subscriptionId' => 'sub-a', 'clientState' => $this->secret, 'lifecycleEvent' => 'missed'],
             ['subscriptionId' => 'sub-a', 'clientState' => $this->secret, 'lifecycleEvent' => 'reauthorizationRequired'],
             ['subscriptionId' => 'sub-a', 'clientState' => $this->secret, 'lifecycleEvent' => 'subscriptionRemoved'],
+            ['subscriptionId' => 'sub-a', 'clientState' => $this->secret, 'lifecycleEvent' => 'somethingNew'],
         ]]));
         self::assertEquals([
             new SweepGraphMailbox('acme'),
-            new RenewGraphSubscriptions('acme', RenewGraphSubscriptions::REAUTHORIZE),
-            new RenewGraphSubscriptions('acme', RenewGraphSubscriptions::REMOVED),
+            new RenewGraphSubscriptions('acme', RenewGraphSubscriptions::REAUTHORIZE, 'sub-a'),
+            new RenewGraphSubscriptions('acme', RenewGraphSubscriptions::REMOVED, 'sub-a'),
         ], $this->bus->messages);
+        self::assertTrue($this->logger->has('lifecycle event ignored'));
     }
 
     public function testRejections(): void
@@ -222,9 +233,15 @@ final class GraphWebhookControllerTest extends TestCase
         for ($i = 0; $i < 3; ++$i) {
             $this->assertPlain($controller($this->post(['value' => [$this->notification('sub-a', 'wrong')]])), 403);
         }
-        $this->assertPlain($controller($this->post(['value' => [$this->notification('sub-a', $this->secret)]])), 429);
+        // An exhausted client bucket never blocks a verifiable notification (Graph shares Microsoft's addresses).
+        $this->assertPlain($controller($this->post(['value' => [$this->notification('sub-a', $this->secret)]])), 202);
+        $this->assertPlain($controller($this->post(['value' => [$this->notification('sub-a', 'wrong'), $this->notification('sub-a', $this->secret)]])), 429);
+        $this->assertPlain($controller(Request::create('/hooks?validationToken=x', 'POST', server: ['REMOTE_ADDR' => '198.51.100.7'])), 429);
+        $this->assertPlain($controller($this->post('{bad')), 429);
         $other = $this->post(['value' => [$this->notification('sub-a', $this->secret)]], 'application/json', ['REMOTE_ADDR' => '203.0.113.5']);
         $this->assertPlain($controller($other), 202);
+        $v6 = $this->post(['value' => [$this->notification('sub-a', 'wrong')]], 'application/json', ['REMOTE_ADDR' => '2001:db8::1']);
+        $this->assertPlain($controller($v6), 403);
 
         // Verified requests use their own bucket.
         $verified = $this->controller(1, 1000);

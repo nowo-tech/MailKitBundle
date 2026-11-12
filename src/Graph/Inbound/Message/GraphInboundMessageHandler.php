@@ -72,7 +72,7 @@ final class GraphInboundMessageHandler
         $failure = null;
         foreach ($this->targets($message->profile) as $profile) {
             try {
-                $this->subscriptions->ensure($profile, $message->reason);
+                $this->subscriptions->ensure($profile, $message->reason, $message->subscriptionId);
             } catch (GraphException $exception) {
                 $this->logger?->warning('Microsoft Graph subscription not renewed.', ['bundle' => 'NowoMailKitBundle', 'profile' => $profile, 'reason' => $exception->reason, 'status' => $exception->status]);
                 $failure = $exception;

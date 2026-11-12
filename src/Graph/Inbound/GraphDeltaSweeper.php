@@ -37,6 +37,12 @@ use const PHP_URL_PATH;
  */
 final class GraphDeltaSweeper
 {
+    /** Accepted (decoded, lower-cased) path of a delta link: a user's mail-folder message delta, nothing else. */
+    private const LINK_PATTERN = "#^/v1\\.0/users(?:/([^/()';]+)|\\('([^/()';]+)'\\))/mailfolders(?:/[^/()';]+|\\('[^/()';]+'\\))/messages/delta\\z#";
+
+    /** Object id (GUID) form of a mailbox identifier. */
+    private const GUID_PATTERN = '/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/';
+
     /**
      * @param string $initialWindow ISO 8601 duration of the first sweep (`P2D`)
      * @param int $pageSize messages per page (Prefer odata.maxpagesize)
@@ -121,26 +127,37 @@ final class GraphDeltaSweeper
 
     /**
      * A link is followed only on `https://graph.microsoft.com/v1.0/` (SSRF guard, {@see GraphApiClient::assertGraphUrl()})
-     * and only when it is a mail-folder message delta of a user: path `users/{id}/…` or `users('{id}')/…`
-     * (case-insensitive) containing `mailFolders` and `messages/delta` (audit NQ-I3). Graph often names the mailbox by
-     * its object id (GUID) instead of the SMTP address, so an identifier that is not the profile's address is logged
-     * once per run and followed (defence in depth only; the token is the profile's own).
+     * and only when its path is exactly a user's mail-folder message delta (audit NQ-I3, NQ-v L1):
+     * `/v1.0/users/{id}/mailFolders/{folder}/messages/delta` or the `users('{id}')` / `mailFolders('{folder}')` key
+     * forms, case-insensitive, with no `.` / `..` segment, `;` or stray quote even after a second URL-decoding. `{id}`
+     * must be the profile's address or a GUID (Graph often names the mailbox by its object id): a GUID is logged once
+     * per run and followed (the token is the profile's own; the access policy limits the app to the mailbox).
      *
      * @throws GraphException
      */
     private function assertMailboxLink(GraphMailbox $mailbox, string $url, bool &$noticed): void
     {
         $this->api->assertGraphUrl($url, 'delta sweep');
-        $path = strtolower(rawurldecode((string) parse_url($url, PHP_URL_PATH)));
-        if (preg_match("#^/v1\\.0/users(?:/([^/(]+)|\\('([^']+)'\\))/#", $path, $match) !== 1
-            || !str_contains($path, '/mailfolders') || !str_contains($path, '/messages/delta')
-        ) {
+        $once  = strtolower(rawurldecode((string) parse_url($url, PHP_URL_PATH)));
+        $twice = rawurldecode($once);
+        foreach ([$once, $twice] as $path) {
+            if (str_contains($path, ';') || preg_match('#(?:^|/)\.{1,2}(?:/|$)#', $path) === 1) {
+                throw GraphException::untrustedUrl('delta sweep');
+            }
+        }
+        if (preg_match(self::LINK_PATTERN, $once, $match) !== 1) {
             throw GraphException::untrustedUrl('delta sweep');
         }
         $identifier = $match[1] !== '' ? $match[1] : ($match[2] ?? '');
-        if ($identifier !== $mailbox->address && !$noticed) {
+        if ($identifier === $mailbox->address) {
+            return;
+        }
+        if (preg_match(self::GUID_PATTERN, $identifier) !== 1) {
+            throw GraphException::untrustedUrl('delta sweep');
+        }
+        if (!$noticed) {
             $noticed = true;
-            $this->logger?->notice('Microsoft Graph delta link names the mailbox by another identifier (object id); followed.', ['bundle' => 'NowoMailKitBundle', 'profile' => $mailbox->profile]);
+            $this->logger?->notice('Microsoft Graph delta link names the mailbox by its object id; followed.', ['bundle' => 'NowoMailKitBundle', 'profile' => $mailbox->profile]);
         }
     }
 

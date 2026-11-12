@@ -26,6 +26,7 @@ use Symfony\Component\Cache\Adapter\ArrayAdapter;
 use Symfony\Component\HttpClient\Response\MockResponse;
 
 use function print_r;
+use function rawurldecode;
 use function str_contains;
 use function str_repeat;
 use function strlen;
@@ -175,7 +176,7 @@ final class GraphInboundProcessorTest extends TestCase
 
         // Over the message cap: handed over without body or headers, flagged oversized (no endless retry).
         $this->handler->messages = [];
-        $this->deliver('m5', [], ['body' => ['contentType' => 'text', 'content' => str_repeat('a', 100_000)]]);
+        $this->deliver('m5', [self::file('a1', 'a.pdf', GraphInboundFixtures::PDF)], ['body' => ['contentType' => 'text', 'content' => str_repeat('a', 100_000)]]);
         $decision = $this->processor(new InboundLimits(maxMessageBytes: 65_536))->process('acme', 'm5');
         self::assertSame(InboundAction::Route, $decision?->action);
         $oversized = $this->handler->messages[0];
@@ -184,6 +185,32 @@ final class GraphInboundProcessorTest extends TestCase
         self::assertSame('Re: Offer for task 42', $oversized->subject);
         self::assertNull($oversized->inReplyTo);
         self::assertTrue($this->logger->has('over the size limit'));
+        self::assertSame([], $oversized->attachments, 'Attachments are not read for an oversized message.');
+        self::assertCount(0, $this->mock->matching('/messages/m5/attachments'));
+
+        // Even the envelope is over its cap (huge recipient lists): read without the recipients.
+        $this->handler->messages = [];
+        $this->deliver('m6', [], ['body' => ['contentType' => 'text', 'content' => str_repeat('a', 100_000)]]);
+        $this->mock->override = static fn (string $method, string $url): ?MockResponse => match (true) {
+            !str_contains($url, '/messages/m6?') || str_contains(rawurldecode($url), 'body') => null,
+            str_contains(rawurldecode($url), 'toRecipients')                                 => GraphApiMock::json(['id' => 'm6', 'toRecipients' => str_repeat('x', 300_000)]),
+            default                                                                          => GraphApiMock::json(['id' => 'm6', 'internetMessageId' => '<m6@x>', 'subject' => 'Huge']),
+        };
+        $this->processor(new InboundLimits(maxMessageBytes: 65_536))->process('acme', 'm6');
+        self::assertTrue($this->handler->messages[0]->oversized);
+        self::assertSame([], $this->handler->messages[0]->to);
+        self::assertCount(1, $this->mock->matching('/messages/m6?$select=' . GraphInboundProcessor::SELECT_MINIMAL));
+        // Another error on the envelope read propagates.
+        $this->mock->override = static fn (string $method, string $url): ?MockResponse => str_contains($url, '/messages/m7?')
+            ? (str_contains(rawurldecode($url), 'body') ? GraphApiMock::json(['body' => str_repeat('b', 100_000)]) : GraphApiMock::json(['error' => ['code' => 'ErrorInternalServerError']], 500))
+            : null;
+        try {
+            $this->processor(new InboundLimits(maxMessageBytes: 65_536))->process('acme', 'm7');
+            self::fail('A 500 on the envelope must propagate.');
+        } catch (GraphException $e) {
+            self::assertSame(500, $e->status);
+        }
+        $this->mock->override = null;
     }
 
     public function testGoneInvalidAndFailingMessages(): void

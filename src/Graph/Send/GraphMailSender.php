@@ -132,12 +132,11 @@ final class GraphMailSender
             // Timeout, network error, 5xx, 429 / 503: Exchange may have sent it. With immutable ids the sent copy keeps
             // the draft's id, so deleting it blindly would move a sent message to Deleted Items (audit NK-1).
             $isDraft = $this->isDraft($mailbox, $messagePath);
-            if ($isDraft === true && $this->cleanupBus instanceof MessageBusInterface) {
-                // Exchange may still be processing a send it accepted (1.9, audit NQ-L5): never block the worker;
-                // a delayed message deletes the draft later only if it is still a draft.
-                $this->cleanupBus->dispatch(new DeleteGraphDraft($mailbox->profile, $id), [new DelayStamp($this->cleanupDelayMs)]);
-
-                throw $exception;
+            if ($isDraft === true && $this->scheduleCleanup($mailbox, $id)) {
+                // Exchange may still be processing a send it accepted (audit NQ-L5 / NQ-v L3): a delayed message
+                // deletes the draft later only if it is still a draft; until then the outcome is unknown, so the send
+                // must not be retried (a retry could duplicate a message Exchange sends after all).
+                throw GraphException::ambiguous($exception);
             }
             if ($isDraft === true) {
                 // Without a cleanup bus: read once more at once. A send Exchange completes after this read is still
@@ -341,6 +340,27 @@ final class GraphMailSender
         $isDraft = $state['isDraft'] ?? null;
 
         return is_bool($isDraft) ? $isDraft : null;
+    }
+
+    /**
+     * Dispatches the delayed clean-up of a draft; false without a bus or when the dispatch fails (the caller then
+     * decides at once, and the original error is never replaced by a dispatch failure).
+     */
+    private function scheduleCleanup(GraphMailbox $mailbox, string $graphId): bool
+    {
+        if (!$this->cleanupBus instanceof MessageBusInterface) {
+            return false;
+        }
+
+        try {
+            $this->cleanupBus->dispatch(new DeleteGraphDraft($mailbox->profile, $graphId), [new DelayStamp($this->cleanupDelayMs)]);
+        } catch (Throwable $failure) {
+            $this->logger?->warning('Microsoft Graph draft clean-up could not be scheduled; deciding at once.', ['bundle' => 'NowoMailKitBundle', 'profile' => $mailbox->profile, 'error' => $failure::class]);
+
+            return false;
+        }
+
+        return true;
     }
 
     /**

@@ -119,9 +119,17 @@ final class GraphSubscriptionManagerTest extends TestCase
         self::assertSame(GraphSubscriptionManager::REAUTHORIZED, $this->manager()->ensure('acme', RenewGraphSubscriptions::REAUTHORIZE));
         self::assertCount(1, $this->mock->matching('/subscriptions/sub-1-0000/reauthorize', 'POST'));
 
-        // Removed by Graph: the stored one is forgotten and a new one created.
-        self::assertSame(GraphSubscriptionManager::CREATED, $this->manager()->ensure('acme', RenewGraphSubscriptions::REMOVED));
+        // A lifecycle event about another (older) subscription is ignored.
+        self::assertSame(GraphSubscriptionManager::STALE, $this->manager()->ensure('acme', RenewGraphSubscriptions::REMOVED, 'sub-old'));
+        self::assertSame('sub-1-0000', $this->store->subscription('acme')['id'] ?? null);
+
+        // Removed by Graph: the stored one is forgotten (best-effort DELETE) and a new one created.
+        self::assertSame(GraphSubscriptionManager::CREATED, $this->manager()->ensure('acme', RenewGraphSubscriptions::REMOVED, 'sub-1-0000'));
         self::assertSame('sub-2-0000', $this->store->subscription('acme')['id'] ?? null);
+        self::assertCount(1, $this->mock->matching('/subscriptions/sub-1-0000', 'DELETE'));
+        $this->mock->override = static fn (string $method): ?MockResponse => $method === 'DELETE' ? GraphApiMock::json([], 500) : null;
+        self::assertSame(GraphSubscriptionManager::CREATED, $this->manager()->ensure('acme', RenewGraphSubscriptions::REMOVED));
+        $this->mock->override = null;
 
         // Reauthorizing a subscription Graph no longer knows recreates it; other errors propagate.
         $this->store->saveSubscription('gone-9', 'acme', 'x', 2_000_000_000);

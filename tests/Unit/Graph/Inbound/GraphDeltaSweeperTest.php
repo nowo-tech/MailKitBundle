@@ -112,7 +112,7 @@ final class GraphDeltaSweeperTest extends TestCase
         self::assertSame($links[3], $this->store->deltaLink('acme'));
         $notices = 0;
         foreach ($this->logger->records as $record) {
-            $notices += str_contains($record['message'], 'another identifier') ? 1 : 0;
+            $notices += str_contains($record['message'], 'by its object id') ? 1 : 0;
         }
         self::assertSame(1, $notices, 'Logged once per run.');
     }
@@ -135,6 +135,15 @@ final class GraphDeltaSweeperTest extends TestCase
             ['@odata.nextLink', 'https://graph.microsoft.com/v1.0/me/messages'],
             ['@odata.deltaLink', 'https://graph.microsoft.com/v1.0/users/x/events/delta'],
             ['@odata.nextLink', 'https://graph.microsoft.com/v1.0/groups/x/mailFolders/inbox/messages/delta'],
+            ['@odata.nextLink', 'https://graph.microsoft.com/v1.0/users/../me/mailFolders/inbox/messages/delta'],
+            ['@odata.nextLink', 'https://graph.microsoft.com/v1.0/users/projects@example.com/mailFolders/inbox/messages/delta;x=1'],
+            ['@odata.nextLink', 'https://graph.microsoft.com/v1.0/users/projects@example.com/messages/delta/mailFolders/inbox'],
+            ['@odata.nextLink', 'https://graph.microsoft.com/v1.0/users/projects@example.com/mailFolders/inbox/messages/delta/../../../../groups/x'],
+            ['@odata.nextLink', 'https://graph.microsoft.com/v1.0/users/%2e%2e/mailFolders/inbox/messages/delta'],
+            ['@odata.nextLink', 'https://graph.microsoft.com/v1.0/users/%252e%252e/mailFolders/inbox/messages/delta'],
+            ['@odata.nextLink', "https://graph.microsoft.com/v1.0/users('x'y')/mailFolders/inbox/messages/delta"],
+            ['@odata.nextLink', 'https://graph.microsoft.com/v1.0/users/other@example.org/mailFolders/inbox/messages/delta'],
+            ['@odata.nextLink', 'https://graph.microsoft.com/v1.0/users/projects@example.com/mailFolders/inbox/messages/delta/extra'],
         ] as [$key, $link]) {
             $this->store->deleteDeltaLink('acme');
             $this->pages(['changeType=created' => ['value' => [], $key => $link]]);

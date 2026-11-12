@@ -198,7 +198,7 @@ Hosts without a public URL (local development) rely on the periodic delta sweep 
 
 Optionally restrict the webhook to Microsoft's addresses with `graph.inbound.webhook.allowed_ips` (the Microsoft 365
 "Microsoft Graph change notifications" ranges, kept current by the owner); behind a reverse proxy set
-`framework.trusted_proxies` so the client address is the real one.
+`framework.trusted_proxies` (your proxies only, never all addresses) so the client address is the real one.
 
 Operations:
 

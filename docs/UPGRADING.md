@@ -3,6 +3,8 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.10.2](#to-1102)
+  - [To 1.10.2](#to-1102-1)
 - [To 1.10.1](#to-1101)
 - [To 1.10.0](#to-1100)
 - [To 1.9.1](#to-191)
@@ -27,6 +29,14 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+## To 1.10.2
+
+From **1.10.1**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
 
 ### To 1.10.2
 

@@ -6,12 +6,14 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[1.10.1] - 2026-11-12](#1101---2026-11-12)
+  - [Fixed](#fixed)
 - [[1.10.0] - 2026-11-12](#1100---2026-11-12)
   - [Added](#added)
   - [Changed](#changed)
   - [Tests](#tests)
 - [[1.9.1] - 2026-11-12](#191---2026-11-12)
-  - [Fixed](#fixed)
+  - [Fixed](#fixed-1)
   - [Security](#security)
 - [[1.9.0] - 2026-11-12](#190---2026-11-12)
   - [Added](#added-1)
@@ -25,7 +27,7 @@ All notable changes to this project are documented here. The format follows
   - [Security](#security-2)
   - [Tests](#tests-2)
 - [[1.7.1] - 2026-11-11](#171---2026-11-11)
-  - [Fixed](#fixed-1)
+  - [Fixed](#fixed-2)
   - [Tests](#tests-3)
   - [Documentation](#documentation)
 - [[1.7.0] - 2026-11-11](#170---2026-11-11)
@@ -47,11 +49,11 @@ All notable changes to this project are documented here. The format follows
 - [[1.2.0] - 2026-11-02](#120---2026-11-02)
   - [Added](#added-8)
   - [Changed](#changed-6)
-  - [Fixed](#fixed-2)
+  - [Fixed](#fixed-3)
 - [[1.1.1] - 2026-11-01](#111---2026-11-01)
   - [Security](#security-5)
   - [Changed](#changed-7)
-  - [Fixed](#fixed-3)
+  - [Fixed](#fixed-4)
 - [[1.1.0] - 2026-11-01](#110---2026-11-01)
   - [Added](#added-9)
   - [Changed](#changed-8)
@@ -61,6 +63,8 @@ All notable changes to this project are documented here. The format follows
   - [Security (re-verification follow-ups)](#security-re-verification-follow-ups)
 
 ## [Unreleased]
+
+## [1.10.1] - 2026-11-12
 
 ### Fixed
 

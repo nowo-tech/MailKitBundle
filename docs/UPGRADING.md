@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.10.1](#to-1101)
 - [To 1.10.0](#to-1100)
 - [To 1.9.1](#to-191)
 - [To 1.9.0](#to-190)
@@ -26,6 +27,14 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+## To 1.10.1
+
+From **1.10.0**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
 
 `nowo_mail_kit.tracking.public_base_url` accepts `'%env(DEFAULT_URI)%'`. Hosts can drop any custom compiler pass whose only
 job was to set that value after the build; set it through config instead:

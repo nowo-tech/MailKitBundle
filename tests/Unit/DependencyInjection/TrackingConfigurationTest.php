@@ -32,6 +32,7 @@ use Symfony\Component\DependencyInjection\Reference;
 use function array_filter;
 use function array_keys;
 use function str_contains;
+use function str_repeat;
 
 final class TrackingConfigurationTest extends TestCase
 {
@@ -61,7 +62,8 @@ final class TrackingConfigurationTest extends TestCase
         self::assertSame('P90D', $tracking['retention']);
         self::assertNull($tracking['bus']);
         self::assertTrue($tracking['skip_redacted']);
-        self::assertSame(Configuration::NEVER_TRACK_TEMPLATES, $tracking['never_track_templates']);
+        self::assertSame([], $tracking['extra_never_track_templates']);
+        self::assertSame(1000, $tracking['max_opens_per_send']);
         self::assertSame([], $tracking['links']['allowed_hosts']);
         self::assertSame(Configuration::ESSENTIAL_LINK_PATTERNS, $tracking['links']['essential_patterns']);
         self::assertSame(Configuration::MACHINE_IP_RANGES, $tracking['machine_opens']['ip_ranges']);
@@ -142,6 +144,33 @@ final class TrackingConfigurationTest extends TestCase
         $resolver = $this->container(['doctrine']);
         (new NowoMailKitExtension())->load([['tracking' => self::ENABLED, 'personal_data' => ['enabled' => true]]], $resolver);
         self::assertSame(DefaultTrackingRecipientResolver::class, (string) $resolver->getAlias(TrackingRecipientResolverInterface::class));
+    }
+
+    public function testTrackingNeedsTheMailerDecorator(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+        $this->expectExceptionMessage('tracking.enabled needs nowo_mail_kit.mailer.decorate: true');
+        (new Processor())->processConfiguration(new Configuration(), [['mailer' => ['decorate' => false], 'tracking' => self::ENABLED]]);
+    }
+
+    public function testLiteralSecretsAreCheckedAtCompileTime(): void
+    {
+        $kernelMode = $this->container(['doctrine']);
+        (new NowoMailKitExtension())->load([['tracking' => self::ENABLED + ['previous_secrets' => ['old-app-secret']]]], $kernelMode);
+        self::assertSame(['old-app-secret'], $kernelMode->getDefinition(TrackingTokenSigner::class)->getArgument(1), 'Previous kernel secrets: any length, derived.');
+
+        $env = $this->container(['doctrine']);
+        (new NowoMailKitExtension())->load([['tracking' => self::ENABLED + ['secret' => '%env(S)%', 'previous_secrets' => ['%env(OLD)%']]]], $env);
+        self::assertNull($env->getDefinition(TrackingTokenSigner::class)->getFactory());
+
+        foreach ([['secret' => 'short'], ['secret' => str_repeat('s', 32), 'previous_secrets' => ['short']]] as $secrets) {
+            try {
+                (new NowoMailKitExtension())->load([['tracking' => self::ENABLED + $secrets]], $this->container(['doctrine']));
+                self::fail('Short literal secret accepted.');
+            } catch (InvalidConfigurationException $exception) {
+                self::assertStringContainsString('at least 32 bytes', $exception->getMessage());
+            }
+        }
     }
 
     public function testEnabledNeedsDoctrine(): void

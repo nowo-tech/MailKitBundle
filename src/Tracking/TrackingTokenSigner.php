@@ -9,6 +9,7 @@ use Psr\Clock\ClockInterface;
 use SensitiveParameter;
 use Symfony\Component\Clock\NativeClock;
 
+use function array_slice;
 use function base64_decode;
 use function base64_encode;
 use function bin2hex;
@@ -77,11 +78,12 @@ final readonly class TrackingTokenSigner
 
     /**
      * Signer keyed from the kernel secret (`tracking.secret: null`): a domain-separated HMAC of it, so a short
-     * `APP_SECRET` still gives a 32-byte key and the pixel key differs from every other use of the kernel secret.
+     * `APP_SECRET` still gives a 32-byte key and the pixel key differs from every other use of the kernel secret. The
+     * previous secrets are previous kernel secrets and are derived the same way (audit NU-M1).
      *
-     * @param list<string> $previousSecrets
+     * @param list<string> $previousSecrets previous kernel secrets (rotation of `APP_SECRET`)
      *
-     * @throws InvalidArgumentException for an empty kernel secret
+     * @throws InvalidArgumentException for an empty kernel or previous secret
      */
     public static function fromKernelSecret(
         #[SensitiveParameter]
@@ -91,11 +93,15 @@ final readonly class TrackingTokenSigner
         int $ttl = 7_776_000,
         ?ClockInterface $clock = null,
     ): self {
-        if ($kernelSecret === '') {
-            throw new InvalidArgumentException('nowo_mail_kit.tracking.secret is null and kernel.secret is empty: set one of them.');
+        $derived = [];
+        foreach ([$kernelSecret, ...$previousSecrets] as $secret) {
+            if ($secret === '') {
+                throw new InvalidArgumentException('nowo_mail_kit.tracking.secret is null and kernel.secret (or a previous secret) is empty: set them.');
+            }
+            $derived[] = hash_hmac('sha256', 'nowo_mail_kit.tracking.secret', $secret);
         }
 
-        return new self(hash_hmac('sha256', 'nowo_mail_kit.tracking.secret', $kernelSecret), $previousSecrets, $ttl, $clock);
+        return new self($derived[0], array_slice($derived, 1), $ttl, $clock);
     }
 
     /**

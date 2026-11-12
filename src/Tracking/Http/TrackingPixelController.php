@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\MailKitBundle\Tracking\Http;
 
+use Closure;
 use Nowo\MailKitBundle\Tracking\Message\RecordMailOpen;
 use Nowo\MailKitBundle\Tracking\OpenClassifier;
 use Nowo\MailKitBundle\Tracking\OpenRecorder;
@@ -40,9 +41,12 @@ final readonly class TrackingPixelController
 
     /**
      * Wires the endpoint.
+     *
+     * @param Closure(): TrackingTokenSigner|TrackingTokenSigner $signer the signer, or a factory of it (built lazily: a
+     *                                                                   bad secret is logged and still answers the GIF)
      */
     public function __construct(
-        private TrackingTokenSigner $signer,
+        private TrackingTokenSigner|Closure $signer,
         private OpenClassifier $classifier,
         private OpenRecorder $recorder,
         private ?MessageBusInterface $bus = null,
@@ -89,7 +93,8 @@ final readonly class TrackingPixelController
 
     private function count(Request $request, string $token): void
     {
-        $sendId = $this->signer->verify($token);
+        $signer = $this->signer instanceof Closure ? ($this->signer)() : $this->signer;
+        $sendId = $signer->verify($token);
         if ($sendId === null) {
             return;
         }

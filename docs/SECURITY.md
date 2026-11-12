@@ -89,7 +89,7 @@ transports and provider bridges, or the content of the messages your application
 | **Spoofed sender verdicts** (1.9) | SPF / DKIM / DMARC are read from the first `Authentication-Results` header only when Exchange marked the message as received from outside (`X-MS-Exchange-Organization-AuthAs: Anonymous`); otherwise null. **Assumption:** Exchange Online Protection's header firewall strips `X-MS-Exchange-Organization-*` and its own `Authentication-Results` from incoming mail, so a sender cannot forge them; with hybrid / on-premises routing (mail entering through your servers first) that is not guaranteed and the verdicts are advisory only. They are a coarse spam signal, not a user authentication; neither is a plus-address tag (anyone can write to `projects+t-42@…`). Hosts decide with their own contact rules. |
 | **Oversized messages** (1.9) | Over `limits.max_message_bytes` the message is handed over without body or headers (`oversized`), so it is neither lost nor retried forever. |
 | **Duplicate processing / lost messages** (1.9) | Claims by SHA-256(profile, internetMessageId) in the bundle table (unique key; savepoint in an open host transaction); a host exception releases the claim; a crashed claim is taken over after `stale_claim_seconds`. |
-| **Tracking a security e-mail** (1.10) | Four independent layers: the `X-Mail-Kit-No-Track` header, `tracking.never_track_templates` (security defaults, before the host is asked), `skip_redacted` (any declared one-time value), and the host policy; credential-bearing links are never rewritten even inside a tracked e-mail. |
+| **Tracking a security e-mail** (1.10) | Four independent layers: the `X-Mail-Kit-No-Track` header, the built-in security template patterns (always applied, plus `tracking.extra_never_track_templates`, before the host is asked), `skip_redacted` (any declared one-time value), and the host policy; credential-bearing links are never rewritten even inside a tracked e-mail. |
 | **Open redirect / link tampering through tracking** (1.10) | MailKit never redirects: it only replaces an allowed `href` with the URL the host rewriter returns (absolute http(s), ≤ 2048 characters, no white space or control characters, HTML-escaped). The redirect and its target checks belong to the rewriter's short-link service (Beacon: OutboundUrlGuard). |
 | **Pixel token forgery / enumeration** (1.10) | 128-bit random send ids, HMAC-SHA256 tokens (truncated to 128 bits), constant-time verification against every configured key, expiry; every outcome answers the same GIF. |
 | **Cross-request state leaks (FrankenPHP worker)** | Only the transport for the last DSN is kept, reset on `kernel.reset` and on settings changes; see [FRANKENPHP-WORKER-AUDIT.md](FRANKENPHP-WORKER-AUDIT.md). |
@@ -152,8 +152,8 @@ processing-register entry (Beacon spec 230: on by default with opt-out, 90-day r
   `tracking.previous_secrets`. `tracking.secret: null` derives the key from `kernel.secret` (domain-separated HMAC):
   rotating `APP_SECRET` then invalidates outstanding pixels.
 - **Never tracked**: messages with `X-Mail-Kit-No-Track`, several envelope recipients (opens could not be attributed and
-  one recipient's opt-out would not cover the others), a template id matching `tracking.never_track_templates`
-  (security defaults), declared redaction values (`skip_redacted`), or a policy answer `none()`. Nothing is stored for
+  one recipient's opt-out would not cover the others), a template id matching the built-in security patterns
+  (always) or `tracking.extra_never_track_templates`, declared redaction values (`skip_redacted`), or a policy answer `none()`. Nothing is stored for
   them (opt-out = zero rows). The policy is the host's: keep its security list and opt-out check authoritative.
 - **Links never rewritten**: credential-bearing URLs (user info; `token`, `code`, `otp`, `signature`, `_hash`,
   `X-Amz-*`… parameters, also in the fragment; `/reset…`, `/login…`, `/magic…`, `/verify…`, `/invitation…`, `/accept…`,
@@ -162,7 +162,8 @@ processing-register entry (Beacon spec 230: on by default with opt-out, 90-day r
   values: keep `links.allowed_path_prefixes` tight and keep magic / reset / one-time links out of tracked templates.
 - **Unsubscribe / preferences / legal links** are flagged `TrackedLink::$essential`: the rewriter must redirect them
   unconditionally (no expiry, block or rate limit). An unsubscribe URL that carries a token parameter is **not**
-  rewritten at all (credential rule wins): it stays a direct link.
+  rewritten at all (credential rule wins): it stays a direct link. A token in the path without a credential word is
+  not detected: mark such links `data-mail-kit-track="off"` or keep their route outside `links.allowed_path_prefixes`.
 - **Pixel endpoint**: public by design; answers the same GIF for every token (no oracle beyond timing of one HMAC per
   configured key and, for valid tokens of known sends, one UPDATE). Exclude it from sessions (`security: false`
   firewall) and keep it out of HttpLog / access logs that store full URLs if you treat tokens as personal data.
@@ -173,8 +174,14 @@ processing-register entry (Beacon spec 230: on by default with opt-out, 90-day r
 - **Retention and rights**: `nowo:mail-kit:tracking:purge` (default `P90D`); export / erasure per recipient id
   (`EmailTrackingPersonalDataInterface`, UserKit `email_tracking` with `personal_data.enabled`), exact binary match.
   Sends tracked without a recipient id are only removed by the purge.
-- **Failure mode**: a failing policy, store, filter or rewriter never blocks delivery: the e-mail (or the link) goes out
-  untracked and the failure is logged without content.
+- **Failure mode**: a failing policy, store, filter, rewriter or signer (bad `%env()%` secret, logged as critical) never
+  blocks delivery: the e-mail (or the link) goes out untracked and the failure is logged without content. Literal
+  secrets shorter than 32 bytes fail the build.
+- **Messenger retries** (audit NU-H1): the transport never changes the caller's message; a retry re-sends it with its
+  no-track / template / tag / redaction headers intact, so a security e-mail stays untracked on every attempt.
+- **Open inflation**: at most `tracking.max_opens_per_send` opens are counted per send (default 1000).
+- **Labels**: `TrackedLink::$label` is author-controlled text: escape it wherever it is displayed.
+- **Opt-out**: the host should also call `eraseRecipient()` when an opt-out must remove past rows.
 
 ## Logging
 

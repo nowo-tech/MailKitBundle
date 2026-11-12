@@ -7,6 +7,7 @@ namespace Nowo\MailKitBundle\Tracking\Store;
 use DateTimeImmutable;
 use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\ParameterType;
 use Doctrine\DBAL\Platforms\AbstractMySQLPlatform;
 use Doctrine\DBAL\Platforms\AbstractPlatform;
 use Doctrine\DBAL\Schema\Schema;
@@ -50,6 +51,7 @@ final class TrackingStore implements EmailTrackingReaderInterface, EmailTracking
     /**
      * @param string|null $connectionName DBAL connection (null = default)
      * @param string $tablePrefix `doctrine.table_prefix`
+     * @param int $maxOpensPerSend opens (human + machine) counted per send at most (`tracking.max_opens_per_send`)
      */
     public function __construct(
         private readonly ManagerRegistry $doctrine,
@@ -57,6 +59,7 @@ final class TrackingStore implements EmailTrackingReaderInterface, EmailTracking
         private readonly string $tablePrefix = '',
         private readonly ?ClockInterface $clock = null,
         private readonly ?LoggerInterface $logger = null,
+        private readonly int $maxOpensPerSend = 1000,
     ) {
     }
 
@@ -102,7 +105,7 @@ final class TrackingStore implements EmailTrackingReaderInterface, EmailTracking
     }
 
     /**
-     * Counts one open (one indexed UPDATE); true when the send exists.
+     * Counts one open (one indexed UPDATE); true when the send exists and is below the open cap.
      *
      * @param string|null $ip truncated address
      * @param string|null $family user-agent family
@@ -113,9 +116,9 @@ final class TrackingStore implements EmailTrackingReaderInterface, EmailTracking
         $prefix = $machine ? 'machine_' : '';
         $sql    = 'UPDATE ' . $this->table() . ' SET ' . $prefix . 'open_count = ' . $prefix . 'open_count + 1, '
             . $prefix . 'first_open_at = COALESCE(' . $prefix . 'first_open_at, ?), ' . $prefix . 'last_open_at = ?, '
-            . 'last_open_ip = ?, last_open_ua = ? WHERE send_id = ?';
+            . 'last_open_ip = ?, last_open_ua = ? WHERE send_id = ? AND open_count + machine_open_count < ?';
 
-        return (int) $this->connection()->executeStatement($sql, [$at, $at, $ip, $family, $sendId]) === 1;
+        return (int) $this->connection()->executeStatement($sql, [$at, $at, $ip, $family, $sendId, $this->maxOpensPerSend], [0 => ParameterType::INTEGER, 1 => ParameterType::INTEGER, 5 => ParameterType::INTEGER]) === 1;
     }
 
     /**
@@ -177,7 +180,7 @@ final class TrackingStore implements EmailTrackingReaderInterface, EmailTracking
     /**
      * The recipient's send rows, oldest first.
      *
-     * @return list<array{send_id: string, template: string|null, tenant: string|null, sent_at: string, opens: int, first_open_at: string|null, last_open_at: string|null, machine_opens: int, machine_first_open_at: string|null, machine_last_open_at: string|null}>
+     * @return list<array{send_id: string, template: string|null, tenant: string|null, sent_at: string, opens: int, first_open_at: string|null, last_open_at: string|null, machine_opens: int, machine_first_open_at: string|null, machine_last_open_at: string|null, last_open_ip: string|null, last_open_ua: string|null}>
      */
     public function exportRecipient(string $recipientId): array
     {
@@ -194,7 +197,7 @@ final class TrackingStore implements EmailTrackingReaderInterface, EmailTracking
     }
 
     /**
-     * @return array{send_id: string, template: string|null, tenant: string|null, sent_at: string, opens: int, first_open_at: string|null, last_open_at: string|null, machine_opens: int, machine_first_open_at: string|null, machine_last_open_at: string|null}
+     * @return array{send_id: string, template: string|null, tenant: string|null, sent_at: string, opens: int, first_open_at: string|null, last_open_at: string|null, machine_opens: int, machine_first_open_at: string|null, machine_last_open_at: string|null, last_open_ip: string|null, last_open_ua: string|null}
      */
     private function exportRow(OpenStats $stats): array
     {
@@ -209,6 +212,8 @@ final class TrackingStore implements EmailTrackingReaderInterface, EmailTracking
             'machine_opens'         => $stats->machineOpens,
             'machine_first_open_at' => $stats->machineFirstOpenAt?->format(DATE_ATOM),
             'machine_last_open_at'  => $stats->machineLastOpenAt?->format(DATE_ATOM),
+            'last_open_ip'          => $stats->lastOpenIp,
+            'last_open_ua'          => $stats->lastOpenFamily,
         ];
     }
 

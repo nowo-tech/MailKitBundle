@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\MailKitBundle\Tracking;
 
+use Closure;
 use Nowo\MailKitBundle\Mailer\MailHeaders;
 use Nowo\MailKitBundle\Tracking\Store\TrackingStore;
 use Psr\Log\LoggerInterface;
@@ -33,17 +34,21 @@ use const PHP_URL_HOST;
 
 /**
  * Prepares the tracked copy of an outgoing e-mail (1.10), called by the runtime transport right before delivery (in
- * the Messenger worker for queued mail). The original message is never changed (a Messenger retry re-delivers it
- * untracked and gets a new send id), and the internal headers it reads are stripped by the transport afterwards.
+ * the Messenger worker for queued mail). The caller's message is never changed: the tracked copy is a clone, and the
+ * transport strips the internal headers from the copy it delivers only (audit NU-H1). A Messenger retry therefore
+ * re-sends the original with its headers intact (`X-Mail-Kit-No-Track`, template, tag, redaction values), is decided
+ * again from scratch and, when tracked, gets a new send id (the failed attempt's send was discarded).
  *
  * In order — any "no" sends the original untouched and stores nothing:
  *
  * 1. an {@see Email} with an HTML body (templated e-mails are rendered first) of at most `tracking.max_html_bytes`,
  *    exactly one envelope recipient, no `X-Mail-Kit-No-Track` header, no pixel of this application already;
- * 2. its template id (`X-Mail-Kit-Template`, else the tag) does not match `tracking.never_track_templates`, and it
+ * 2. its template id (`X-Mail-Kit-Template`, else the tag) does not match {@see self::SECURITY_TEMPLATES} (always) or
+ *    `tracking.extra_never_track_templates`, and it
  *    declares no redaction values while `tracking.skip_redacted` is on (one-time links and codes);
  * 3. the host {@see EmailTrackingPolicyInterface} answers {@see TrackingDecision::track()} (an exception = no);
- * 4. the send row is stored (a store failure = no).
+ * 4. the pixel signer is available (a bad secret = no, logged as critical) and the send row is stored (a store
+ *    failure = no).
  *
  * Then each absolute http(s) link that is not credential-bearing ({@see CredentialLinkDetector}), not this
  * application's pixel and allowed by the {@see TrackableLinkFilterInterface} goes through the
@@ -56,8 +61,17 @@ final readonly class EmailTracker
     public const MAX_URL = 2048;
 
     /**
+     * Template id patterns (`fnmatch`, case-insensitive) that are never tracked, whatever the configuration or the
+     * policy says (audit NU-M2): security e-mails. `tracking.extra_never_track_templates` adds to them.
+     */
+    public const SECURITY_TEMPLATES = ['*password*', '*reset*', '*magic*', '*login*', '*sign_in*', '*signin*', '*one_time*', '*otp*', '*code*', '*verif*', '*confirm*', '*security*', '*new_device*', '*email_change*', '*invitation*', '*invite*', '*2fa*', '*mfa*', '*token*'];
+
+    /**
      * @param string $pixelBase absolute URL prefix of the pixel (`tracking.public_base_url` + `tracking.path_prefix`)
-     * @param list<string> $neverTrackTemplates `fnmatch` patterns (case-insensitive) of template ids never tracked
+     * @param Closure(): TrackingTokenSigner|TrackingTokenSigner $signer the signer, or a factory of it (built lazily so
+     *                                                                   a bad secret leaves mail untracked, not undelivered)
+     * @param list<string> $neverTrackTemplates extra `fnmatch` patterns (case-insensitive) of template ids never
+     *                                          tracked, on top of {@see self::SECURITY_TEMPLATES}
      * @param bool $skipRedacted never track an e-mail that declares redaction values
      * @param list<string> $essentialPatterns case-insensitive substrings of the URL or label of essential links
      * @param int $maxHtmlBytes larger HTML bodies are sent untracked
@@ -68,7 +82,7 @@ final readonly class EmailTracker
         private EmailLinkRewriterInterface $rewriter,
         private TrackableLinkFilterInterface $filter,
         private CredentialLinkDetector $credentials,
-        private TrackingTokenSigner $signer,
+        private TrackingTokenSigner|Closure $signer,
         private TrackingStore $store,
         private HtmlLinkTracker $html,
         private string $pixelBase,
@@ -148,6 +162,13 @@ final readonly class EmailTracker
         if (!$decision->tracks()) {
             return null;
         }
+        try {
+            $signer = $this->signer instanceof Closure ? ($this->signer)() : $this->signer;
+        } catch (Throwable $exception) {
+            $this->logger?->critical('Mail tracking signer unavailable (check nowo_mail_kit.tracking.secret): the e-mail is sent untracked.', ['bundle' => 'NowoMailKitBundle', 'error' => $exception::class]);
+
+            return null;
+        }
         $sendId = TrackingTokenSigner::newSendId();
         if (!$this->store->createSend($sendId, TrackingIds::template($template), $decision->recipientId, $decision->tenant, $logId)) {
             return null;
@@ -166,7 +187,7 @@ final readonly class EmailTracker
             }
         }
         if ($decision->pixel) {
-            $html = $this->html->injectPixel($html, $this->pixelBase . '/' . $this->signer->issue($sendId) . '.gif');
+            $html = $this->html->injectPixel($html, $this->pixelBase . '/' . $signer->issue($sendId) . '.gif');
         }
         $copy->html($html, $message->getHtmlCharset() ?? 'utf-8');
 
@@ -241,7 +262,7 @@ final readonly class EmailTracker
         if ($template === null) {
             return false;
         }
-        foreach ($this->neverTrackTemplates as $pattern) {
+        foreach ([...self::SECURITY_TEMPLATES, ...$this->neverTrackTemplates] as $pattern) {
             if (fnmatch($pattern, $template, FNM_CASEFOLD)) {
                 return true;
             }

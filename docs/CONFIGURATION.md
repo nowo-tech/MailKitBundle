@@ -142,7 +142,8 @@ nowo_mail_kit:
         purge_batch_size: 1000
         connection: null               # DBAL connection of the tracking table (null = default)
         bus: null                      # Messenger bus: the pixel only dispatches RecordMailOpen; null = one synchronous UPDATE
-        never_track_templates: ['*password*', '*reset*', '*magic*', '*login*', '*sign_in*', '*signin*', '*one_time*', '*otp*', '*code*', '*verif*', '*confirm*', '*security*', '*new_device*', '*email_change*', '*invitation*', '*invite*', '*2fa*', '*mfa*', '*token*']
+        extra_never_track_templates: []  # added to the built-in security patterns (EmailTracker::SECURITY_TEMPLATES, always applied)
+        max_opens_per_send: 1000       # opens (human + machine) counted per send at most
         skip_redacted: true            # never track an e-mail that declares MailHeaders::redact() values
         max_html_bytes: 2097152        # larger HTML bodies go out untracked
         links:
@@ -336,22 +337,23 @@ handler is added and every e-mail goes out exactly as in 1.9. Needs doctrine/doc
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `enabled` | `false` | Registers the tracker (called by the runtime transport right before delivery), the DBAL store and its schema listener, the pixel controller and its route loader, the commands, the read / GDPR port aliases. Literal boolean. |
+| `enabled` | `false` | Needs `mailer.decorate: true` (refused otherwise: mail through the undecorated framework transports would bypass the policy). Registers the tracker (called by the runtime transport right before delivery), the DBAL store and its schema listener, the pixel controller and its route loader, the commands, the read / GDPR port aliases. Literal boolean. |
 | `policy` | — | Service id implementing `Tracking\EmailTrackingPolicyInterface`: decides per template id and recipient (never the security templates, never an opted-out recipient) and returns the recipient id / tenant stored. Required when enabled. |
 | `link_rewriter` | `null` | Service id implementing `Tracking\EmailLinkRewriterInterface` (e.g. short links of kind `email`). `null`: `NullEmailLinkRewriter`, links are kept and only the pixel is added. |
 | `link_filter` | `null` | Service id implementing `Tracking\TrackableLinkFilterInterface`; `null`: the `links.allowed_hosts` / `allowed_path_prefixes` allow-list. Credential-bearing links are refused before either is asked. |
 | `recipient_resolver` | `null` | Service id implementing `Tracking\TrackingRecipientResolverInterface` (recipient ids of a UserKit user for the `email_tracking` eraser / export section, registered with `personal_data.enabled`); `null`: `getId()`. |
 | `public_base_url` | — | Absolute URL the pixel is served from (`https://app.example.com`, no query / fragment / user info). Required when enabled: Messenger workers have no request to build it from. |
 | `path_prefix` | `/e/o` | Pixel path: `<prefix>/{token}.gif`. Import the loader (`type: nowo_mail_kit_tracking`) and make the prefix public (ideally a `security: false` firewall). |
-| `secret` / `previous_secrets` | `null` / `[]` | HMAC secret of the pixel tokens (at least 32 bytes; use `%env()%`, never commit it). `null`: a domain-separated HMAC of `kernel.secret`. Previous secrets keep older tokens valid during a rotation. |
+| `secret` / `previous_secrets` | `null` / `[]` | HMAC secret of the pixel tokens (at least 32 bytes; use `%env()%`, never commit it). A literal shorter than 32 bytes fails the container build; an `%env()%` value is checked when the signer is first built — lazily, so a bad value leaves mail **untracked** (logged as critical) and the pixel still answers, never "no mail". `null`: a domain-separated HMAC of `kernel.secret`; `previous_secrets` are then previous kernel secrets, derived the same way. Previous secrets keep older tokens valid during a rotation. |
 | `retention` | `P90D` | ISO 8601 duration in days (`P1D` … `P3650D`): `nowo:mail-kit:tracking:purge` deletes older sends; older tokens are refused. |
 | `purge_batch_size` | `1000` | Rows deleted per statement by the purge. |
 | `connection` | `null` | DBAL connection of `<prefix>mail_kit_tracking_send`. |
 | `bus` | `null` | Messenger bus id: the pixel dispatches `Tracking\Message\RecordMailOpen` (route it to an async transport) instead of the synchronous UPDATE. |
-| `never_track_templates` | security patterns (see the reference) | `fnmatch` patterns (case-insensitive) of template ids (`X-Mail-Kit-Template`, else the tag) never tracked, checked before the policy. Replacing the list drops the defaults: keep the security ones. |
+| `extra_never_track_templates` | `[]` | Extra `fnmatch` patterns (case-insensitive) of template ids (`X-Mail-Kit-Template`, else the tag) never tracked, checked before the policy. The built-in security patterns (`EmailTracker::SECURITY_TEMPLATES`: password, reset, magic, login, sign-in, one-time, OTP, code, verify, confirm, security, new device, e-mail change, invitation, invite, 2FA, MFA, token) **always** apply and cannot be removed. |
+| `max_opens_per_send` | `1000` | Opens (human + machine) counted per send at most; later fetches still answer the GIF and change nothing (no event). |
 | `skip_redacted` | `true` | An e-mail that declares `MailHeaders::redact()` values (one-time links and codes) is never tracked. With `false`, links containing those values are still never rewritten. Literal boolean. |
 | `max_html_bytes` | `2097152` | Larger HTML bodies are sent untracked. |
-| `links.allowed_hosts` / `allowed_path_prefixes` | `[]` / `[]` | Allow-list of the default link filter: exact host, `*.example.com` (sub-domains) or `*`; path prefix (`/issues` matches `/issues/…`, not `/issues-old`). No host = nothing is rewritten. |
+| `links.allowed_hosts` / `allowed_path_prefixes` | `[]` / `[]` | Allow-list of the default link filter: exact host, `*.example.com` (sub-domains) or `*`; path prefix (`/issues` matches `/issues/…`, not `/issues-old`). No host = nothing is rewritten. Recommended: your own host only and the route prefixes of ordinary content (`/issues`, `/projects`), never `/` or `*` — token-bearing routes outside the list stay direct links. |
 | `links.credential_query_parameters` / `credential_path_segments` | `[]` / `[]` | Added to the built-in credential rules (`Tracking\CredentialLinkDetector`), which cannot be turned off. |
 | `links.essential_patterns` | `unsubscribe`, `preferences`, `privacy`, `legal`, `terms` | URL / label substrings flagged `TrackedLink::$essential`: tracked, but the rewriter must never block, expire or rate-limit them. |
 | `links.max_links` | `100` | Links rewritten per e-mail at most. |
@@ -473,5 +475,5 @@ The container refuses to compile when:
 - a switch is an env placeholder, a prefix / path / interval / template id is invalid;
 - `graph.inbound.enabled` is true without `graph.enabled`, without `graph.inbound.handler`, without symfony/messenger, symfony/html-sanitizer, the fileinfo extension or DoctrineBundle, `retention_days` does not exceed `sweep.initial_window` by more than a day, or an inbound option is invalid (profile names, folder, webhook path, notification URL, sweep window);
 - `graph.enabled` is true without `graph.mailbox_provider` and without a profile named like `graph.default_profile`, or a profile name is invalid;
-- `tracking.enabled` is true without `tracking.policy`, without `tracking.public_base_url` or without DoctrineBundle, `tracking.bus` is set without symfony/messenger, or a tracking option is invalid (base URL, path prefix, retention, machine IP ranges); a `tracking.secret` shorter than 32 bytes fails when the signer is built;
+- `tracking.enabled` is true without `tracking.policy`, without `tracking.public_base_url`, without DoctrineBundle or with `mailer.decorate: false`, a literal `tracking.secret` / `previous_secrets` value is shorter than 32 bytes, `tracking.bus` is set without symfony/messenger, or a tracking option is invalid (base URL, path prefix, retention, machine IP ranges);
 - `brand.name` is blank, too long or contains control / bidi characters, a `brand.colors` value is not `#rrggbb`, or `brand.max_image_bytes` exceeds `brand.max_total_bytes`.

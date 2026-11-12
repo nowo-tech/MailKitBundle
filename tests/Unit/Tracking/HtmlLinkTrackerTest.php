@@ -59,6 +59,18 @@ final class HtmlLinkTrackerTest extends TestCase
         self::assertCount(6, $result['map']);
     }
 
+    public function testHrefIsOnlyAnAttributeName(): void
+    {
+        $html = '<a title=" href=https://evil.example/x " data-x=\'href="https://evil.example/y"\' download href="https://app.example.com/real">Real</a>'
+            . '<a xhref="https://evil.example/z">No href</a><a =broken href="https://app.example.com/after-garbage">Kept</a>';
+        $result = (new HtmlLinkTracker())->rewriteHtml($html, $this->recorder());
+
+        self::assertSame([['https://app.example.com/real', 'Real', 1]], $this->calls);
+        self::assertStringContainsString('title=" href=https://evil.example/x "', $result['html']);
+        self::assertStringContainsString('download href="https://t.example/1?x=1&amp;y=$1\\">Real</a>', $result['html']);
+        self::assertStringContainsString('<a =broken href="https://app.example.com/after-garbage">', $result['html'], 'An unparsable tag is never rewritten.');
+    }
+
     public function testMalformedHtmlNeverBreaksTheBody(): void
     {
         $tracker = new HtmlLinkTracker();

@@ -7,6 +7,7 @@ namespace Nowo\MailKitBundle\Tracking;
 use Nowo\MailKitBundle\Mailer\MailHeaders;
 
 use function array_map;
+use function array_shift;
 use function explode;
 use function implode;
 use function in_array;
@@ -43,7 +44,7 @@ use function urlencode;
  * - it contains one of the values the message declared for redaction ({@see MailHeaders::redact()}),
  *   raw or URL-encoded.
  *
- * Tokens embedded in a path without such a word are only caught by the redaction values and the allow-list
+ * Path (matrix) parameters (`;jsessionid=…`) are checked like query parameters. Tokens embedded in a path without such a word are only caught by the redaction values and the allow-list
  * ({@see TrackableLinkFilterInterface}): keep `tracking.links.allowed_path_prefixes` tight.
  */
 final readonly class CredentialLinkDetector
@@ -53,7 +54,7 @@ final readonly class CredentialLinkDetector
         'token', 'access_token', 'refresh_token', 'id_token', 'auth', 'authorization', 'code', 'otp', 'totp', 'pin',
         'key', 'api_key', 'apikey', 'secret', 'password', 'pass', 'pwd', 'passcode', 'signature', 'sig', 'hash',
         '_hash', '_expiration', 'expires', 'nonce', 'ticket', 'session', 'sessionid', 'sid', 'jwt', 'magic', 'login',
-        'credential', 'credentials', 'state', 'verify', 'verification', 'confirm', 'confirmation', 'reset', 'invite',
+        'credential', 'credentials', 'state', 'jsessionid', 'phpsessid', 'aspsessionid', 'verify', 'verification', 'confirm', 'confirmation', 'reset', 'invite',
         'invitation', 'k', 't',
     ];
 
@@ -139,7 +140,12 @@ final readonly class CredentialLinkDetector
     private function credentialPath(string $path): bool
     {
         foreach (explode('/', $path) as $segment) {
-            $segment = strtolower(rawurldecode($segment));
+            // Path (matrix) parameters: `/home;jsessionid=…`, `/a;token=…` (audit NU-L2).
+            $parameters = explode(';', $segment);
+            $segment    = strtolower(rawurldecode(array_shift($parameters)));
+            if ($parameters !== [] && $this->credentialParameters(implode('&', $parameters))) {
+                return true;
+            }
             if ($segment === '') {
                 continue;
             }

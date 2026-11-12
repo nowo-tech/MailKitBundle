@@ -41,6 +41,9 @@ as in 1.9. Two small, compatible changes apply to everyone:
 - `MailHeaders::strip()` also removes the new internal headers `X-Mail-Kit-Template`, `X-Mail-Kit-Recipient`,
   `X-Mail-Kit-Tenant` and `X-Mail-Kit-No-Track` before delivery (if your application sent headers with these exact
   names to recipients, rename them).
+- `RuntimeTransport` no longer removes the internal headers from **your** message object, only from the delivered copy
+  (fix of audit NU-H1: Messenger retries lost the queued log row, the tag and the redaction values). If you inspected
+  your message after `send()` and relied on the headers being gone, read them from the `SentMessage` instead.
 - `MailDeliveredEvent` and `RuntimeTransport` get an optional trailing constructor argument (`$trackingId`,
   `$tracker`); code that builds them positionally keeps working.
 
@@ -50,7 +53,7 @@ To track opens and clicks ([USAGE](USAGE.md#open-and-click-tracking), privacy no
    return the recipient id and tenant to store) and, for clicks, `Tracking\EmailLinkRewriterInterface` (e.g. short
    links of kind `email`; an `essential` link must always redirect).
 2. Tag your e-mails: `MailHeaders::template($email, 'issue_alert')`, `MailHeaders::trackingRecipient($email, $userId, $tenant)`,
-   and `MailHeaders::noTracking($email)` on security e-mails.
+   and `MailHeaders::noTracking($email)` on security e-mails. Keep `mailer.decorate: true` (the default; required).
 3. Enable it:
 
    ```yaml

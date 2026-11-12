@@ -92,7 +92,7 @@ final class TrackingTokenSignerTest extends TestCase
             TrackingTokenSigner::fromKernelSecret('');
             self::fail('Empty kernel secret.');
         } catch (InvalidArgumentException $exception) {
-            self::assertStringContainsString('kernel.secret is empty', $exception->getMessage());
+            self::assertStringContainsString('is empty', $exception->getMessage());
         }
         try {
             new TrackingTokenSigner(self::SECRET, ['too-short']);

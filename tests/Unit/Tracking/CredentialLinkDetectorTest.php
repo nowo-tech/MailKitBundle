@@ -40,6 +40,8 @@ final class CredentialLinkDetectorTest extends TestCase
         yield '2fa path' => ['https://app.example.com/2fa'];
         yield 'encoded segment' => ['https://app.example.com/%6Cogin'];
         yield 'unparsable' => ['https:///nohost'];
+        yield 'jsessionid path parameter' => ['https://app.example.com/home;jsessionid=ABC123'];
+        yield 'token path parameter' => ['https://app.example.com/a;x=1;token=abc/b'];
     }
 
     /**
@@ -54,6 +56,7 @@ final class CredentialLinkDetectorTest extends TestCase
         yield 'unsubscribe' => ['https://app.example.com/account/notifications'];
         yield 'no path' => ['https://app.example.com'];
         yield 'empty segments' => ['https://app.example.com//a//'];
+        yield 'harmless path parameter' => ['https://app.example.com/list;page=2'];
     }
 
     #[DataProvider('credentialLinks')]

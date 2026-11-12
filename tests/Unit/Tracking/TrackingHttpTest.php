@@ -59,6 +59,15 @@ final class TrackingHttpTest extends TestCase
         self::assertSame($clock->now()->getTimestamp(), $events[0]->occurredAt->getTimestamp());
         self::assertSame('thunderbird', $store->find($id)->lastOpenFamily ?? null);
 
+        // A bad secret (lazy signer): still the pixel, logged.
+        $lazyLogger = new RecordingLogger();
+        $lazy       = new TrackingPixelController(static fn (): TrackingTokenSigner => new TrackingTokenSigner('short'), new OpenClassifier(), new OpenRecorder($store), logger: $lazyLogger);
+        self::assertSame(200, $lazy(Request::create('/e/o/x.gif'), $signer->issue($id))->getStatusCode());
+        self::assertTrue($lazyLogger->has('Mail open not recorded.'));
+        $working = new TrackingPixelController(static fn (): TrackingTokenSigner => $signer, new OpenClassifier(), new OpenRecorder($store));
+        $working(Request::create('/e/o/x.gif', server: ['HTTP_USER_AGENT' => 'Thunderbird/115']), $signer->issue($id));
+        self::assertSame(2, $store->find($id)->opens ?? null);
+
         // The store breaks: still the pixel, the failure is logged.
         $this->trackingDb()->executeStatement('DROP TABLE mail_kit_tracking_send');
         $broken = $controller(Request::create('/e/o/x.gif'), $signer->issue($id));

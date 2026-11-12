@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows
 - [[Unreleased]](#unreleased)
   - [Added](#added)
   - [Changed](#changed)
+  - [Fixed](#fixed)
   - [Tests](#tests)
 - [[1.9.0] - 2026-11-12](#190---2026-11-12)
   - [Added](#added-1)
@@ -21,7 +22,7 @@ All notable changes to this project are documented here. The format follows
   - [Security](#security-1)
   - [Tests](#tests-2)
 - [[1.7.1] - 2026-11-11](#171---2026-11-11)
-  - [Fixed](#fixed)
+  - [Fixed](#fixed-1)
   - [Tests](#tests-3)
   - [Documentation](#documentation)
 - [[1.7.0] - 2026-11-11](#170---2026-11-11)
@@ -43,11 +44,11 @@ All notable changes to this project are documented here. The format follows
 - [[1.2.0] - 2026-11-02](#120---2026-11-02)
   - [Added](#added-8)
   - [Changed](#changed-6)
-  - [Fixed](#fixed-1)
+  - [Fixed](#fixed-2)
 - [[1.1.1] - 2026-11-01](#111---2026-11-01)
   - [Security](#security-4)
   - [Changed](#changed-7)
-  - [Fixed](#fixed-2)
+  - [Fixed](#fixed-3)
 - [[1.1.0] - 2026-11-01](#110---2026-11-01)
   - [Added](#added-9)
   - [Changed](#changed-8)
@@ -74,7 +75,8 @@ Next minor: 1.10.0 (Beacon spec 230 block B, D-20261112-16: e-mail open and clic
   `Tracking\TrackableLinkFilterInterface` (default `ConfiguredTrackableLinkFilter`, deny by default:
   `links.allowed_hosts` / `allowed_path_prefixes`), `Tracking\TrackingRecipientResolverInterface` (GDPR bridge).
 - **Never tracked:** `X-Mail-Kit-No-Track` (`MailHeaders::noTracking()`), several envelope recipients, no HTML body,
-  template ids matching `tracking.never_track_templates` (security defaults), declared redaction values
+  template ids matching the built-in security patterns (`EmailTracker::SECURITY_TEMPLATES`, always applied) or
+  `tracking.extra_never_track_templates`, declared redaction values
   (`skip_redacted`), a policy answer `none()` — no pixel, links untouched, **no row**. Credential-bearing links
   (`Tracking\CredentialLinkDetector`: user info, token / code / OTP / signature / `_hash` / pre-signed parameters,
   reset / login / magic / verify / invitation / accept / OAuth path segments, redaction values) are never rewritten;
@@ -101,8 +103,27 @@ Next minor: 1.10.0 (Beacon spec 230 block B, D-20261112-16: e-mail open and clic
   `X-Mail-Kit-Tenant`, `X-Mail-Kit-No-Track`), with tracking on or off.
 - `RuntimeTransport` gets an optional trailing constructor argument (`?EmailTracker`); defaults unchanged.
 
+- Audit NU (before the 1.10.0 tag): the pixel signer is built lazily (a bad `%env()%` secret leaves mail untracked
+  and is logged as critical; literal secrets under 32 bytes fail the build; with `secret: null` the previous secrets
+  are derived from previous kernel secrets), the built-in security template patterns can no longer be replaced
+  (`extra_never_track_templates` adds to them), `href` is matched only as an attribute name (tokenised attributes),
+  path parameters (`;jsessionid=`) count as credential parameters, `tracking.enabled` needs `mailer.decorate: true`,
+  the GDPR export includes the last open's truncated address and user-agent family, and `max_opens_per_send` caps
+  the counters (default 1000).
+
+### Fixed
+
+- **Messenger retries lost the internal headers (since 1.0.0, audit NU-H1).** `RuntimeTransport` stripped
+  `X-Mail-Kit-Log-Id`, `-Tag` and `-Redact` from the caller's message before delivery; Messenger re-sends that very
+  object on a retry (serialized again by the retry / failure transport), so a retried message lost its queued log row
+  (a second row was written; the first stayed `failed`), its tag and — with `log.store_bodies: true` — its redaction
+  values: the retry's row stored the one-time link / code **unredacted**. The headers are now removed from the
+  delivered copy only; with tracking, a retried security / no-track / redacted e-mail stays untracked.
+
 ### Tests
 
+- Messenger retry regression (serialized `SendEmailMessage` re-handled after a failure): one log row, tag kept, body
+  redacted; security, no-track and redacted mail never tracked on the retry.
 - HTML rewriting edge cases (malformed HTML, comments, `<script>` / `<style>`, Outlook VML buttons, entities, quoting,
   labels, limits, `data-mail-kit-track="off"`, text part, PCRE failure), credential URLs, token forgery (every bit flip),
   rotation, expiry and clock skew, unknown / forged tokens still answer the GIF, opt-out and security templates → zero

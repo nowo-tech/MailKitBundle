@@ -46,7 +46,10 @@ final readonly class HtmlLinkTracker
 
     private const PATTERN = '~<!--(?!\[if).*?-->|<(script|style)\b[^>]*>.*?</\1\s*>|<(a|area|v:roundrect)\b((?:[^>"\']|"[^"]*"|\'[^\']*\')*)>~is';
 
-    private const HREF = '~(\shref\s*=\s*)(?:"([^"]*)"|\'([^\']*)\'|([^\s>"\']+))~i';
+    /** One attribute (`name`, `name=value`, quoted or not) at the scan position (audit NU-L1: names are tokens). */
+    private const ATTRIBUTE = '~\G\s*([^\s"\'>/=]+)(?:\s*=\s*("[^"]*"|\'[^\']*\'|[^\s"\'>]+))?~';
+
+    private const IMG = '~<img\b((?:[^>"\']|"[^"]*"|\'[^\']*\')*)>~i';
 
     /**
      * @param int $maxLinks links rewritten in one e-mail at most (the following ones are kept)
@@ -77,25 +80,27 @@ final readonly class HtmlLinkTracker
                 return $match[0][0];
             }
             $attributes = $match[3][0] ?? '';
-            if (preg_match(self::HREF, $attributes, $href) !== 1) {
+            $parsed     = $this->scan($attributes);
+            $href       = $parsed['href'] ?? null;
+            if ($href === null) {
                 return $match[0][0];
             }
-            $url = trim(html_entity_decode(($href[2] ?? '') !== '' ? $href[2] : (($href[3] ?? '') !== '' ? $href[3] : ($href[4] ?? '')), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            $url = trim(html_entity_decode($href['value'], ENT_QUOTES | ENT_HTML5, 'UTF-8'));
             if (preg_match('~^https?://~i', $url) !== 1) {
                 return $match[0][0];
             }
             ++$position;
-            if ($rewritten >= $this->maxLinks || preg_match('~\sdata-mail-kit-track\s*=\s*["\']?off\b~i', $attributes) === 1) {
+            if ($rewritten >= $this->maxLinks || strtolower($parsed['data-mail-kit-track']['value'] ?? '') === 'off') {
                 return $match[0][0];
             }
-            $label = $this->label(strtolower($tag) === 'a' ? $this->inner($html, $match[0][1] + strlen($match[0][0])) : '', $attributes);
+            $label = $this->label(strtolower($tag) === 'a' ? $this->inner($html, $match[0][1] + strlen($match[0][0])) : '', $parsed);
             $new   = $rewrite($url, $label, $position);
             if ($new === null) {
                 return $match[0][0];
             }
             ++$rewritten;
             $map[$url] ??= $new;
-            $replaced = (string) preg_replace(self::HREF, '${1}"' . $this->escapeReplacement(htmlspecialchars($new, ENT_QUOTES | ENT_HTML5 | ENT_SUBSTITUTE, 'UTF-8')) . '"', $attributes, 1);
+            $replaced = substr_replace($attributes, '"' . htmlspecialchars($new, ENT_QUOTES | ENT_HTML5 | ENT_SUBSTITUTE, 'UTF-8') . '"', $href['offset'], $href['length']);
 
             return '<' . $tag . $replaced . '>';
         }, $html, flags: PREG_OFFSET_CAPTURE);
@@ -152,11 +157,15 @@ final readonly class HtmlLinkTracker
     }
 
     /**
-     * `aria-label`, then the visible text, then the first image `alt` (or the `alt` of an `<area>`), then `title`; white space collapsed, bounded.
+     * `aria-label`, then the visible text, then the first image `alt` (or the `alt` of an `<area>`), then `title`;
+     * white space collapsed, bounded.
+     *
+     * @param array<string, array{value: string, offset: int, length: int}> $attributes
      */
-    private function label(string $inner, string $attributes): ?string
+    private function label(string $inner, array $attributes): ?string
     {
-        foreach ([$this->attribute($attributes, 'aria-label'), strip_tags($inner), $this->attribute($inner, 'alt'), $this->attribute($attributes, 'alt'), $this->attribute($attributes, 'title')] as $candidate) {
+        $image = preg_match(self::IMG, $inner, $m) === 1 ? $this->scan($m[1]) : [];
+        foreach ([$attributes['aria-label']['value'] ?? null, strip_tags($inner), $image['alt']['value'] ?? null, $attributes['alt']['value'] ?? null, $attributes['title']['value'] ?? null] as $candidate) {
             $text = trim((string) preg_replace('/\s+/u', ' ', html_entity_decode($candidate ?? '', ENT_QUOTES | ENT_HTML5, 'UTF-8')));
             if ($text !== '') {
                 return mb_substr($text, 0, self::LABEL_MAX);
@@ -166,17 +175,27 @@ final readonly class HtmlLinkTracker
         return null;
     }
 
-    private function attribute(string $html, string $name): ?string
+    /**
+     * Attributes of a tag, tokenised left to right (a `href=` inside another attribute's value is not an attribute):
+     * lower-case name => first occurrence, its unquoted value and the offset / length of the value as written. Stops at
+     * the first token that does not parse (the rest of the tag is then ignored, never rewritten).
+     *
+     * @return array<string, array{value: string, offset: int, length: int}>
+     */
+    private function scan(string $attributes): array
     {
-        if (preg_match('~\s' . $name . '\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>"\']+))~i', $html, $m) !== 1) {
-            return null;
+        $found  = [];
+        $offset = 0;
+        while (preg_match(self::ATTRIBUTE, $attributes, $m, PREG_OFFSET_CAPTURE, $offset) === 1) {
+            $name = strtolower($m[1][0]);
+            if (!isset($found[$name]) && isset($m[2]) && $m[2][1] >= 0) {
+                $raw          = $m[2][0];
+                $quoted       = $raw[0] === '"' || $raw[0] === "'";
+                $found[$name] = ['value' => $quoted ? substr($raw, 1, -1) : $raw, 'offset' => $m[2][1], 'length' => strlen($raw)];
+            }
+            $offset += strlen($m[0][0]);
         }
 
-        return $m[1] !== '' ? $m[1] : (($m[2] ?? '') !== '' ? $m[2] : ($m[3] ?? ''));
-    }
-
-    private function escapeReplacement(string $value): string
-    {
-        return (string) preg_replace('/[\\\\$]/', '\\\\$0', $value);
+        return $found;
     }
 }

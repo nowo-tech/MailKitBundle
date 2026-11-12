@@ -20,6 +20,7 @@ use Nowo\MailKitBundle\Tracking\Store\TrackingStore;
 use Nowo\MailKitBundle\Tracking\TrackableLinkFilterInterface;
 use Nowo\MailKitBundle\Tracking\TrackedEmail;
 use Nowo\MailKitBundle\Tracking\TrackedLink;
+use Nowo\MailKitBundle\Tracking\TrackingCandidate;
 use Nowo\MailKitBundle\Tracking\TrackingTokenSigner;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -122,8 +123,10 @@ final class EmailTrackerTest extends TestCase
         $email = $this->email();
         MailHeaders::template($email, $template);
         self::assertNull($this->tracker()->track($email));
-        // … and the host policy refuses them too when the defaults are replaced.
+        // … the built-in patterns cannot be removed (audit NU-M2) …
         self::assertNull($this->tracker(neverTrack: [])->track($email));
+        // … and the host policy refuses them too.
+        self::assertFalse((new HostTrackingPolicy())->decide(new TrackingCandidate($template, 'user@example.com'))->tracks());
         self::assertSame(0, $this->rows());
         self::assertSame([], $this->rewriter->links);
     }
@@ -265,6 +268,32 @@ final class EmailTrackerTest extends TestCase
         $this->trackingDb()->executeStatement('DROP TABLE mail_kit_tracking_send');
         self::assertNull($this->tracker()->track($this->email()));
         self::assertTrue($this->logger->has('Mail tracking store write failed; the e-mail is sent untracked.'));
+    }
+
+    public function testExtraPatternsAndABrokenSignerLeaveMailUntracked(): void
+    {
+        $digest = $this->email();
+        MailHeaders::template($digest, 'weekly_digest');
+        self::assertNull($this->tracker(neverTrack: ['weekly_*'])->track($digest));
+        self::assertNotNull($this->tracker(neverTrack: [])->track($digest));
+
+        $broken = new EmailTracker(
+            new HostTrackingPolicy(),
+            $this->rewriter,
+            new ConfiguredTrackableLinkFilter(['app.example.com']),
+            new CredentialLinkDetector(),
+            static fn (): TrackingTokenSigner => new TrackingTokenSigner('too-short'),
+            $this->store,
+            new HtmlLinkTracker(),
+            self::BASE,
+            logger: $this->logger,
+        );
+        self::assertNull($broken->track($this->email()));
+        self::assertTrue($this->logger->has('Mail tracking signer unavailable'));
+        self::assertSame(1, $this->rows(), 'Only the digest above; the broken signer stored nothing.');
+
+        $lazy = new EmailTracker(new HostTrackingPolicy(), $this->rewriter, new ConfiguredTrackableLinkFilter(['app.example.com']), new CredentialLinkDetector(), fn (): TrackingTokenSigner => $this->signer, $this->store, new HtmlLinkTracker(), self::BASE);
+        self::assertNotNull($lazy->track($this->email()));
     }
 
     public function testStoreWritesJoinTheHostTransactionThroughASavepoint(): void

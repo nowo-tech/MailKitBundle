@@ -12,6 +12,7 @@ use Nowo\MailKitBundle\Graph\GraphMailbox;
 use Nowo\MailKitBundle\Graph\Inbound\InboundLimits;
 use Nowo\MailKitBundle\Graph\Send\GraphSendLimits;
 use Nowo\MailKitBundle\Log\SentMailCsvExporter;
+use Nowo\MailKitBundle\Tracking\EmailTracker;
 use Nowo\MailKitBundle\Ui\MailKitPages;
 use Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition;
 use Symfony\Component\Config\Definition\Builder\TreeBuilder;
@@ -58,8 +59,8 @@ final class Configuration implements ConfigurationInterface
     /** brand.mode: ignore any brand provider. */
     public const BRAND_OFF = 'off';
 
-    /** Default `tracking.never_track_templates`: security e-mails are never tracked, whatever the policy says. */
-    public const NEVER_TRACK_TEMPLATES = ['*password*', '*reset*', '*magic*', '*login*', '*sign_in*', '*signin*', '*one_time*', '*otp*', '*code*', '*verif*', '*confirm*', '*security*', '*new_device*', '*email_change*', '*invitation*', '*invite*', '*2fa*', '*mfa*', '*token*'];
+    /** Built-in security template patterns, always applied (`EmailTracker::SECURITY_TEMPLATES`, audit NU-M2). */
+    public const NEVER_TRACK_TEMPLATES = EmailTracker::SECURITY_TEMPLATES;
 
     /** Default `tracking.links.essential_patterns`: tracked, never blocked. */
     public const ESSENTIAL_LINK_PATTERNS = ['unsubscribe', 'preferences', 'privacy', 'legal', 'terms'];
@@ -380,6 +381,10 @@ final class Configuration implements ConfigurationInterface
             ->validate()
                 ->ifTrue(static fn (array $v): bool => ($v['log']['enabled'] ?? true) === true && ($v['log']['map_entities'] ?? true) === false)
                 ->thenInvalid('nowo_mail_kit.log.map_entities: false needs nowo_mail_kit.log.enabled: false (the log and its admin pages use the mapped entities).')
+            ->end()
+            ->validate()
+                ->ifTrue(static fn (array $v): bool => ($v['tracking']['enabled'] ?? false) === true && ($v['mailer']['decorate'] ?? true) === false)
+                ->thenInvalid('nowo_mail_kit.tracking.enabled needs nowo_mail_kit.mailer.decorate: true (mail sent through the framework transports would otherwise bypass the tracking policy and the never-track rules).')
             ->end()
             ->validate()
                 ->ifTrue(static fn (array $v): bool => ($v['web_ui']['export']['include_bodies'] ?? false) === true && ($v['log']['store_bodies'] ?? false) !== true)
@@ -813,7 +818,8 @@ final class Configuration implements ConfigurationInterface
                 ->integerNode('purge_batch_size')->info('Rows deleted per statement by the purge.')->defaultValue(1000)->min(1)->max(100_000)->end()
                 ->scalarNode('connection')->info('DBAL connection of the tracking table (null = default).')->defaultNull()->end()
                 ->scalarNode('bus')->info('Messenger bus service id: the pixel only dispatches a RecordMailOpen message (route it to an async transport); null = one synchronous UPDATE.')->defaultNull()->end()
-                ->append($listOfStrings('never_track_templates', 'fnmatch patterns (case-insensitive) of template ids never tracked, before the policy is asked. Replacing the list drops the defaults: keep the security ones.', self::NEVER_TRACK_TEMPLATES))
+                ->append($listOfStrings('extra_never_track_templates', 'fnmatch patterns (case-insensitive) of template ids never tracked, before the policy is asked, added to the built-in security patterns (which always apply).', []))
+                ->integerNode('max_opens_per_send')->info('Opens (human + machine) counted per send at most; later fetches still get the pixel but change nothing.')->defaultValue(1000)->min(1)->max(1_000_000)->end()
                 ->booleanNode('skip_redacted')
                     ->info('Never track an e-mail that declares redaction values (MailHeaders::redact(): one-time links and codes).')
                     ->defaultTrue()

@@ -1085,7 +1085,8 @@ MailHeaders::trackingRecipient($email, $user->getId()->toRfc4122(), $organizatio
 MailHeaders::noTracking($resetEmail);                         // never track this one (security mail)
 ```
 
-These headers are internal: they are removed before the message leaves the application, also with tracking off.
+These headers are internal: they are removed from the copy that leaves the application (also with tracking off), never
+from your message object — a Messenger retry re-sends that object with its headers intact and is decided again.
 
 ### What is never tracked
 
@@ -1093,8 +1094,9 @@ No pixel, links untouched, **no row stored** when:
 
 - the message has `X-Mail-Kit-No-Track`, more than one envelope recipient (To + Cc + Bcc), no HTML body, an HTML body
   larger than `max_html_bytes`, or already carries this application's pixel;
-- its template id matches `tracking.never_track_templates` (defaults cover password / reset / magic / login / sign-in /
-  one-time / OTP / code / verify / confirm / security / new device / e-mail change / invitation / 2FA / MFA / token);
+- its template id matches the built-in security patterns (`EmailTracker::SECURITY_TEMPLATES`: password / reset / magic /
+  login / sign-in / one-time / OTP / code / verify / confirm / security / new device / e-mail change / invitation / 2FA /
+  MFA / token — always applied) or `tracking.extra_never_track_templates`;
 - it declares `MailHeaders::redact()` values (one-time links and codes) while `skip_redacted` is on (default);
 - the policy says `none()` (security templates, opted-out recipients) or throws, or the row cannot be stored.
 
@@ -1103,7 +1105,13 @@ relative, `cid:`), carries user info, a credential-like query / fragment paramet
 `_hash`, `X-Amz-Signature`…), a credential-like path segment (`/reset-password`, `/login/…`, `/magic`, `/verify-email`,
 `/invitations/…/accept`, `/oauth`…), contains a redaction value, is marked `data-mail-kit-track="off"`, is not on the
 allow-list (`links.allowed_hosts` / `allowed_path_prefixes`, or your `TrackableLinkFilterInterface`), or when the rewriter
-returns null, something that is not an absolute `http(s)` URL, or throws. HTML comments (except Outlook conditional
+returns null, something that is not an absolute `http(s)` URL, or throws. Path parameters (`;jsessionid=…`) count like query
+parameters.
+
+**Token-bearing unsubscribe / one-click links** (`/unsubscribe?token=…`, `List-Unsubscribe` targets) are never
+rewritten by the credential rule; if yours carry the token in the path without a credential word, mark them
+`data-mail-kit-track="off"` or keep their route outside `links.allowed_path_prefixes`. List route prefixes of ordinary
+content in the allow-list (`/issues`, `/projects`), never `/` or `*`. HTML comments (except Outlook conditional
 blocks), `<script>` and `<style>` are not touched, and malformed HTML is kept byte for byte around the rewritten `href`s.
 
 ### Standard Symfony host
@@ -1114,7 +1122,7 @@ nowo_mail_kit:
     tracking:
         enabled: true
         policy: App\Mail\MailTrackingPolicy
-        public_base_url: '%env(APP_PUBLIC_URL)%'      # https://app.example.com
+        public_base_url: '%env(APP_PUBLIC_URL)%'      # https://app.example.com (needs mailer.decorate: true, the default)
         secret: '%env(MAIL_KIT_TRACKING_SECRET)%'      # ≥ 32 bytes; or null to derive it from kernel.secret
         links:
             allowed_hosts: [app.example.com]           # nothing is rewritten until a host is listed
@@ -1252,7 +1260,10 @@ $many  = $reader->findMany($sendIds);      // keyed by send id (an e-mail log pa
 ```
 
 `MailOpenedEvent` / `MailMachineOpenedEvent` (send id and time only) are dispatched after each counted open of a known
-send. Clicks are recorded by your link rewriter's redirect (e.g. the short-link bundle), not by MailKit.
+send. Clicks are recorded by your link rewriter's redirect (e.g. the short-link bundle), not by MailKit. Each send counts at most
+`tracking.max_opens_per_send` opens (default 1000). `TrackedLink::$label` is the link's visible text as written by the
+e-mail's author (entities decoded, tags stripped, at most 100 characters): escape it wherever you display it, and keep it
+under the same retention as the click rows.
 
 ### Retention, GDPR and worker mode
 
@@ -1262,6 +1273,13 @@ send. Clicks are recorded by your link rewriter's redirect (e.g. the short-link 
   id (exact, binary match, re-checked in PHP). With `personal_data.enabled` and UserKit, the `email_tracking` eraser and
   export section call them with the ids of your `TrackingRecipientResolverInterface` (default: `getId()`). Sends tracked
   without a recipient id cannot be attributed: only the purge removes them.
+- **Opt-out**: the policy stops new tracking at once; call `EmailTrackingPersonalDataInterface::eraseRecipient()` from
+  your opt-out handler too when turning tracking off must also remove what was already recorded (and delete the
+  recipient's click rows in your short-link store).
+- **Recipient id**: return one from the policy for every tracked send (recommended: refuse to track without one), so
+  export and erasure can find the rows.
+- **Client address**: set `framework.trusted_proxies` to your proxies only; the truncated address and the machine-open
+  ranges use `Request::getClientIp()`.
 - Every tracking service is immutable (FrankenPHP worker mode, kernel reset off): the policy, rewriter and filter are
   asked on every send, the store resolves its connection per call, nothing is memoised. Tested with 1 000 pixel
   requests for two tenants in one kept-alive kernel without the services resetter (flat memory, p95 < 20 ms).

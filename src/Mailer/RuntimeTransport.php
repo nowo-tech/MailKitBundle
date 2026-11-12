@@ -45,7 +45,8 @@ use function strlen;
  * dropped by {@see reset()} (`kernel.reset` between requests / Messenger messages in worker mode, and on
  * `SettingsChangedEvent` for the mail sections).
  *
- * The internal {@see MailHeaders} are removed before delivery; the outcome is written to the sent-mail log when it
+ * The internal {@see MailHeaders} are removed from the copy that is delivered (never from the caller's message, which a
+ * Messenger retry sends again, 1.10 / audit NU-H1); the outcome is written to the sent-mail log when it
  * is enabled. A failure is rethrown as {@see DeliveryFailedException}: scrubbed message and reference, never the
  * provider response body (so it is safe in flashes, the log and the Messenger failure transport).
  *
@@ -168,16 +169,17 @@ final class RuntimeTransport implements TransportInterface, ResetInterface
         $id       = $message instanceof Message ? MailHeaders::value($message, MailHeaders::LOG_ID) : null;
         $tag      = $message instanceof Message ? MailHeaders::value($message, MailHeaders::TAG) : null;
         $tracked  = $message instanceof Message ? $this->tracker?->track($message, $envelope, $id) : null;
-        if ($message instanceof Message) {
-            MailHeaders::strip($message);
-        }
-        if ($tracked instanceof TrackedEmail) {
-            MailHeaders::strip($tracked->email);
+        // The caller's message is never changed (audit NU-H1): a Messenger retry re-sends that very object, which must
+        // still carry the log row id, the tag, the redaction values and the tracking opt-outs. Only the copy that
+        // leaves the application loses the internal headers.
+        $outgoing = $tracked instanceof TrackedEmail ? $tracked->email : ($message instanceof Message ? clone $message : $message);
+        if ($outgoing instanceof Message) {
+            MailHeaders::strip($outgoing);
         }
         $label = $dsn instanceof RuntimeDsn ? MailerDsnAudit::scheme($dsn->dsn) : self::FALLBACK_LABEL;
 
         try {
-            $sent = ($dsn instanceof RuntimeDsn ? $this->transportFor($dsn) : $this->fallback)->send($tracked instanceof TrackedEmail ? $tracked->email : $message, $envelope);
+            $sent = ($dsn instanceof RuntimeDsn ? $this->transportFor($dsn) : $this->fallback)->send($outgoing, $envelope);
         } catch (Throwable $exception) {
             if ($tracked instanceof TrackedEmail) {
                 $this->tracker?->discard($tracked);

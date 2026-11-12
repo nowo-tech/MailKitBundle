@@ -152,6 +152,8 @@ use function is_array;
 use function is_bool;
 use function is_string;
 use function sprintf;
+use function str_contains;
+use function strlen;
 
 /**
  * Loads `nowo_mail_kit`: the Instance Settings sections, DSN / sender validation, the runtime transport and mailer
@@ -507,7 +509,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
      */
     private function registerTracking(ContainerBuilder $container, array $tracking, array $doctrine, bool $personalData, bool $hasDoctrine): void
     {
-        /** @var array{enabled: bool, policy: string, link_rewriter: string|null, link_filter: string|null, recipient_resolver: string|null, public_base_url: string, path_prefix: string, secret: string|null, previous_secrets: list<string>, retention: string, purge_batch_size: int, connection: string|null, bus: string|null, never_track_templates: list<string>, skip_redacted: bool, max_html_bytes: int, links: array{allowed_hosts: list<string>, allowed_path_prefixes: list<string>, credential_query_parameters: list<string>, credential_path_segments: list<string>, essential_patterns: list<string>, max_links: int}, machine_opens: array{user_agents: list<string>, ip_ranges: list<string>}} $tracking */
+        /** @var array{enabled: bool, policy: string, link_rewriter: string|null, link_filter: string|null, recipient_resolver: string|null, public_base_url: string, path_prefix: string, secret: string|null, previous_secrets: list<string>, retention: string, purge_batch_size: int, connection: string|null, bus: string|null, extra_never_track_templates: list<string>, max_opens_per_send: int, skip_redacted: bool, max_html_bytes: int, links: array{allowed_hosts: list<string>, allowed_path_prefixes: list<string>, credential_query_parameters: list<string>, credential_path_segments: list<string>, essential_patterns: list<string>, max_links: int}, machine_opens: array{user_agents: list<string>, ip_ranges: list<string>}} $tracking */
         if (!$tracking['enabled']) {
             return;
         }
@@ -522,12 +524,20 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $clock     = new Reference('clock', ContainerInterface::NULL_ON_INVALID_REFERENCE);
         $retention = Configuration::daysSeconds($tracking['retention']);
 
-        $container->setDefinition(TrackingStore::class, new Definition(TrackingStore::class, [new Reference('doctrine'), $tracking['connection'], $doctrine['table_prefix'], $clock, $logger]));
+        $container->setDefinition(TrackingStore::class, new Definition(TrackingStore::class, [new Reference('doctrine'), $tracking['connection'], $doctrine['table_prefix'], $clock, $logger, $tracking['max_opens_per_send']]));
         $container->setAlias(EmailTrackingReaderInterface::class, TrackingStore::class)->setPublic(true);
         $container->setAlias(EmailTrackingPersonalDataInterface::class, TrackingStore::class)->setPublic(true);
         $container->setDefinition(TrackingSchemaListener::class, (new Definition(TrackingSchemaListener::class, [new Reference(TrackingStore::class), new Reference('doctrine'), $doctrine['entity_manager']]))
             ->addTag('doctrine.event_listener', ['event' => 'postGenerateSchema']));
 
+        // Literal secrets are checked now (audit NU-M1); %env()% values when the signer is first built — lazily, so a
+        // bad secret leaves mail untracked (logged as critical) instead of breaking every send.
+        // With `secret: null` the previous secrets are previous kernel secrets (derived like the current one, any length).
+        foreach (is_string($tracking['secret']) && $tracking['secret'] !== '' ? [$tracking['secret'], ...$tracking['previous_secrets']] : [] as $secret) {
+            if (is_string($secret) && !str_contains($secret, '%env(') && $container->resolveEnvPlaceholders($secret, true) === $secret && strlen($secret) < 32) {
+                throw new InvalidConfigurationException('nowo_mail_kit.tracking.secret and tracking.previous_secrets must be at least 32 bytes long (use a random value from %env()%).');
+            }
+        }
         $signer = is_string($tracking['secret']) && $tracking['secret'] !== ''
             ? new Definition(TrackingTokenSigner::class, [$tracking['secret'], $tracking['previous_secrets'], $retention, $clock])
             : (new Definition(TrackingTokenSigner::class, ['%kernel.secret%', $tracking['previous_secrets'], $retention, $clock]))->setFactory([TrackingTokenSigner::class, 'fromKernelSecret']);
@@ -554,11 +564,11 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             new Reference(EmailLinkRewriterInterface::class),
             new Reference(TrackableLinkFilterInterface::class),
             new Definition(CredentialLinkDetector::class, [$tracking['links']['credential_query_parameters'], $tracking['links']['credential_path_segments']]),
-            new Reference(TrackingTokenSigner::class),
+            new ServiceClosureArgument(new Reference(TrackingTokenSigner::class)),
             new Reference(TrackingStore::class),
             new Definition(HtmlLinkTracker::class, [$tracking['links']['max_links']]),
             $tracking['public_base_url'] . $tracking['path_prefix'],
-            $tracking['never_track_templates'],
+            $tracking['extra_never_track_templates'],
             $tracking['skip_redacted'],
             $tracking['links']['essential_patterns'],
             $tracking['max_html_bytes'],
@@ -577,7 +587,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
                 ->addTag('messenger.message_handler', ['handles' => RecordMailOpen::class]));
         }
         $container->setDefinition(TrackingPixelController::class, (new Definition(TrackingPixelController::class, [
-            new Reference(TrackingTokenSigner::class),
+            new ServiceClosureArgument(new Reference(TrackingTokenSigner::class)),
             new Reference(OpenClassifier::class),
             new Reference(OpenRecorder::class),
             $bus !== null ? new Reference($bus) : null,

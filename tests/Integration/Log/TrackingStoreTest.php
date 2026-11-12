@@ -58,6 +58,8 @@ final class TrackingStoreTest extends KernelTestCase
             $stats->machineFirstOpenAt?->getTimestamp(), $stats->machineLastOpenAt?->getTimestamp(),
         ]);
         self::assertSame(['17.58.0.0', 'apple_mail'], [$stats->lastOpenIp, $stats->lastOpenFamily]);
+        $export = $store->exportRecipient('UserA')[0];
+        self::assertSame(['17.58.0.0', 'apple_mail', 2, 1], [$export['last_open_ip'], $export['last_open_ua'], $export['opens'], $export['machine_opens']]);
         self::assertTrue($stats->opened());
 
         $many = $store->findMany([$a, $b, 'not-an-id', TrackingTokenSigner::newSendId()]);
@@ -156,6 +158,20 @@ final class TrackingStoreTest extends KernelTestCase
         self::assertSame(7, $store->purge($clock->now()->getTimestamp() - 86_400, 3));
         self::assertSame(0, $store->purge($clock->now()->getTimestamp() - 86_400, 3));
         self::assertNotNull($store->find($fresh));
+    }
+
+    public function testOpensStopCountingAtTheCap(): void
+    {
+        $kernel   = $this->boot();
+        $doctrine = $this->container($kernel)->get('doctrine');
+        self::assertInstanceOf(ManagerRegistry::class, $doctrine);
+        $store = new TrackingStore($doctrine, null, '', null, null, 2);
+        $id    = TrackingTokenSigner::newSendId();
+        $store->createSend($id, null, null, null);
+        self::assertTrue($store->recordOpen($id, false, null, null, 1));
+        self::assertTrue($store->recordOpen($id, true, null, null, 2));
+        self::assertFalse($store->recordOpen($id, false, null, null, 3));
+        self::assertSame([1, 1], [$store->find($id)?->opens, $store->find($id)?->machineOpens]);
     }
 
     public function testAFailingWriteInsideTheHostTransactionLeavesItUsable(): void

@@ -28,6 +28,12 @@
 
 ## Unreleased
 
+### To 1.10.2
+
+From **1.10.1**: `composer update nowo-tech/mail-kit-bundle`. No change is needed. `public_base_url: '%env(DEFAULT_URI)%'`
+now builds (1.10.1 failed `cache:clear`). A compiler pass that still sets `EmailTracker` argument 7 to the full pixel
+base (base + `/e/o`) keeps working; it can be dropped in favour of the config value.
+
 ## To 1.10.1
 
 From **1.10.0**:

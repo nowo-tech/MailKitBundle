@@ -24,6 +24,7 @@ use function parse_url;
 use function preg_match;
 use function rewind;
 use function str_contains;
+use function str_ends_with;
 use function str_starts_with;
 use function stream_get_contents;
 use function stream_get_meta_data;
@@ -236,7 +237,10 @@ final readonly class EmailTracker
      */
     private function resolvedBase(): string
     {
-        return TrackingBaseUrl::normalize($this->pixelBase) . $this->pathPrefix;
+        $base = TrackingBaseUrl::normalize($this->pixelBase);
+
+        // A host that sets the full pixel base (base + prefix) as the first argument keeps working: no second prefix.
+        return $this->pathPrefix === '' || str_ends_with($base, $this->pathPrefix) ? $base : $base . $this->pathPrefix;
     }
 
     private function read(mixed $body): string|false|null

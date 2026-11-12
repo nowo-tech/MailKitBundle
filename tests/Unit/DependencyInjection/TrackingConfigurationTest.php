@@ -26,6 +26,8 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\Config\Definition\Processor;
+use Symfony\Component\DependencyInjection\Compiler\MergeExtensionConfigurationPass;
+use Symfony\Component\DependencyInjection\Compiler\ValidateEnvPlaceholdersPass;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Extension\Extension;
 use Symfony\Component\DependencyInjection\Reference;
@@ -114,6 +116,41 @@ final class TrackingConfigurationTest extends TestCase
 
         (new NowoMailKitExtension())->load([['tracking' => ['enabled' => true, 'policy' => 'app.policy', 'public_base_url' => $placeholder]]], $container);
         self::assertSame($placeholder, $container->getDefinition(EmailTracker::class)->getArgument(7));
+    }
+
+    public function testTheRealEnvPlaceholderValidationPassAcceptsAnEnvBackedBase(): void
+    {
+        $container = $this->container(['doctrine']);
+        $container->setParameter('kernel.bundles', ['NowoInstanceSettingsBundle' => 'x', 'SecurityBundle' => 'y', 'DoctrineBundle' => 'z']);
+        $container->registerExtension(new NowoMailKitExtension());
+        $container->loadFromExtension('nowo_mail_kit', ['tracking' => ['enabled' => true, 'policy' => 'app.policy', 'public_base_url' => '%env(DEFAULT_URI)%']]);
+
+        // Merge runs the extension with placeholders; the validation pass then re-processes the configuration with
+        // every placeholder replaced by its type default ("" for a scalar).
+        (new MergeExtensionConfigurationPass())->process($container);
+        (new ValidateEnvPlaceholdersPass())->process($container);
+
+        self::assertTrue($container->hasDefinition(EmailTracker::class));
+        self::assertArrayHasKey('DEFAULT_URI', $container->getEnvCounters());
+    }
+
+    /**
+     * @return iterable<string, array{0: string}>
+     */
+    public static function badLiteralBases(): iterable
+    {
+        yield 'empty' => [''];
+        yield 'javascript' => ['javascript:x'];
+        yield 'user info' => ['http://user@host'];
+    }
+
+    #[DataProvider('badLiteralBases')]
+    public function testALiteralEmptyOrInvalidBaseFailsTheBuildInTheExtension(string $base): void
+    {
+        $container = $this->container(['doctrine']);
+        $this->expectException(InvalidConfigurationException::class);
+        $this->expectExceptionMessage('absolute http(s) URL');
+        (new NowoMailKitExtension())->load([['tracking' => ['enabled' => true, 'policy' => 'app.policy', 'public_base_url' => $base]]], $container);
     }
 
     public function testALiteralInvalidBaseStillFailsTheBuild(): void

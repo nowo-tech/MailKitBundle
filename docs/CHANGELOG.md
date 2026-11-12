@@ -64,6 +64,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **1.10.1 regression: `public_base_url: '%env(DEFAULT_URI)%'` still failed `cache:clear`.** Symfony's
+  `ValidateEnvPlaceholdersPass` re-processes the configuration with each env placeholder replaced by `""`, which the
+  1.10.1 validator rejected. `Configuration` now lets `""` through; the extension, which sees the real value, rejects a
+  literal that is empty or not a valid URL (`javascript:x` still fails the build) and accepts an env placeholder
+  (re-checked at runtime, failing closed as before). `enabled: true` without `public_base_url` still fails.
+- **`EmailTracker` argument 7 compatibility.** A host compiler pass that sets argument 7 to the full pixel base (base +
+  path prefix, as before 1.10.1) no longer gets the prefix twice (pixel route 404): the prefix is appended only when
+  the base does not already end with it.
+
 ## [1.10.1] - 2026-11-12
 
 ### Fixed

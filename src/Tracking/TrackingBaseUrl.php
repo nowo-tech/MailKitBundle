@@ -29,6 +29,9 @@ abstract class TrackingBaseUrl
         return is_string($value) && preg_match('/env_[0-9a-f]{16}_\w+/', $value) === 1;
     }
 
+    /**
+     * Whether the value is an absolute http(s) URL with a host and no user info, query or fragment.
+     */
     public static function isValid(mixed $value): bool
     {
         if (!is_string($value) || preg_match('#^https?://[^/\s?\#@]+(/[^\s?\#]*)?\z#i', $value) !== 1) {

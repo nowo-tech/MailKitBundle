@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[1.9.1] - 2026-11-12](#191---2026-11-12)
   - [Fixed](#fixed)
   - [Security](#security)
 - [[1.9.0] - 2026-11-12](#190---2026-11-12)
@@ -56,6 +57,8 @@ All notable changes to this project are documented here. The format follows
   - [Security (re-verification follow-ups)](#security-re-verification-follow-ups)
 
 ## [Unreleased]
+
+## [1.9.1] - 2026-11-12
 
 Next patch: 1.9.1.
 

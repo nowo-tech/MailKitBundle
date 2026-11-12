@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[1.9.0] - 2026-11-12](#190---2026-11-12)
   - [Added](#added)
   - [Changed](#changed)
   - [Audit NQ (before the 1.9.0 tag)](#audit-nq-before-the-190-tag)
@@ -53,6 +54,8 @@ All notable changes to this project are documented here. The format follows
   - [Security (re-verification follow-ups)](#security-re-verification-follow-ups)
 
 ## [Unreleased]
+
+## [1.9.0] - 2026-11-12
 
 Next minor: 1.9.0 (Beacon spec 229 block B, D-20261112-09: inbound client e-mail from the Graph mailbox).
 
@@ -128,7 +131,6 @@ Next minor: 1.9.0 (Beacon spec 229 block B, D-20261112-09: inbound client e-mail
   `nowo:mail-kit:graph:subscriptions --delete` offboards a mailbox. I3: delta links are followed only when shaped as a user's
   mail-folder message delta (`users/{id}/…` or `users('{id}')/…` with `mailFolders` and `messages/delta`); an
   identifier other than the profile's address (Graph often uses the object id) is logged once per run and followed. I7: renewals purge old idempotency records too. I9: see the dependencies.
-
 
 ### Audit NQ-v (verification, before the 1.9.0 tag)
 

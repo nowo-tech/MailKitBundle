@@ -32,6 +32,12 @@ final class GraphException extends RuntimeException
     /** Network failure, timeout or an unreadable answer. */
     public const REASON_TRANSPORT = 'transport';
 
+    /**
+     * The send call failed in a way that does not prove the message stayed unsent (timeout, 5xx, throttling) and its
+     * draft state could not be read: not retryable, to avoid a duplicate (audit NK-1).
+     */
+    public const REASON_AMBIGUOUS = 'ambiguous';
+
     /** The message breaks a configured limit or the MIME / attachment rules. */
     public const REASON_INVALID_MESSAGE = 'invalid_message';
 
@@ -107,6 +113,20 @@ final class GraphException extends RuntimeException
             $code,
             $requestId,
             $throttled ? $retryAfter : null,
+        );
+    }
+
+    /**
+     * The outcome of a send is unknown (see {@see REASON_AMBIGUOUS}); keeps the status, code and request id.
+     */
+    public static function ambiguous(self $cause): self
+    {
+        return new self(
+            'Microsoft Graph send outcome is unknown (' . $cause->getMessage() . ' and the draft state could not be read); not retried to avoid a duplicate.',
+            self::REASON_AMBIGUOUS,
+            $cause->status,
+            $cause->graphCode,
+            $cause->requestId,
         );
     }
 

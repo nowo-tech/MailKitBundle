@@ -14,6 +14,7 @@ use Psr\Log\LoggerInterface;
 use Symfony\Component\Mailer\Exception\TransportException;
 use Symfony\Component\Mailer\SentMessage;
 use Symfony\Component\Mailer\Transport\AbstractTransport;
+use Symfony\Component\Messenger\Exception\UnrecoverableExceptionInterface;
 use Symfony\Component\Mime\Address;
 use Symfony\Component\Mime\Email;
 use Symfony\Component\Mime\Exception\ExceptionInterface as MimeException;
@@ -26,6 +27,7 @@ use Symfony\Component\Mime\Part\DataPart;
 
 use function array_key_exists;
 use function array_values;
+use function interface_exists;
 use function is_string;
 use function preg_match;
 use function preg_match_all;
@@ -84,6 +86,11 @@ final class GraphTransport extends AbstractTransport
             $result = $this->sender->send($this->toGraph($email, $message->getEnvelope()->getRecipients()), $this->profile);
         } catch (GraphException $exception) {
             // GraphException messages are built by MailKit (no body, URL, token or secret): safe to pass on.
+            // Unknown outcome (audit NK-1): Messenger must not retry (the message may have been sent).
+            if ($exception->reason === GraphException::REASON_AMBIGUOUS && interface_exists(UnrecoverableExceptionInterface::class)) {
+                throw new GraphUnrecoverableTransportException($exception->getMessage(), $exception->status ?? 0, $exception);
+            }
+
             throw new TransportException($exception->getMessage(), $exception->status ?? 0, $exception);
         }
 

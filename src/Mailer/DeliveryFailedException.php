@@ -9,6 +9,7 @@ use SensitiveParameter;
 use Symfony\Component\Mailer\Exception\HttpTransportException;
 use Symfony\Component\Mailer\Exception\TransportException;
 use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
+use Symfony\Component\Messenger\Exception\UnrecoverableExceptionInterface;
 use Throwable;
 
 use function bin2hex;
@@ -27,8 +28,10 @@ use function trim;
  * correlation reference. Provider response bodies (HTTP API bridges) never reach the caller, the sent-mail log, the
  * flash or the Messenger failure transport — only the HTTP status; the scrubbed detail goes to the application log
  * under the same reference. The original exception is not kept as `previous` (it may carry credentials or bodies).
+ *
+ * Not final since 1.8: {@see UnrecoverableDeliveryFailedException} keeps Messenger's "do not retry" marker.
  */
-final class DeliveryFailedException extends TransportException
+class DeliveryFailedException extends TransportException
 {
     /** Longest transport message kept (SMTP answers). */
     public const PUBLIC_MAX = 300;
@@ -73,6 +76,9 @@ final class DeliveryFailedException extends TransportException
             $message = sprintf('Mail delivery failed: %s (reference %s).', substr((string) strrchr('\\' . $exception::class, '\\'), 1), $reference);
         }
 
-        return new self($message, $reference, $detail);
+        // Keep Messenger's "do not retry" marker (a Graph send with an unknown outcome, audit NK-1).
+        return $exception instanceof UnrecoverableExceptionInterface
+            ? new UnrecoverableDeliveryFailedException($message, $reference, $detail)
+            : new self($message, $reference, $detail);
     }
 }

@@ -82,7 +82,7 @@ nowo_mail_kit:
         mailbox_provider: null         # service id implementing Graph\GraphMailboxProviderInterface; null = profiles below
         default_profile: default       # profile used when the caller names none
         profiles: {}                   # name => { tenant_id, client_id, client_secret, mailbox } (use %env()%)
-        http_client: http_client       # keep the decorated client so HttpLog records the calls
+        http_client: http_client       # keep the decorated client so HttpLog counts the calls
         token_cache: cache.app         # PSR-6 pool of the app-only tokens
         timeout: 30.0                  # idle deadline of one Graph / token call, seconds (1 … 300)
         upload_hosts: [outlook.office.com, outlook.office365.com]  # accepted upload session hosts (HTTPS)
@@ -219,7 +219,7 @@ changes. Microsoft 365 setup: [MICROSOFT-GRAPH-SETUP.md](MICROSOFT-GRAPH-SETUP.m
 | `profiles.<name>.client_id` | — | Application (client) id (GUID). Required. |
 | `profiles.<name>.client_secret` | — | Client secret. Required. Use `%env(…)%` (resolved at runtime); never commit it. |
 | `profiles.<name>.mailbox` | — | Shared mailbox address; the From of every message. Required. |
-| `http_client` | `http_client` | HTTP client service. Keep the default (decorated by HttpLog when installed, so the calls appear under the `microsoft_graph` provider with redaction). Every call uses `max_redirects: 0` and the timeout below. |
+| `http_client` | `http_client` | HTTP client service. Keep the default (decorated by HttpLog when installed): the calls are counted under the outbound provider **you declare** for `graph.microsoft.com`, `login.microsoftonline.com` and the upload hosts (e.g. `microsoft_graph`). HttpLog never records bodies, query strings or headers. Every call uses `max_redirects: 0` and the timeout below. |
 | `token_cache` | `cache.app` | PSR-6 pool of the access tokens, key = SHA-256 of tenant, client id and secret fingerprint; stored until 5 minutes before expiry (the expiry is also checked on read). Tokens are bearer credentials valid for about an hour: on a shared or persistent cache, use a pool with an encrypting marshaller (`SodiumMarshaller`) or `cache.adapter.array` per worker. |
 | `timeout` | `30.0` | Idle deadline of one call (the total per call is 4×, the token request 2×). 1 … 300 s. |
 | `upload_hosts` | `[outlook.office.com, outlook.office365.com]` | Hosts accepted in the upload session URL Graph returns (HTTPS, port 443, no user info, exact match, lower-cased). Any other URL is refused before a byte is sent (SSRF guard). |

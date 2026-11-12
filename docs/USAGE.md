@@ -712,10 +712,13 @@ in [CONFIGURATION.md](CONFIGURATION.md#graph). Nothing changes while `graph.enab
    and a **draft** is created from it (`POST /users/{mailbox}/messages`, base64 MIME, immutable ids). Graph's JSON
    `internetMessageHeaders` only take custom `x-` headers, which is why MailKit uses the MIME path: it is the one
    that keeps the RFC 5322 threading headers.
-3. Bcc recipients are set on the draft; each attachment is added (below 3 MiB in one call, from 3 MiB with an upload
-   session in 3.75 MiB chunks read from the stream).
-4. The draft is sent (`POST …/send`) and saved in Sent Items with the same immutable id. A failure after step 2
-   deletes the draft.
+3. Bcc recipients are set on the draft; each attachment is added (below 2.9 MB in one call, from 2.9 MB with an
+   upload session in 3.75 MiB chunks read from the stream).
+4. The draft is sent (`POST …/send`) and saved in Sent Items with the same immutable id. A failure in step 3, or a
+   definite refusal of the send (4xx), deletes the draft. An ambiguous send failure (network error, timeout, 5xx,
+   429 / 503) reads `isDraft` first: still a draft → deleted, error rethrown (safe to retry); sent → success;
+   unknown → the draft is kept and the send fails with the non-retryable reason `ambiguous` (the mailer transport
+   throws a Messenger `UnrecoverableExceptionInterface`, so the message is not sent twice).
 
 The From address is always the mailbox (Graph sends as that mailbox); only its display name is yours.
 
@@ -801,7 +804,7 @@ $result->conversationId;     // Outlook conversation id (reply fallback)
 ```
 
 `GraphAttachment` sources: `fromPath()` (opened only while uploading), `fromStream()` (a non-seekable stream is
-copied once to `php://temp`, capped), `fromString()`. File names are neutralised (no directory part, no control or
+copied once to `php://temp`, capped at 35 MiB unless you pass `$maxBytes` — pass your `graph.limits.max_attachment_bytes`), `fromString()`. File names are neutralised (no directory part, no control or
 bidi characters, at most 200 characters); a content type that is not a plain `type/subtype` token becomes
 `application/octet-stream`. The HTML is sent as you pass it: sanitise user-written HTML first. The value objects
 hold streams and are not serializable; queue an ID and build the mail in the handler (or use the mailer transport,
@@ -824,7 +827,7 @@ The MIME part (headers and bodies, no attachments) is capped at 2.9 MB so its ba
 
 Everything fails with `Nowo\MailKitBundle\Graph\GraphException` (the transport rethrows it as a Mailer
 `TransportException` with the same message): `reason` (`configuration`, `authentication`, `api`, `throttled`,
-`transport`, `invalid_message`, `untrusted_url`), `status`, `graphCode`, `requestId`, `retryAfter`, and
+`transport`, `invalid_message`, `untrusted_url`, `ambiguous`), `status`, `graphCode`, `requestId`, `retryAfter`, and
 `isRetryable()`. Messages contain only those — never a response body, a URL, a token, the secret or message content
 — and no `previous` exception. Throttling (429 / 503) is not retried in the request: retry later (Messenger).
 

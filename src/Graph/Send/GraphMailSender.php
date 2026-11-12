@@ -18,6 +18,7 @@ use function base64_encode;
 use function bin2hex;
 use function count;
 use function fread;
+use function is_bool;
 use function is_string;
 use function max;
 use function min;
@@ -40,7 +41,8 @@ use function strrchr;
  *    upload session (`createUploadSession`, then `PUT` chunks of {@see CHUNK_BYTES} read from the stream, no token,
  *    only to the allowed upload hosts).
  * 4. The draft is sent (`POST /messages/{id}/send`; Exchange saves it in Sent Items with the same immutable id).
- * A failure after step 1 deletes the draft (best effort). The result carries the Graph id, the internetMessageId and
+ * A failure before the send call, or a definite refusal of it, deletes the draft (best effort); an ambiguous send
+ * failure checks `isDraft` first and never deletes a sent message (audit NK-1). The result carries the Graph id, the internetMessageId and
  * the conversation id.
  *
  * Stateless (FrankenPHP worker mode): the mailbox and token are resolved per call. Logs carry the profile, the
@@ -48,8 +50,8 @@ use function strrchr;
  */
 final class GraphMailSender
 {
-    /** Attachments of this size or more go through an upload session (Graph: 3 MB to 150 MB). */
-    public const LARGE_ATTACHMENT_BYTES = 3_145_728;
+    /** Attachments of this size or more go through an upload session (Graph: "3 MB" to 150 MB; 2.9 MB keeps a plain POST's base64 JSON under Graph's 4 MB request limit, audit NK-2). */
+    public const LARGE_ATTACHMENT_BYTES = 2_900_000;
 
     /** Bytes of one upload chunk: 12 × 320 KiB (Graph recommends at most 4 MB per PUT). */
     public const CHUNK_BYTES = 3_932_160;
@@ -101,14 +103,39 @@ final class GraphMailSender
             foreach ($mail->attachments as $attachment) {
                 $this->attach($mailbox, $messagePath, $attachment);
             }
+        } catch (Throwable $exception) {
+            // Before the send call: the message is certainly still a draft.
+            $this->discardDraft($mailbox, $messagePath);
+
+            throw $exception;
+        }
+
+        try {
             $this->api->call($mailbox, 'POST', $messagePath . '/send', [
                 'headers' => ['Prefer' => 'IdType="ImmutableId"'],
                 'body'    => '',
             ], [202], 'send');
-        } catch (Throwable $exception) {
-            $this->discardDraft($mailbox, $messagePath);
+        } catch (GraphException $exception) {
+            if (!$this->ambiguous($exception)) {
+                // A definite refusal (4xx): nothing was sent.
+                $this->discardDraft($mailbox, $messagePath);
 
-            throw $exception;
+                throw $exception;
+            }
+            // Timeout, network error, 5xx, 429 / 503: Exchange may have sent it. With immutable ids the sent copy keeps
+            // the draft's id, so deleting it blindly would move a sent message to Deleted Items (audit NK-1).
+            $isDraft = $this->isDraft($mailbox, $messagePath);
+            if ($isDraft === true) {
+                $this->discardDraft($mailbox, $messagePath);
+
+                throw $exception;
+            }
+            if ($isDraft === null) {
+                $this->logger?->notice('Microsoft Graph send outcome unknown; the draft is kept and the send is not retried.', ['bundle' => 'NowoMailKitBundle', 'profile' => $mailbox->profile, 'status' => $exception->status]);
+
+                throw GraphException::ambiguous($exception);
+            }
+            $this->logger?->notice('Microsoft Graph send call failed but the message was sent.', ['bundle' => 'NowoMailKitBundle', 'profile' => $mailbox->profile, 'status' => $exception->status]);
         }
 
         $internetId = is_string($draft['internetMessageId'] ?? null) && $draft['internetMessageId'] !== '' ? $draft['internetMessageId'] : '<' . $mime['messageId'] . '>';
@@ -174,7 +201,8 @@ final class GraphMailSender
                 $headers->addIdHeader('References', $mail->references);
             }
             if ($mail->to === [] && $mail->cc === []) {
-                // Bcc-only: the MIME needs a recipient header; Exchange takes the real recipients from the draft.
+                // Bcc-only: Symfony Mime refuses to render a message without a To, Cc or Bcc header. Email::toString()
+                // strips Bcc again, so the MIME carries no recipient; delivery relies on the PATCH of bccRecipients.
                 $email->addBcc($this->address($mail->bcc[0]));
             }
             $mime = $email->toString();
@@ -269,6 +297,31 @@ final class GraphMailSender
         }
 
         return $data;
+    }
+
+    /**
+     * A send failure that does not prove the message stayed unsent.
+     */
+    private function ambiguous(GraphException $exception): bool
+    {
+        return $exception->reason === GraphException::REASON_TRANSPORT
+            || $exception->reason === GraphException::REASON_THROTTLED
+            || ($exception->status !== null && $exception->status >= 500);
+    }
+
+    /**
+     * `isDraft` of the message after an ambiguous send: true / false, or null when it cannot be read.
+     */
+    private function isDraft(GraphMailbox $mailbox, string $messagePath): ?bool
+    {
+        try {
+            $state = $this->api->call($mailbox, 'GET', $messagePath . '?$select=isDraft', ['headers' => ['Prefer' => 'IdType="ImmutableId"']], [200], 'read draft state');
+        } catch (GraphException) {
+            return null;
+        }
+        $isDraft = $state['isDraft'] ?? null;
+
+        return is_bool($isDraft) ? $isDraft : null;
     }
 
     private function discardDraft(GraphMailbox $mailbox, string $messagePath): void

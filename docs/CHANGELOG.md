@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[1.8.0] - 2026-11-12](#180---2026-11-12)
   - [Added](#added)
   - [Security](#security)
   - [Tests](#tests)
@@ -47,6 +48,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-11-12
+
 Next minor: 1.8.0 (Beacon spec 229, D-20261112-09: client e-mail threads; the inbound Graph pipeline follows in 1.9.0).
 
 ### Added
@@ -57,9 +60,11 @@ Next minor: 1.8.0 (Beacon spec 229, D-20261112-09: client e-mail threads; the in
   credentials, scope `https://graph.microsoft.com/.default`) and returns a `GraphSendResult`: the immutable Graph id,
   the `internetMessageId` and the conversation id. The message is created as a draft from MIME (the only Graph path
   that keeps `Message-ID`, `In-Reply-To` and `References`; JSON `internetMessageHeaders` accept `x-` headers only),
-  Bcc is set on the draft, attachments are added (below 3 MiB in one call, from 3 MiB through an upload session in
-  3.75 MiB chunks read from the stream), then the draft is sent and saved in Sent Items. A failure after the draft
-  deletes it. `PlusAddress::compose()` / `tag()` build and read plus addresses (`projects+t-42@…`) for a per-thread Reply-To.
+  Bcc is set on the draft, attachments are added (below 2.9 MB in one call, from 2.9 MB through an upload session in
+  3.75 MiB chunks read from the stream), then the draft is sent and saved in Sent Items. A failure before the send
+  call, or a definite refusal of it (4xx), deletes the draft; an ambiguous send failure (network error, timeout, 5xx,
+  429 / 503) reads the draft state first: still a draft → deleted and the error rethrown; sent → success; unknown →
+  the draft is kept and the send fails with the non-retryable reason `ambiguous`. `PlusAddress::compose()` / `tag()` build and read plus addresses (`projects+t-42@…`) for a per-thread Reply-To.
 - **`microsoft+graph://<profile>` mailer transport** (`GraphTransportFactory`, tag `mailer.transport_factory`):
   standard hosts send a Mailer `Email` through Graph as a named transport or `MAILER_DSN` (queued e-mails stay
   serializable). The `SentMessage` carries Graph's internetMessageId; envelope-only recipients become Bcc. The DSN
@@ -93,6 +98,23 @@ Next minor: 1.8.0 (Beacon spec 229, D-20261112-09: client e-mail threads; the in
   subject line breaks are removed; message ids are validated before they reach a header.
 - Limits checked before any Graph call: attachments per e-mail, bytes per attachment (≤ 150 MiB), bytes per e-mail,
   and the MIME part capped at 2.9 MB.
+- Audit NK (before the 1.8.0 tag):
+  - NK-1 (Medium): an ambiguous failure of the send call no longer deletes the draft blindly (with immutable ids the
+    sent copy keeps the draft's id, so a delete could move a sent message to Deleted Items, and a retry duplicated
+    it). The draft state decides (see above); an unknown outcome is `GraphException::REASON_AMBIGUOUS`
+    (`isRetryable()` false), thrown by the transport as `GraphUnrecoverableTransportException` and kept by
+    `DeliveryFailedException::from()` as `UnrecoverableDeliveryFailedException` (both Messenger
+    `UnrecoverableExceptionInterface`), so Messenger does not retry it. `DeliveryFailedException` is no longer `final`.
+  - NK-2 (Low): upload sessions from 2.9 MB (`GraphMailSender::LARGE_ATTACHMENT_BYTES` = `MAX_MIME_BYTES`), so a
+    plain attachment POST stays under Graph's 4 MB request limit after base64.
+  - NK-3 (Low): `GraphAttachment::fromStream()` spools a non-seekable stream up to 35 MiB by default
+    (`GraphSendLimits::DEFAULT_MAX_BYTES`, was 150 MiB); pass your attachment limit as `$maxBytes`.
+  - NK-4 (Info): upload URL host check removes one trailing dot only and refuses a leading dot, empty labels and a
+    port written other than `:443` (e.g. `:0443`).
+  - NK-5 (Info): HttpLog wording: HttpLog never records bodies, query strings or headers; `microsoft_graph` is a
+    provider the host declares.
+  - NK-6 (Info): comment of the Bcc-only rendering fixed (the placeholder Bcc only satisfies Symfony Mime; delivery
+    relies on the PATCH of `bccRecipients`).
 
 ### Tests
 

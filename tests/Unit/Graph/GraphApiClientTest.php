@@ -140,12 +140,18 @@ final class GraphApiClientTest extends TestCase
         $api = $this->api();
         $api->assertUploadUrl('https://outlook.office.com/upload/x?authtoken=a');
         $api->assertUploadUrl('https://OUTLOOK.office365.com:443/upload/x');
+        $api->assertUploadUrl('https://outlook.office.com.:443?x=1');
+        $api->assertUploadUrl('https://outlook.office.com./upload/x');
         foreach ([
             'http://outlook.office.com/upload/x',
             'https://evil.example/upload',
             'https://outlook.office.com.evil.example/x',
             'https://user:pw@outlook.office.com/x',
             'https://outlook.office.com:8443/x',
+            'https://outlook.office.com:0443/x',
+            'https://outlook.office.com../x',
+            'https://.outlook.office.com/x',
+            'https://outlook..office.com/x',
             'https://169.254.169.254/latest/meta-data',
             'not a url',
             '//outlook.office.com/x',

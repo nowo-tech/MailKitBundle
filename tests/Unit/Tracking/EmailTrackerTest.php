@@ -344,6 +344,16 @@ final class EmailTrackerTest extends TestCase
         self::assertTrue($this->logger->has('Mail tracking skipped: the e-mail is sent untracked.'));
     }
 
+    public function testAHostThatSetsTheFullPixelBaseDoesNotGetThePrefixTwice(): void
+    {
+        // Beacon-style compiler pass: argument 7 = DEFAULT_URI + "/e/o", the extension still passes "/e/o" last.
+        foreach (['https://app.example.com/e/o', 'https://app.example.com/e/o/'] as $full) {
+            $tracked = $this->trackerWithBase($full)->track($this->email());
+            self::assertNotNull($tracked);
+            self::assertSame(1, preg_match('~<img src="https://app\.example\.com/e/o/[A-Za-z0-9_-]{48}\.gif"~', (string) $tracked->email->getHtmlBody()));
+        }
+    }
+
     public function testBaseUrlRules(): void
     {
         self::assertFalse(TrackingBaseUrl::isPlaceholder(null));

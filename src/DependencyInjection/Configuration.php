@@ -783,7 +783,7 @@ final class Configuration implements ConfigurationInterface
                     ->info('Absolute https URL of the application the pixel is served from (e.g. "https://app.example.com" or "%env(DEFAULT_URI)%", an env value is re-checked when first used); required when enabled (Messenger workers have no request).')
                     ->defaultNull()
                     ->validate()
-                        ->ifTrue(static fn (mixed $v): bool => $v !== null && !TrackingBaseUrl::isPlaceholder($v) && !TrackingBaseUrl::isValid($v))
+                        ->ifTrue(static fn (mixed $v): bool => $v !== null && $v !== '' && !TrackingBaseUrl::isPlaceholder($v) && !TrackingBaseUrl::isValid($v))
                         ->thenInvalid('nowo_mail_kit.tracking.public_base_url must be an absolute http(s) URL without user info, query or fragment, got %s.')
                     ->end()
                     ->validate()

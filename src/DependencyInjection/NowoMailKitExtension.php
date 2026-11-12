@@ -117,6 +117,7 @@ use Nowo\MailKitBundle\Tracking\OpenRecorder;
 use Nowo\MailKitBundle\Tracking\Store\TrackingSchemaListener;
 use Nowo\MailKitBundle\Tracking\Store\TrackingStore;
 use Nowo\MailKitBundle\Tracking\TrackableLinkFilterInterface;
+use Nowo\MailKitBundle\Tracking\TrackingBaseUrl;
 use Nowo\MailKitBundle\Tracking\TrackingRecipientResolverInterface;
 use Nowo\MailKitBundle\Tracking\TrackingTokenSigner;
 use Nowo\MailKitBundle\Twig\MailKitBrandTwigExtension;
@@ -512,6 +513,11 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         /** @var array{enabled: bool, policy: string, link_rewriter: string|null, link_filter: string|null, recipient_resolver: string|null, public_base_url: string, path_prefix: string, secret: string|null, previous_secrets: list<string>, retention: string, purge_batch_size: int, connection: string|null, bus: string|null, extra_never_track_templates: list<string>, max_opens_per_send: int, skip_redacted: bool, max_html_bytes: int, links: array{allowed_hosts: list<string>, allowed_path_prefixes: list<string>, credential_query_parameters: list<string>, credential_path_segments: list<string>, essential_patterns: list<string>, max_links: int}, machine_opens: array{user_agents: list<string>, ip_ranges: list<string>}} $tracking */
         if (!$tracking['enabled']) {
             return;
+        }
+        // Configuration lets "" through (ValidateEnvPlaceholdersPass re-processes the config with every env placeholder
+        // replaced by ""); here the real value is known: a literal must be a valid URL, an env value is re-checked at runtime.
+        if (!TrackingBaseUrl::isPlaceholder($tracking['public_base_url']) && !TrackingBaseUrl::isValid($tracking['public_base_url'])) {
+            throw new InvalidConfigurationException('nowo_mail_kit.tracking.public_base_url must be an absolute http(s) URL without user info, query or fragment (or an env placeholder such as %env(DEFAULT_URI)%).');
         }
         if (!$hasDoctrine) {
             throw new LogicException('NowoMailKitBundle: nowo_mail_kit.tracking requires doctrine/doctrine-bundle (DBAL connection of the tracking table).');

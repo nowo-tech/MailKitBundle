@@ -9,6 +9,8 @@ use Nowo\MailKitBundle\Graph\GraphException;
 use Nowo\MailKitBundle\Graph\GraphMailbox;
 use Nowo\MailKitBundle\Graph\GraphMailboxProviderInterface;
 use Nowo\MailKitBundle\Graph\GraphTokenProvider;
+use Nowo\MailKitBundle\Graph\Send\DeleteGraphDraft;
+use Nowo\MailKitBundle\Graph\Send\DeleteGraphDraftHandler;
 use Nowo\MailKitBundle\Graph\Send\GraphAttachment;
 use Nowo\MailKitBundle\Graph\Send\GraphMailSender;
 use Nowo\MailKitBundle\Graph\Send\GraphOutgoingMail;
@@ -16,11 +18,13 @@ use Nowo\MailKitBundle\Graph\Send\GraphRecipient;
 use Nowo\MailKitBundle\Graph\Send\GraphSendLimits;
 use Nowo\MailKitBundle\Graph\Send\PlusAddress;
 use Nowo\MailKitBundle\Tests\Support\GraphApiMock;
+use Nowo\MailKitBundle\Tests\Support\RecordingBus;
 use Nowo\MailKitBundle\Tests\Support\RecordingLogger;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Cache\Adapter\ArrayAdapter;
 use Symfony\Component\HttpClient\Exception\TransportException;
 use Symfony\Component\HttpClient\Response\MockResponse;
+use Symfony\Component\Messenger\Stamp\DelayStamp;
 
 use function base64_decode;
 use function file_put_contents;
@@ -40,7 +44,7 @@ final class GraphMailSenderTest extends TestCase
 
     private RecordingLogger $logger;
 
-    private int $recheckDelay = 0;
+    private ?RecordingBus $cleanupBus = null;
 
     protected function setUp(): void
     {
@@ -64,7 +68,7 @@ final class GraphMailSenderTest extends TestCase
         };
         $api = new GraphApiClient($client, new GraphTokenProvider($client, new ArrayAdapter()), GraphApiClient::DEFAULT_UPLOAD_HOSTS, 5.0, $this->logger);
 
-        return new GraphMailSender($mailboxes, $api, $limits ?? new GraphSendLimits(), $this->logger, $this->recheckDelay);
+        return new GraphMailSender($mailboxes, $api, $limits ?? new GraphSendLimits(), $this->logger, $this->cleanupBus, 5000);
     }
 
     /**
@@ -296,14 +300,14 @@ final class GraphMailSenderTest extends TestCase
     }
 
     /**
-     * 1.9: after an ambiguous send, a draft is read twice (with a pause) before it is deleted.
+     * 1.9 (audit NQ-L5): without a clean-up bus a draft is read twice before it is deleted; with one, a delayed message
+     * deletes it later only if it is still a draft.
      */
-    public function testAmbiguousSendIsReadTwiceBeforeDeleting(): void
+    public function testAmbiguousSendIsReadTwiceOrCleanedUpLater(): void
     {
         $this->mock->override = static fn (string $method, string $url): ?MockResponse => str_contains($url, '/send') ? new MockResponse('', ['http_code' => 503]) : null;
 
         // Draft at first, sent by the second read: success, nothing deleted.
-        $this->recheckDelay      = 1000;
         $this->mock->draftStates = [true, false];
         $result                  = $this->sender()->send($this->mail());
         self::assertSame('<own-1@example.com>', $result->internetMessageId);
@@ -319,8 +323,31 @@ final class GraphMailSenderTest extends TestCase
         $this->mock->draftStates = [true, null];
         $this->assertFailure($this->mail(), GraphException::REASON_AMBIGUOUS);
         self::assertCount(0, $this->mock->matching('/messages/draft-', 'DELETE'));
-        $this->mock->override   = null;
+
+        // With a clean-up bus: nothing deleted now, a delayed DeleteGraphDraft instead; the worker never blocks.
+        $bus                     = new RecordingBus();
+        $this->cleanupBus        = $bus;
+        $this->mock->requests    = [];
+        $this->mock->draftStates = [];
+        $this->mock->draftState  = true;
+        $this->assertFailure($this->mail(), GraphException::REASON_THROTTLED);
+        self::assertCount(0, $this->mock->matching('/messages/draft-', 'DELETE'));
+        self::assertCount(1, $this->mock->matching('$select=isDraft', 'GET'));
+        self::assertEquals([new DeleteGraphDraft('acme', 'draft-projects@example.com-4')], $bus->messages);
+        self::assertEquals([new DelayStamp(5000)], $bus->stamps[0]);
+        $this->mock->override = null;
+
+        // The delayed message deletes only a draft.
+        $handler                = new DeleteGraphDraftHandler($this->sender());
+        $this->mock->requests   = [];
+        $this->mock->draftState = false;
+        $handler(new DeleteGraphDraft('acme', 'draft-x'));
+        self::assertCount(0, $this->mock->matching('/messages/draft-x', 'DELETE'));
         $this->mock->draftState = true;
+        self::assertTrue($this->sender()->deleteDraftIfStillDraft('acme', 'draft-x'));
+        self::assertCount(1, $this->mock->matching('/messages/draft-x', 'DELETE'));
+        self::assertTrue($this->logger->has('draft of an unsent message deleted'));
+        self::assertTrue($this->logger->has('nothing deleted'));
     }
 
     public function testAttachmentPathBoundary(): void

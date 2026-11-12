@@ -75,6 +75,11 @@ final class InboundValueObjectsTest extends TestCase
         self::assertNull($odd->dkim);
         self::assertFalse((new AuthenticationResults('pass', null, 'fail'))->aligned());
         self::assertTrue((new AuthenticationResults(null, 'pass'))->aligned());
+
+        // Trusted only for mail Exchange received from outside (audit NQ-L4).
+        self::assertSame('pass', AuthenticationResults::fromExchange('spf=pass', ' anonymous ')->spf);
+        self::assertNull(AuthenticationResults::fromExchange('spf=pass', 'Internal')->spf);
+        self::assertNull(AuthenticationResults::fromExchange('spf=pass', null)->spf);
     }
 
     public function testLimits(): void
@@ -125,5 +130,6 @@ final class InboundValueObjectsTest extends TestCase
         self::assertSame(['acme', 'id'], [(new FetchGraphMessage('acme', 'id'))->profile, (new FetchGraphMessage('acme', 'id'))->graphMessageId]);
         self::assertNull((new SweepGraphMailbox())->profile);
         self::assertSame('acme', (new RenewGraphSubscriptions('acme'))->profile);
+        self::assertSame(RenewGraphSubscriptions::REMOVED, (new RenewGraphSubscriptions('acme', RenewGraphSubscriptions::REMOVED))->reason);
     }
 }

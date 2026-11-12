@@ -7,11 +7,16 @@ namespace Nowo\MailKitBundle\Graph\Inbound;
 use function in_array;
 use function preg_match;
 use function strtolower;
+use function trim;
 
 /**
  * SPF / DKIM / DMARC verdicts of an inbound message (1.9), read from the **first** (topmost) `Authentication-Results`
  * header — the one added by Exchange Online when it received the message; headers further down were written by
  * other hops or by the sender and are ignored. A verdict is one of {@see VERDICTS}, or null when absent.
+ *
+ * Trusted only for mail Exchange received from outside the organization (`X-MS-Exchange-Organization-AuthAs:
+ * Anonymous`, audit NQ-L4); internal mail, or a message without that marker, has null verdicts. These are a coarse
+ * spam / spoofing signal — never a user authentication (neither is a plus-address tag).
  */
 final class AuthenticationResults
 {
@@ -40,6 +45,15 @@ final class AuthenticationResults
         }
 
         return new self(self::verdict($value, 'spf'), self::verdict($value, 'dkim'), self::verdict($value, 'dmarc'));
+    }
+
+    /**
+     * Verdicts of the first `Authentication-Results` value, only when Exchange marked the message as received from
+     * outside (`X-MS-Exchange-Organization-AuthAs: Anonymous`); otherwise none.
+     */
+    public static function fromExchange(?string $authenticationResults, ?string $authAs): self
+    {
+        return strtolower(trim((string) $authAs)) === 'anonymous' ? self::fromHeader($authenticationResults) : new self();
     }
 
     /**

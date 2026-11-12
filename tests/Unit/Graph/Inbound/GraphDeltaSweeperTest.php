@@ -101,7 +101,12 @@ final class GraphDeltaSweeperTest extends TestCase
 
     public function testLinksOutsideGraphAreNeverFollowed(): void
     {
-        foreach (['@odata.nextLink' => 'https://evil.example/v1.0/steal', '@odata.deltaLink' => 'https://graph.microsoft.com.evil.example/v1.0/x'] as $key => $link) {
+        foreach ([
+            ['@odata.nextLink', 'https://evil.example/v1.0/steal'],
+            ['@odata.deltaLink', 'https://graph.microsoft.com.evil.example/v1.0/x'],
+            ['@odata.nextLink', 'https://graph.microsoft.com/v1.0/users/support%40example.org/mailFolders/inbox/messages/delta?$skiptoken=x'],
+            ['@odata.deltaLink', 'https://graph.microsoft.com/v1.0/users/projects%40example.com.evil/messages/delta'],
+        ] as [$key, $link]) {
             $this->store->deleteDeltaLink('acme');
             $this->pages(['changeType=created' => ['value' => [], $key => $link]]);
             try {
@@ -112,6 +117,7 @@ final class GraphDeltaSweeperTest extends TestCase
             }
             self::assertNull($this->store->deltaLink('acme'));
             self::assertCount(0, $this->mock->matching('evil.example'));
+            self::assertCount(0, $this->mock->matching('support%40example.org'));
         }
 
         // A stored link that is not Graph (tampered table) is refused too.

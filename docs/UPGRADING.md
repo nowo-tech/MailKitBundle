@@ -34,14 +34,18 @@ composer update nowo-tech/mail-kit-bundle
 ```
 
 Next minor: 1.9.0. **No change is needed**: the Graph inbound pipeline is opt-in (`nowo_mail_kit.graph.inbound.enabled`,
-default `false`); with it off no route, table, handler or command is added. New runtime requirements:
-`symfony/html-sanitizer` and `ext-fileinfo` (installed by Composer / present in standard PHP builds). New sender
-option `graph.send_recheck_delay_ms` (default 2000): after an ambiguous send failure the draft state is read a second
-time before the draft is deleted.
+default `false`); with it off no route, table, handler or command is added and no new package is required.
+`graph.inbound` needs `symfony/messenger`, `symfony/html-sanitizer` and the PHP `fileinfo` extension (suggested; the
+container refuses to compile without them). New sender option `graph.draft_cleanup` (`bus`, `delay_ms`): after an
+ambiguous send failure a delayed `DeleteGraphDraft` message deletes the draft only if it is still a draft (route it
+to a transport that supports delays); without a bus the draft state is read once more at once.
+
+The default `graph.inbound.limits.allowed_types` does **not** include `application/zip` (owner decision 2026-11-12):
+add it explicitly if your users must send archives (their content is not scanned).
 
 To read the shared mailbox ([USAGE](USAGE.md#inbound-mail-from-a-graph-mailbox)):
 
-1. Require `symfony/messenger` and route `Nowo\MailKitBundle\Graph\Inbound\Message\FetchGraphMessage`,
+1. Require `symfony/messenger` and `symfony/html-sanitizer` (and the `fileinfo` extension), and route `Nowo\MailKitBundle\Graph\Inbound\Message\FetchGraphMessage`,
    `SweepGraphMailbox` and `RenewGraphSubscriptions` to an async transport.
 2. Implement `GraphInboundHandlerInterface` (route / quarantine / discard; copy attachment streams inside the call).
 3. Enable it:

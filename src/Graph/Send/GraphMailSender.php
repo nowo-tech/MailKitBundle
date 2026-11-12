@@ -9,6 +9,8 @@ use Nowo\MailKitBundle\Graph\GraphException;
 use Nowo\MailKitBundle\Graph\GraphMailbox;
 use Nowo\MailKitBundle\Graph\GraphMailboxProviderInterface;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\Messenger\MessageBusInterface;
+use Symfony\Component\Messenger\Stamp\DelayStamp;
 use Symfony\Component\Mime\Address;
 use Symfony\Component\Mime\Email;
 use Symfony\Component\Mime\Exception\ExceptionInterface as MimeException;
@@ -27,7 +29,6 @@ use function rawurlencode;
 use function sprintf;
 use function strlen;
 use function strrchr;
-use function usleep;
 
 /**
  * Sends an e-mail from a shared mailbox through Microsoft Graph with app-only credentials (1.8).
@@ -64,14 +65,17 @@ final class GraphMailSender
      * @param GraphMailboxProviderInterface $mailboxes mailbox port (configured profiles or the host's)
      * @param GraphApiClient $api Graph client
      * @param GraphSendLimits $limits limits checked before any call
-     * @param int $recheckDelayMicroseconds pause before reading `isDraft` a second time after an ambiguous send (1.9)
+     * @param MessageBusInterface|null $cleanupBus receives a delayed {@see DeleteGraphDraft} after an ambiguous send
+     *                                             that still reads as a draft (1.9, `graph.draft_cleanup.bus`)
+     * @param int $cleanupDelayMs delay of that message, in milliseconds
      */
     public function __construct(
         private readonly GraphMailboxProviderInterface $mailboxes,
         private readonly GraphApiClient $api,
         private readonly GraphSendLimits $limits = new GraphSendLimits(),
         private readonly ?LoggerInterface $logger = null,
-        private readonly int $recheckDelayMicroseconds = 2_000_000,
+        private readonly ?MessageBusInterface $cleanupBus = null,
+        private readonly int $cleanupDelayMs = 5000,
     ) {
     }
 
@@ -128,14 +132,16 @@ final class GraphMailSender
             // Timeout, network error, 5xx, 429 / 503: Exchange may have sent it. With immutable ids the sent copy keeps
             // the draft's id, so deleting it blindly would move a sent message to Deleted Items (audit NK-1).
             $isDraft = $this->isDraft($mailbox, $messagePath);
+            if ($isDraft === true && $this->cleanupBus instanceof MessageBusInterface) {
+                // Exchange may still be processing a send it accepted (1.9, audit NQ-L5): never block the worker;
+                // a delayed message deletes the draft later only if it is still a draft.
+                $this->cleanupBus->dispatch(new DeleteGraphDraft($mailbox->profile, $id), [new DelayStamp($this->cleanupDelayMs)]);
+
+                throw $exception;
+            }
             if ($isDraft === true) {
-                // Exchange may still be processing a send it accepted: look again after a short pause (1.9). A send
-                // that completes after the second read is still deleted with its draft (residual race, documented).
-                if ($this->recheckDelayMicroseconds > 0) {
-                    // Rare failure path, bounded by graph.send_recheck_delay_ms (0 disables it): a short pause beats
-                    // deleting a message Exchange is still sending.
-                    usleep($this->recheckDelayMicroseconds); // @phpstan-ignore frankenphp.hardening.noBlockingSleep
-                }
+                // Without a cleanup bus: read once more at once. A send Exchange completes after this read is still
+                // deleted with its draft (residual race, documented; configure graph.draft_cleanup.bus).
                 $isDraft = $this->isDraft($mailbox, $messagePath);
             }
             if ($isDraft === true) {
@@ -335,6 +341,26 @@ final class GraphMailSender
         $isDraft = $state['isDraft'] ?? null;
 
         return is_bool($isDraft) ? $isDraft : null;
+    }
+
+    /**
+     * Deletes the message when it is still a draft (the delayed clean-up after an ambiguous send); true when deleted.
+     *
+     * @throws GraphException
+     */
+    public function deleteDraftIfStillDraft(string $profile, string $graphId): bool
+    {
+        $mailbox     = $this->mailboxes->mailbox($profile);
+        $messagePath = GraphApiClient::userPath($mailbox) . '/messages/' . rawurlencode($graphId);
+        if ($this->isDraft($mailbox, $messagePath) !== true) {
+            $this->logger?->info('Microsoft Graph draft clean-up: the message was sent or is gone; nothing deleted.', ['bundle' => 'NowoMailKitBundle', 'profile' => $profile]);
+
+            return false;
+        }
+        $this->api->call($mailbox, 'DELETE', $messagePath, [], [204, 404], 'delete draft');
+        $this->logger?->notice('Microsoft Graph draft of an unsent message deleted.', ['bundle' => 'NowoMailKitBundle', 'profile' => $profile]);
+
+        return true;
     }
 
     private function discardDraft(GraphMailbox $mailbox, string $messagePath): void

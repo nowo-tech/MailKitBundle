@@ -53,6 +53,14 @@ final class GraphInboundMessageHandler
         foreach ($this->targets($message->profile) as $profile) {
             $this->sweeper->sweep($profile, $this->maxPages);
         }
+        $this->purge();
+    }
+
+    /**
+     * Deletes idempotency records older than `retention_days` (after sweeps and renewals, audit NQ-I7).
+     */
+    private function purge(): void
+    {
         $this->store->purge(($this->clock ?? new NativeClock())->now()->getTimestamp() - $this->retentionDays * 86_400);
     }
 
@@ -64,12 +72,13 @@ final class GraphInboundMessageHandler
         $failure = null;
         foreach ($this->targets($message->profile) as $profile) {
             try {
-                $this->subscriptions->ensure($profile);
+                $this->subscriptions->ensure($profile, $message->reason);
             } catch (GraphException $exception) {
                 $this->logger?->warning('Microsoft Graph subscription not renewed.', ['bundle' => 'NowoMailKitBundle', 'profile' => $profile, 'reason' => $exception->reason, 'status' => $exception->status]);
                 $failure = $exception;
             }
         }
+        $this->purge();
         if ($failure instanceof GraphException) {
             throw $failure;
         }

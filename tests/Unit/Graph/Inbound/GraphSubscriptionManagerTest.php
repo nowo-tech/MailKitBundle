@@ -9,6 +9,7 @@ use Nowo\MailKitBundle\Graph\GraphApiClient;
 use Nowo\MailKitBundle\Graph\GraphException;
 use Nowo\MailKitBundle\Graph\GraphTokenProvider;
 use Nowo\MailKitBundle\Graph\Inbound\GraphSubscriptionManager;
+use Nowo\MailKitBundle\Graph\Inbound\Message\RenewGraphSubscriptions;
 use Nowo\MailKitBundle\Graph\Inbound\Store\GraphInboundStore;
 use Nowo\MailKitBundle\Tests\Support\GraphApiMock;
 use Nowo\MailKitBundle\Tests\Support\HostGraphMailboxProvider;
@@ -110,6 +111,24 @@ final class GraphSubscriptionManagerTest extends TestCase
         $this->expectException(GraphException::class);
         $this->expectExceptionMessage('no usable id');
         $this->manager()->ensure('acme');
+    }
+
+    public function testLifecycleReasons(): void
+    {
+        $this->manager()->ensure('acme');
+        self::assertSame(GraphSubscriptionManager::REAUTHORIZED, $this->manager()->ensure('acme', RenewGraphSubscriptions::REAUTHORIZE));
+        self::assertCount(1, $this->mock->matching('/subscriptions/sub-1-0000/reauthorize', 'POST'));
+
+        // Removed by Graph: the stored one is forgotten and a new one created.
+        self::assertSame(GraphSubscriptionManager::CREATED, $this->manager()->ensure('acme', RenewGraphSubscriptions::REMOVED));
+        self::assertSame('sub-2-0000', $this->store->subscription('acme')['id'] ?? null);
+
+        // Reauthorizing a subscription Graph no longer knows recreates it; other errors propagate.
+        $this->store->saveSubscription('gone-9', 'acme', 'x', 2_000_000_000);
+        self::assertSame(GraphSubscriptionManager::CREATED, $this->manager()->ensure('acme', RenewGraphSubscriptions::REAUTHORIZE));
+        $this->mock->override = static fn (string $method, string $url): ?MockResponse => str_contains($url, '/reauthorize') ? GraphApiMock::json(['error' => ['code' => 'ErrorAccessDenied']], 403) : null;
+        $this->expectException(GraphException::class);
+        $this->manager()->ensure('acme', RenewGraphSubscriptions::REAUTHORIZE);
     }
 
     public function testRemove(): void

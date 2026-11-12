@@ -195,7 +195,7 @@ final class GraphApiMock
                 : self::json(['nextExpectedRanges' => [($end + 1) . '-']]);
         }
 
-        if (preg_match('#^https://graph\.microsoft\.com/v1\.0/subscriptions(?:/([^/?]+))?$#', $url, $m) === 1) {
+        if (preg_match('#^https://graph\.microsoft\.com/v1\.0/subscriptions(?:/([^/?]+)(/reauthorize)?)?$#', $url, $m) === 1) {
             $token = (string) preg_replace('/^Bearer /', '', $headers['authorization'] ?? '');
             if (!isset($this->tokens[$token])) {
                 return self::json(['error' => ['code' => 'InvalidAuthenticationToken']], 401);
@@ -207,6 +207,9 @@ final class GraphApiMock
                 $this->subscriptionRequests[] = is_array($payload) ? $payload : [];
 
                 return self::json(['id' => 'sub-' . $this->subscriptionCount . '-0000', 'expirationDateTime' => is_array($payload) ? ($payload['expirationDateTime'] ?? null) : null], 201);
+            }
+            if ($method === 'POST' && $sub !== null && isset($m[2])) {
+                return str_starts_with($sub, 'sub-') ? new MockResponse('', ['http_code' => 204]) : self::json(['error' => ['code' => 'ResourceNotFound']], 404);
             }
             if ($method === 'PATCH' && $sub !== null) {
                 if (!str_starts_with($sub, 'sub-')) {

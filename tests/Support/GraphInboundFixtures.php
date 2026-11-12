@@ -47,6 +47,7 @@ final class GraphInboundFixtures
             'body'                   => ['contentType' => 'html', 'content' => '<p>Hello <b>team</b><script>alert(1)</script></p><img src="cid:plan@client">'],
             'hasAttachments'         => false,
             'internetMessageHeaders' => [
+                ['name' => 'X-MS-Exchange-Organization-AuthAs', 'value' => 'Anonymous'],
                 ['name' => 'Authentication-Results', 'value' => 'spf=pass (sender IP is 192.0.2.1) smtp.mailfrom=example.net; dkim=pass header.d=example.net;dmarc=pass action=none header.from=example.net;compauth=pass reason=100'],
                 ['name' => 'Authentication-Results', 'value' => 'spf=fail; dkim=fail; dmarc=fail'],
                 ['name' => 'In-Reply-To', 'value' => '<task-42-1@example.com>'],

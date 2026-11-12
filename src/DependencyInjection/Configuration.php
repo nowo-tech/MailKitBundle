@@ -518,11 +518,13 @@ final class Configuration implements ConfigurationInterface
                     ->min(1.0)
                     ->max(300.0)
                 ->end()
-                ->integerNode('send_recheck_delay_ms')
-                    ->info('1.9: after an ambiguous send failure that still reads as a draft, pause this long and read isDraft again before deleting the draft (0 = no pause). Blocks the worker only on that rare path.')
-                    ->defaultValue(2000)
-                    ->min(0)
-                    ->max(10_000)
+                ->arrayNode('draft_cleanup')
+                    ->info('1.9: after an ambiguous send failure (timeout, 5xx, 429 / 503) whose message still reads as a draft, a delayed DeleteGraphDraft message deletes it later only if it is still a draft. Without a bus the state is read once more at once (residual race).')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->scalarNode('bus')->info('Messenger bus service id of the delayed clean-up (route DeleteGraphDraft to a transport that supports delays); null = no delayed clean-up.')->defaultNull()->end()
+                        ->integerNode('delay_ms')->info('Delay of the clean-up message.')->defaultValue(5000)->min(1000)->max(600_000)->end()
+                    ->end()
                 ->end()
                 ->arrayNode('upload_hosts')
                     ->info('Hosts accepted in attachment upload session URLs returned by Graph (HTTPS only, exact match).')
@@ -635,7 +637,13 @@ final class Configuration implements ConfigurationInterface
                         ->end()
                         ->integerNode('max_body_bytes')->info('Largest notification request read.')->defaultValue(1_048_576)->min(1024)->max(16_777_216)->end()
                         ->integerNode('max_notifications')->info('Most notifications in one request.')->defaultValue(200)->min(1)->max(1000)->end()
-                        ->integerNode('rate_limit')->info('Webhook requests accepted per minute (all senders together; 429 above).')->defaultValue(1200)->min(10)->max(100_000)->end()
+                        ->integerNode('rate_limit')->info('Requests with at least one valid notification accepted per minute (all together; 429 above).')->defaultValue(1200)->min(10)->max(100_000)->end()
+                        ->integerNode('client_rate_limit')->info('Unverified requests (validation, rejected or malformed) accepted per minute and client IP (429 above).')->defaultValue(60)->min(1)->max(100_000)->end()
+                        ->arrayNode('allowed_ips')
+                            ->info('Optional source allow-list (addresses or CIDR ranges, e.g. the Microsoft 365 Graph change-notification ranges); empty = any. Behind a proxy, configure framework.trusted_proxies.')
+                            ->scalarPrototype()->cannotBeEmpty()->end()
+                            ->defaultValue([])
+                        ->end()
                     ->end()
                 ->end()
                 ->arrayNode('subscriptions')
@@ -686,11 +694,25 @@ final class Configuration implements ConfigurationInterface
                 ->end()
             ->end()
             ->validate()
+                ->ifTrue(static fn (array $v): bool => ($v['retention_days'] ?? 30) * 86_400 <= self::durationSeconds((string) ($v['sweep']['initial_window'] ?? 'P2D')) + 86_400)
+                ->thenInvalid('nowo_mail_kit.graph.inbound.retention_days must exceed graph.inbound.sweep.initial_window by more than one day (records of messages the first sweep can see again must still exist).')
+            ->end()
+            ->validate()
                 ->ifTrue(static fn (array $v): bool => ($v['enabled'] ?? false) === true && (!is_string($v['handler'] ?? null) || $v['handler'] === ''))
                 ->thenInvalid('nowo_mail_kit.graph.inbound.enabled needs graph.inbound.handler (your GraphInboundHandlerInterface service).')
             ->end();
 
         return $node;
+    }
+
+    /**
+     * Seconds of a validated `PnD` / `PTnH` / `PnDTnH` duration.
+     */
+    public static function durationSeconds(string $duration): int
+    {
+        preg_match('/^P(?:(\d+)D)?(?:T(\d+)H)?\z/', $duration, $m);
+
+        return (int) ($m[1] ?? 0) * 86_400 + (int) ($m[2] ?? 0) * 3600;
     }
 
     /**

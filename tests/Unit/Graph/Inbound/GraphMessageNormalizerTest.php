@@ -45,6 +45,7 @@ final class GraphMessageNormalizerTest extends TestCase
         self::assertSame('Hello team', $message->text);
         self::assertSame('2026-11-12T10:00:00+00:00', $message->receivedAt?->format(DATE_ATOM));
         self::assertSame(['pass', 'pass', 'pass'], [$message->authentication->spf, $message->authentication->dkim, $message->authentication->dmarc]);
+        self::assertFalse($message->oversized);
         self::assertFalse($message->forwarded);
         self::assertSame([], $message->attachments);
     }

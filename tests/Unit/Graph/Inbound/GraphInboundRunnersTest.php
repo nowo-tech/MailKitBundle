@@ -41,6 +41,7 @@ use Symfony\Component\Console\Tester\CommandTester;
 use Symfony\Component\HttpClient\Response\MockResponse;
 
 use function str_contains;
+use function strtok;
 
 /**
  * Messenger handler, console commands and the ORM schema listener of the inbound pipeline.
@@ -97,7 +98,7 @@ final class GraphInboundRunnersTest extends TestCase
         $handler->fetch(new FetchGraphMessage('acme', 'm1'));
         self::assertCount(1, $this->host->messages);
 
-        $this->mock->override = static fn (string $method, string $url): ?MockResponse => str_contains($url, '/delta') ? GraphApiMock::json(['value' => [['id' => 'x1']], '@odata.deltaLink' => 'https://graph.microsoft.com/v1.0/users/x/messages/delta?$deltatoken=1']) : null;
+        $this->mock->override = static fn (string $method, string $url): ?MockResponse => str_contains($url, '/delta') ? GraphApiMock::json(['value' => [['id' => 'x1']], '@odata.deltaLink' => strtok($url, '?') . '?$deltatoken=1']) : null;
         $this->store->claim('acme', 'old@x', 900);
         $this->clock->modify('+31 days');
         $handler->sweep(new SweepGraphMailbox());
@@ -107,7 +108,10 @@ final class GraphInboundRunnersTest extends TestCase
         self::assertCount(3, $this->bus->messages);
 
         $this->mock->override = null;
+        $this->store->claim('acme', 'renew-purge@x', 900);
+        $this->clock->modify('+31 days');
         $handler->renew(new RenewGraphSubscriptions());
+        self::assertTrue($this->store->claim('acme', 'renew-purge@x', 900), 'Renewals purge too.');
         self::assertNotNull($this->store->subscription('acme'));
         self::assertNotNull($this->store->subscription('globex'));
 
@@ -145,15 +149,15 @@ final class GraphInboundRunnersTest extends TestCase
         self::assertSame("acme: created\nglobex: created\n", $command->getDisplay());
         self::assertSame(0, $command->execute(['--profile' => 'acme']));
         self::assertSame("acme: current\n", $command->getDisplay());
-        self::assertSame(0, $command->execute(['--remove' => true, '--profile' => 'acme']));
-        self::assertSame("acme: removed\n", $command->getDisplay());
-        self::assertSame(0, $command->execute(['--remove' => true, '--profile' => 'acme']));
+        self::assertSame(0, $command->execute(['--delete' => true, '--profile' => 'acme']));
+        self::assertSame("acme: deleted\n", $command->getDisplay());
+        self::assertSame(0, $command->execute(['--delete' => true, '--profile' => 'acme']));
         self::assertSame("acme: none\n", $command->getDisplay());
         self::assertSame(1, $command->execute(['--profile' => 'initech']));
         self::assertStringContainsString('initech: Unknown organization.', $command->getDisplay());
 
         $sweep                = new CommandTester(new GraphSweepCommand($handler));
-        $this->mock->override = static fn (string $method, string $url): ?MockResponse => str_contains($url, 'delta') ? GraphApiMock::json(['value' => [], '@odata.deltaLink' => 'https://graph.microsoft.com/v1.0/x/delta?$deltatoken=1']) : null;
+        $this->mock->override = static fn (string $method, string $url): ?MockResponse => str_contains($url, 'delta') ? GraphApiMock::json(['value' => [], '@odata.deltaLink' => strtok($url, '?') . '?$deltatoken=1']) : null;
         self::assertSame(0, $sweep->execute(['--profile' => 'acme']));
         self::assertSame("Sweep done.\n", $sweep->getDisplay());
         self::assertSame(1, $sweep->execute(['--profile' => 'initech']));

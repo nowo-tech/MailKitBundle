@@ -18,7 +18,7 @@ use function sprintf;
 
 /**
  * `nowo:mail-kit:graph:subscriptions` (1.9): creates or renews the change-notification subscriptions (schedule it at
- * least hourly), or removes them with `--remove`.
+ * least hourly), or deletes them with `--delete`.
  */
 #[AsCommand(name: self::NAME, description: 'Create or renew the Microsoft Graph change-notification subscriptions of the inbound mailboxes.')]
 final class GraphSubscriptionsCommand extends Command
@@ -40,7 +40,7 @@ final class GraphSubscriptionsCommand extends Command
     {
         $this
             ->addOption('profile', null, InputOption::VALUE_REQUIRED, 'Only this mailbox profile')
-            ->addOption('remove', null, InputOption::VALUE_NONE, 'Delete the subscriptions instead');
+            ->addOption('delete', null, InputOption::VALUE_NONE, 'Delete the subscriptions instead (offboarding a mailbox)');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -49,8 +49,8 @@ final class GraphSubscriptionsCommand extends Command
         $status  = Command::SUCCESS;
         foreach (is_string($profile) && $profile !== '' ? [$profile] : $this->profiles->inboundProfiles() as $name) {
             try {
-                $outcome = $input->getOption('remove') === true
-                    ? ($this->subscriptions->delete($name) ? 'removed' : 'none')
+                $outcome = $input->getOption('delete') === true
+                    ? ($this->subscriptions->delete($name) ? 'deleted' : 'none')
                     : $this->subscriptions->ensure($name);
                 $output->writeln(sprintf('%s: %s', $name, $outcome));
             } catch (GraphException $exception) {

@@ -61,15 +61,16 @@ final class GraphMessageNormalizer
      * @param array<mixed> $data Graph message resource
      * @param list<InboundAttachment> $attachments
      * @param bool $attachedMessage an attached e-mail (item attachment) was found
+     * @param bool $oversized the message was over the size limit: no body or headers were read
      */
-    public function normalize(string $profile, string $mailbox, array $data, array $attachments, bool $attachedMessage): GraphInboundMessage
+    public function normalize(string $profile, string $mailbox, array $data, array $attachments, bool $attachedMessage, bool $oversized = false): GraphInboundMessage
     {
-        $headers = $this->headers($data['internetMessageHeaders'] ?? null);
+        $headers = $oversized ? [] : $this->headers($data['internetMessageHeaders'] ?? null);
         $to      = $this->recipients($data['toRecipients'] ?? null, $mailbox);
         $cc      = $this->recipients($data['ccRecipients'] ?? null, $mailbox);
         $subject = mb_substr(trim((string) preg_replace('/[\x00-\x1F\x7F\s]+/u', ' ', $this->string($data['subject'] ?? null))), 0, self::MAX_SUBJECT);
 
-        $body    = is_array($data['body'] ?? null) ? $data['body'] : [];
+        $body    = !$oversized && is_array($data['body'] ?? null) ? $data['body'] : [];
         $content = $this->string($body['content'] ?? null);
         $html    = null;
         if (strtolower($this->string($body['contentType'] ?? null)) === 'html') {
@@ -123,9 +124,10 @@ final class GraphMessageNormalizer
             html: $html,
             receivedAt: $this->date($data['receivedDateTime'] ?? null),
             attachments: $attachments,
-            authentication: AuthenticationResults::fromHeader($headers['authentication-results'][0] ?? null),
+            authentication: AuthenticationResults::fromExchange($headers['authentication-results'][0] ?? null, $headers['x-ms-exchange-organization-authas'][0] ?? null),
             forwarded: $forwarded,
             plusTags: array_keys($tags),
+            oversized: $oversized,
         );
     }
 

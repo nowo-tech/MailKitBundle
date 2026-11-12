@@ -64,7 +64,10 @@ final class GraphConfigurationTest extends TestCase
         $custom = $this->process(['inbound' => ['limits' => ['allowed_types' => ['IMAGE/*']], 'webhook' => ['notification_url' => 'https://app.example.com/hooks/mail-kit/v1/graph']]])['inbound'];
         self::assertIsArray($custom);
         self::assertSame(['image/*'], $custom['limits']['allowed_types']);
-        self::assertSame(2000, $this->process([])['send_recheck_delay_ms']);
+        self::assertSame(['bus' => null, 'delay_ms' => 5000], $this->process([])['draft_cleanup']);
+        self::assertNotContains('application/zip', $inbound['limits']['allowed_types']);
+        self::assertSame(60, $inbound['webhook']['client_rate_limit']);
+        self::assertSame([], $inbound['webhook']['allowed_ips']);
     }
 
     public function testRequireInterface(): void
@@ -102,6 +105,7 @@ final class GraphConfigurationTest extends TestCase
         yield 'notification url http' => [['inbound' => ['webhook' => ['notification_url' => 'http://app.example.com/h']]], 'absolute https:// URL'];
         yield 'notification url userinfo' => [['inbound' => ['webhook' => ['notification_url' => 'https://u:p@app.example.com/h']]], 'absolute https:// URL'];
         yield 'sweep window' => [['inbound' => ['sweep' => ['initial_window' => 'P1Y']]], 'initial_window'];
+        yield 'retention shorter than the sweep window' => [['inbound' => ['retention_days' => 2, 'sweep' => ['initial_window' => 'P2DT1H']]], 'retention_days must exceed'];
         yield 'lifetime' => [['inbound' => ['subscriptions' => ['lifetime_minutes' => 20_000]]], 'lifetime_minutes'];
     }
 

@@ -21,7 +21,6 @@ final class InboundLimits
         'image/webp',
         'text/plain',
         'text/csv',
-        'application/zip',
         'application/msword',
         'application/vnd.ms-excel',
         'application/vnd.ms-powerpoint',

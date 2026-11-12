@@ -7,6 +7,7 @@ namespace Nowo\MailKitBundle\Graph\Inbound;
 use DateInterval;
 use Nowo\MailKitBundle\Graph\GraphApiClient;
 use Nowo\MailKitBundle\Graph\GraphException;
+use Nowo\MailKitBundle\Graph\GraphMailbox;
 use Nowo\MailKitBundle\Graph\GraphMailboxProviderInterface;
 use Nowo\MailKitBundle\Graph\Inbound\Message\FetchGraphMessage;
 use Nowo\MailKitBundle\Graph\Inbound\Store\GraphInboundStore;
@@ -17,8 +18,14 @@ use Symfony\Component\Messenger\MessageBusInterface;
 
 use function is_array;
 use function is_string;
+use function parse_url;
 use function preg_match;
+use function rawurldecode;
 use function rawurlencode;
+use function str_starts_with;
+use function strtolower;
+
+use const PHP_URL_PATH;
 
 /**
  * Delta sweep of a mailbox folder (1.9): catches messages whose change notification was missed, and is the only
@@ -68,6 +75,7 @@ final class GraphDeltaSweeper
                 $since = ($this->clock ?? new NativeClock())->now()->sub(new DateInterval($this->initialWindow))->format('Y-m-d\TH:i:s\Z');
                 $data  = $this->api->call($mailbox, 'GET', GraphApiClient::userPath($mailbox) . '/mailFolders/' . rawurlencode($this->folder) . '/messages/delta?changeType=created&$select=id&$filter=' . rawurlencode('receivedDateTime ge ' . $since), $options, [200], 'delta sweep');
             } else {
+                $this->assertMailboxLink($mailbox, $link);
                 $data = $this->api->callUrl($mailbox, 'GET', $link, $options, [200], 'delta sweep');
             }
 
@@ -82,7 +90,7 @@ final class GraphDeltaSweeper
                 $delta = $data['@odata.deltaLink'] ?? null;
                 $next  = $data['@odata.nextLink'] ?? null;
                 if (is_string($delta)) {
-                    $this->api->assertGraphUrl($delta, 'delta sweep');
+                    $this->assertMailboxLink($mailbox, $delta);
                     $this->store->saveDeltaLink($profile, $delta);
 
                     return $this->done($profile, $pages, $dispatched, true);
@@ -90,7 +98,7 @@ final class GraphDeltaSweeper
                 if (!is_string($next)) {
                     return $this->done($profile, $pages, $dispatched, false);
                 }
-                $this->api->assertGraphUrl($next, 'delta sweep');
+                $this->assertMailboxLink($mailbox, $next);
                 $this->store->saveDeltaLink($profile, $next);
                 if ($pages >= $maxPages) {
                     return $this->done($profile, $pages, $dispatched, false);
@@ -107,6 +115,21 @@ final class GraphDeltaSweeper
             }
 
             throw $exception;
+        }
+    }
+
+    /**
+     * A link is followed only on Graph v1.0 **and** under this profile's mailbox (`/v1.0/users/{mailbox}/`, audit
+     * NQ-I3), so a tampered stored link or a confused answer cannot read another mailbox with this token.
+     *
+     * @throws GraphException
+     */
+    private function assertMailboxLink(GraphMailbox $mailbox, string $url): void
+    {
+        $this->api->assertGraphUrl($url, 'delta sweep');
+        $path = strtolower(rawurldecode((string) parse_url($url, PHP_URL_PATH)));
+        if (!str_starts_with($path, '/v1.0/users/' . $mailbox->address . '/')) {
+            throw GraphException::untrustedUrl('delta sweep');
         }
     }
 

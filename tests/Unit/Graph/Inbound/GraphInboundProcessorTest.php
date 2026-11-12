@@ -25,7 +25,6 @@ use RuntimeException;
 use Symfony\Component\Cache\Adapter\ArrayAdapter;
 use Symfony\Component\HttpClient\Response\MockResponse;
 
-use function base64_encode;
 use function print_r;
 use function str_contains;
 use function str_repeat;
@@ -99,7 +98,7 @@ final class GraphInboundProcessorTest extends TestCase
         $message = $this->handler->messages[0];
         self::assertTrue($message->forwarded, 'An attached e-mail marks the message as forwarded.');
         [$pdf, $exe, $png, $item, $reference] = $message->attachments;
-        self::assertSame(['offer.pdf', 'application/pdf', true], [$pdf->filename, $pdf->contentType, $pdf->isAccepted()]);
+        self::assertSame(['offer.pdf', 'application/pdf', true, 'offer.pdf'], [$pdf->filename, $pdf->contentType, $pdf->isAccepted(), $pdf->safeFilename]);
         self::assertSame([InboundAttachment::REJECTED_TYPE, 'application/pdf'], [$exe->rejection, $exe->declaredContentType]);
         self::assertNotSame('application/pdf', $exe->contentType);
         self::assertSame(['image/png', 'plan@client', true], [$png->contentType, $png->contentId, $png->inline]);
@@ -151,28 +150,40 @@ final class GraphInboundProcessorTest extends TestCase
         $this->processor(new InboundLimits(maxAttachmentBytes: 1000))->process('acme', 'm3');
         self::assertSame(InboundAttachment::REJECTED_SIZE, $this->handler->messages[0]->attachments[0]->rejection);
 
-        // Inline attachment with broken base64 / over the cap.
+        // Inline parts: Content-ID from the metadata, bytes from $value; dangerous extensions are never downloaded;
+        // a name whose extension disagrees with the detected type gets a safe name.
         $this->handler->messages = [];
         $this->deliver('m4', [
-            ['contentBytes' => '***'] + $this->file('a1', 'x.png', '', 'image/png', 10, true),
-            ['contentBytes' => base64_encode(str_repeat('p', 2000))] + $this->file('a2', 'y.png', '', 'image/png', 10, true),
-            $this->file('a3', 'z.png', GraphInboundFixtures::PNG, 'image/png', null, true, 'bad cid'),
+            self::file('a1', 'logo.png', GraphInboundFixtures::PNG, 'image/png', null, true, '<logo@client>'),
+            self::file('a2', 'z.png', GraphInboundFixtures::PNG, 'image/png', null, true, 'bad cid'),
+            self::file('a3', 'report.pdf.html', GraphInboundFixtures::PDF),
+            self::file('a4', 'chart.svg', GraphInboundFixtures::PNG, 'image/png'),
+            self::file('a5', 'photo.pdf', GraphInboundFixtures::PNG, 'application/pdf'),
+            self::file('a6', 'noext', GraphInboundFixtures::PDF),
         ]);
-        $this->processor(new InboundLimits(maxAttachmentBytes: 1000))->process('acme', 'm4');
-        [$broken, $large, $badCid] = $this->handler->messages[0]->attachments;
-        self::assertSame(InboundAttachment::REJECTED_UNREADABLE, $broken->rejection);
-        self::assertSame(InboundAttachment::REJECTED_UNREADABLE, $large->rejection);
+        $this->processor()->process('acme', 'm4');
+        [$logo, $badCid, $html, $svg, $photo, $noext] = $this->handler->messages[0]->attachments;
+        self::assertSame(['logo@client', true, 'logo.png'], [$logo->contentId, $logo->isAccepted(), $logo->safeFilename]);
         self::assertTrue($badCid->isAccepted());
         self::assertNull($badCid->contentId);
+        self::assertSame(InboundAttachment::REJECTED_EXTENSION, $html->rejection);
+        self::assertSame(InboundAttachment::REJECTED_EXTENSION, $svg->rejection);
+        self::assertCount(0, $this->mock->matching('/attachments/a3/$value'));
+        self::assertSame(['image/png', 'photo.png'], [$photo->contentType, $photo->safeFilename]);
+        self::assertSame('noext.pdf', $noext->safeFilename);
+        self::assertCount(1, $this->mock->matching('/attachments/a1?$select=id,contentId,isInline'));
 
-        // The whole message JSON is capped.
+        // Over the message cap: handed over without body or headers, flagged oversized (no endless retry).
+        $this->handler->messages = [];
         $this->deliver('m5', [], ['body' => ['contentType' => 'text', 'content' => str_repeat('a', 100_000)]]);
-        try {
-            $this->processor(new InboundLimits(maxMessageBytes: 65_536))->process('acme', 'm5');
-            self::fail('Over the message cap.');
-        } catch (GraphException $e) {
-            self::assertSame(GraphException::REASON_TOO_LARGE, $e->reason);
-        }
+        $decision = $this->processor(new InboundLimits(maxMessageBytes: 65_536))->process('acme', 'm5');
+        self::assertSame(InboundAction::Route, $decision?->action);
+        $oversized = $this->handler->messages[0];
+        self::assertTrue($oversized->oversized);
+        self::assertSame('', $oversized->text);
+        self::assertSame('Re: Offer for task 42', $oversized->subject);
+        self::assertNull($oversized->inReplyTo);
+        self::assertTrue($this->logger->has('over the size limit'));
     }
 
     public function testGoneInvalidAndFailingMessages(): void

@@ -144,6 +144,7 @@ final class GraphInboundKernelTest extends KernelTestCase
                     'mailbox_provider' => HostGraphMailboxProvider::class,
                     'http_client'      => 'test.graph_http_client',
                     'token_cache'      => 'cache.graph_tokens',
+                    'draft_cleanup'    => ['bus' => 'messenger.default_bus'],
                     'inbound'          => [
                         'enabled' => true,
                         'handler' => RecordingInboundHandler::class,

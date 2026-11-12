@@ -30,6 +30,8 @@ final class GraphInboundMessage
      * @param list<InboundAttachment> $attachments accepted and rejected attachments
      * @param list<string> $plusTags distinct plus-address tags of the mailbox (To, Cc, envelope headers)
      * @param bool $forwarded the message looks forwarded (subject prefix, attached e-mail, forward markers)
+     * @param bool $oversized over `limits.max_message_bytes`: no body, headers, threading headers or authentication
+     *                        results were read (quarantine it, or fetch it yourself)
      */
     public function __construct(
         public readonly string $profile,
@@ -51,6 +53,7 @@ final class GraphInboundMessage
         public readonly AuthenticationResults $authentication,
         public readonly bool $forwarded,
         public readonly array $plusTags,
+        public readonly bool $oversized = false,
     ) {
     }
 }

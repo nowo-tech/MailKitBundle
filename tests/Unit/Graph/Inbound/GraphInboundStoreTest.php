@@ -33,9 +33,9 @@ final class GraphInboundStoreTest extends TestCase
     {
         $store  = $this->inboundStore();
         $secret = 'client-state-REDACTED-TEST';
-        $store->saveSubscription('sub-1', 'acme', $secret, 1000);
-        $store->saveSubscription('sub-2', 'acme', $secret, 2000);
-        self::assertSame(['id' => 'sub-2', 'expires_at' => 2000], $store->subscription('acme'));
+        $store->saveSubscription('sub-1', 'acme', $secret, 1_900_000_000);
+        $store->saveSubscription('sub-2', 'acme', $secret, 2_000_000_000);
+        self::assertSame(['id' => 'sub-2', 'expires_at' => 2_000_000_000], $store->subscription('acme'));
         self::assertNull($store->subscription('globex'));
 
         $stored = $this->inboundConnection?->fetchOne('SELECT client_state_hash FROM mail_kit_graph_subscription');
@@ -46,8 +46,10 @@ final class GraphInboundStoreTest extends TestCase
         self::assertNull($store->verifyNotification('sub-1', $secret));
         self::assertNull($store->verifyNotification('unknown', $secret));
 
+        // An expired subscription no longer authenticates notifications.
         $store->updateSubscriptionExpiry('sub-2', 3000);
         self::assertSame(3000, $store->subscription('acme')['expires_at'] ?? null);
+        self::assertNull($store->verifyNotification('sub-2', $secret));
         $store->deleteSubscription('sub-2');
         self::assertNull($store->subscription('acme'));
     }

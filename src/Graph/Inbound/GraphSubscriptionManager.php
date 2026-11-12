@@ -10,6 +10,7 @@ use Exception;
 use Nowo\MailKitBundle\Graph\GraphApiClient;
 use Nowo\MailKitBundle\Graph\GraphException;
 use Nowo\MailKitBundle\Graph\GraphMailboxProviderInterface;
+use Nowo\MailKitBundle\Graph\Inbound\Message\RenewGraphSubscriptions;
 use Nowo\MailKitBundle\Graph\Inbound\Store\GraphInboundStore;
 use Psr\Clock\ClockInterface;
 use Psr\Log\LoggerInterface;
@@ -41,6 +42,9 @@ final class GraphSubscriptionManager
     /** `ensure()` outcome: a new subscription was created. */
     public const CREATED = 'created';
 
+    /** `ensure()` outcome: the subscription was reauthorized (lifecycle `reauthorizationRequired`). */
+    public const REAUTHORIZED = 'reauthorized';
+
     /** `ensure()` outcome: no notification URL configured. */
     public const DISABLED = 'disabled';
 
@@ -64,13 +68,17 @@ final class GraphSubscriptionManager
     }
 
     /**
-     * Creates or renews the profile's subscription when needed.
+     * Creates or renews the profile's subscription when needed. A lifecycle reason (1.9, audit NQ-L1) forces the
+     * matching action: {@see RenewGraphSubscriptions::REAUTHORIZE} calls `POST /subscriptions/{id}/reauthorize`;
+     * {@see RenewGraphSubscriptions::REMOVED} forgets the stored subscription and creates a new one.
+     *
+     * @param string|null $reason null, RenewGraphSubscriptions::REAUTHORIZE or ::REMOVED
      *
      * @throws GraphException
      *
      * @return string one of the outcome constants
      */
-    public function ensure(string $profile): string
+    public function ensure(string $profile, ?string $reason = null): string
     {
         if ($this->notificationUrl === null) {
             return self::DISABLED;
@@ -79,6 +87,24 @@ final class GraphSubscriptionManager
         $current = $this->store->subscription($profile);
         $mailbox = $this->mailboxes->mailbox($profile);
         $expiry  = $now + $this->lifetimeMinutes * 60;
+        if ($current !== null && $reason === RenewGraphSubscriptions::REMOVED) {
+            $this->store->deleteSubscription($current['id']);
+            $current = null;
+        }
+        if ($current !== null && $reason === RenewGraphSubscriptions::REAUTHORIZE) {
+            try {
+                $this->api->call($mailbox, 'POST', '/subscriptions/' . rawurlencode($current['id']) . '/reauthorize', ['body' => ''], [200, 204], 'reauthorize subscription');
+                $this->log($profile, self::REAUTHORIZED);
+
+                return self::REAUTHORIZED;
+            } catch (GraphException $exception) {
+                if ($exception->status !== 404) {
+                    throw $exception;
+                }
+                $this->store->deleteSubscription($current['id']);
+                $current = null;
+            }
+        }
         if ($current !== null && $current['expires_at'] > $now + $this->renewBeforeMinutes * 60) {
             return self::CURRENT;
         }

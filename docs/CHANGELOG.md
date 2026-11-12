@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows
 - [[Unreleased]](#unreleased)
   - [Added](#added)
   - [Changed](#changed)
+  - [Audit NQ (before the 1.9.0 tag)](#audit-nq-before-the-190-tag)
   - [Security](#security)
   - [Tests](#tests)
 - [[1.8.0] - 2026-11-12](#180---2026-11-12)
@@ -64,9 +65,9 @@ Next minor: 1.9.0 (Beacon spec 229 block B, D-20261112-09: inbound client e-mail
   `/hooks/mail-kit/v1/graph`, stateless): echoes Graph's `validationToken` as `text/plain` (1–1024 printable ASCII
   characters, `nosniff`, `default-src 'none'`), checks every notification against a stored subscription and its
   `clientState` (SHA-256 digests, `hash_equals`), caps the body (`max_body_bytes`), the batch (`max_notifications`) and
-  the rate (`rate_limit` per minute, 429), refuses anything else (400 / 403 / 413 / 415) and only **enqueues**
+  the rate (per-client-IP and verified buckets, 429), refuses anything else (400 / 403 / 413 / 415) and only **enqueues**
   `FetchGraphMessage` (lifecycle events: `RenewGraphSubscriptions` / `SweepGraphMailbox`).
-- **Subscriptions** (`GraphSubscriptionManager`, command `nowo:mail-kit:graph:subscriptions [--profile] [--remove]`,
+- **Subscriptions** (`GraphSubscriptionManager`, command `nowo:mail-kit:graph:subscriptions [--profile] [--delete]`,
   message `RenewGraphSubscriptions`): one per profile on the folder's messages (`created`, immutable ids, lifecycle
   URL), a fresh random 256-bit `clientState` stored as SHA-256 only, renewed `renew_before_minutes` before expiry,
   recreated when Graph forgot it.
@@ -89,14 +90,42 @@ Next minor: 1.9.0 (Beacon spec 229 block B, D-20261112-09: inbound client e-mail
 - Host port `GraphInboundProfilesProviderInterface` (default: `graph.inbound.profiles`, else the default profile).
 - `GraphApiClient::callUrl()` (absolute Graph links, `assertGraphUrl()`), `download()` (streamed into a sink, capped)
   and a response size cap on every call (`GraphException::REASON_TOO_LARGE`).
-- Dependencies: `symfony/html-sanitizer` and `ext-fileinfo` (required); `symfony/messenger` (suggested, required by
-  `graph.inbound`).
+- Dependencies: `symfony/messenger`, `symfony/html-sanitizer` and `ext-fileinfo` are suggested; `graph.inbound`
+  refuses to compile without them (no new hard requirement for hosts that do not read mail).
 
 ### Changed
 
-- After an ambiguous send failure that still reads as a draft, the sender pauses `graph.send_recheck_delay_ms`
-  (default 2000, 0 = none) and reads `isDraft` again before deleting the draft (review of NK-1). A send Exchange
-  completes after the second read is still deleted with its draft (residual race, documented).
+- After an ambiguous send failure that still reads as a draft (review of NK-1, audit NQ-L5): with
+  `graph.draft_cleanup.bus` the sender dispatches a delayed `DeleteGraphDraft` (`DelayStamp`, `delay_ms`, default
+  5 s) that deletes the message only if it is still a draft, and never blocks the worker; without a bus it reads
+  `isDraft` once more at once before deleting (a send Exchange completes after that read is still deleted with its
+  draft: residual race, documented).
+
+### Audit NQ (before the 1.9.0 tag)
+
+- M1: the webhook reads the request body to the cap whatever the stream's chunk size (`php://input` hands out 8 KiB
+  per `fread()`); test with an 8 KiB-chunk stream wrapper.
+- M2: two rate-limit buckets — a per-client-IP bucket for unverified traffic (validation, malformed, rejected;
+  `webhook.client_rate_limit`, default 60 per minute) and the global `webhook.rate_limit` consumed only by requests
+  with a valid notification; each subscription is verified once per request; a request stops with 403 after 5
+  rejected items; optional source allow-list `webhook.allowed_ips` (CIDR).
+- L1: lifecycle events carry a reason: `reauthorizationRequired` → `POST /subscriptions/{id}/reauthorize` (404 →
+  recreate), `subscriptionRemoved` → forget and recreate (`RenewGraphSubscriptions::$reason`).
+- L2: inline attachments stream through `$value` like the others; their Content-ID comes from
+  `?$select=id,contentId,isInline` (no base64 in memory).
+- L3: dangerous extensions (`html`, `svg`, `js`, `php*`, `exe`, `bat`, `ps1`, `lnk`, macro-enabled Office…,
+  `InboundFileTypes::DANGEROUS_EXTENSIONS`) are rejected (`extension`) without being downloaded, whatever the bytes;
+  `InboundAttachment::$safeFilename` carries the extension of the detected type when the name disagrees;
+  **`application/zip` is no longer in the default `allowed_types`** (owner decision 2026-11-12; add it explicitly).
+- L4: SPF / DKIM / DMARC are read only when Exchange marked the message as received from outside
+  (`X-MS-Exchange-Organization-AuthAs: Anonymous`); otherwise null.
+- L5: see Changed.
+- L6: a message over `limits.max_message_bytes` is handed to the host without body or headers, flagged
+  `GraphInboundMessage::$oversized`, instead of failing and retrying forever; `retention_days` must exceed the sweep's
+  `initial_window` by more than a day (checked at compile time).
+- I2: notifications of an expired subscription or of a profile no longer in `inboundProfiles()` are refused;
+  `nowo:mail-kit:graph:subscriptions --delete` offboards a mailbox. I3: delta links are followed only under
+  `/v1.0/users/{mailbox}/` of the profile. I7: renewals purge old idempotency records too. I9: see the dependencies.
 
 ### Security
 

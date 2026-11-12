@@ -723,9 +723,11 @@ in [CONFIGURATION.md](CONFIGURATION.md#graph). Nothing changes while `graph.enab
 4. The draft is sent (`POST …/send`) and saved in Sent Items with the same immutable id. A failure in step 3, or a
    definite refusal of the send (4xx), deletes the draft. An ambiguous send failure (network error, timeout, 5xx,
    429 / 503) reads `isDraft` first: still a draft → deleted, error rethrown (safe to retry); sent → success;
-   unknown → the draft is kept and the send fails with the non-retryable reason `ambiguous`. Since 1.9 a draft
-   is read twice, `graph.send_recheck_delay_ms` apart, before it is deleted; a send Exchange completes after the
-   second read is still deleted with its draft (residual race) (the mailer transport
+   unknown → the draft is kept and the send fails with the non-retryable reason `ambiguous`. Since 1.9, with
+   `graph.draft_cleanup.bus` a delayed `DeleteGraphDraft` (default 5 s) deletes a still-draft message later instead
+   of deleting it at once (the worker never waits); without a bus the state is read once more at once (a send
+   Exchange completes after that read is still deleted with its draft: residual race). Route `DeleteGraphDraft` to a
+   transport that supports delays (Doctrine, Redis, AMQP) (the mailer transport
    throws a Messenger `UnrecoverableExceptionInterface`, so the message is not sent twice).
 
 The From address is always the mailbox (Graph sends as that mailbox); only its display name is yours.
@@ -900,8 +902,10 @@ URL): [MICROSOFT-GRAPH-SETUP.md](MICROSOFT-GRAPH-SETUP.md#webhook-url-requiremen
 ### How a message comes in
 
 1. **Webhook** — Graph POSTs a change notification to `graph.inbound.webhook.path`. MailKit checks the subscription
-   id and its `clientState` (constant time), then only dispatches `FetchGraphMessage(profile, graphId)` and answers
-   202. Lifecycle events dispatch `RenewGraphSubscriptions` (reauthorization, removal) or `SweepGraphMailbox` (missed).
+   (stored, unexpired, of an inbound profile) and its `clientState` (constant time), then only dispatches
+   `FetchGraphMessage(profile, graphId)` and answers 202. Lifecycle events dispatch `RenewGraphSubscriptions` with a
+   reason (`reauthorize` → `POST /subscriptions/{id}/reauthorize`; `removed` → recreate) or `SweepGraphMailbox`
+   (missed).
 2. **Delta sweep** — `nowo:mail-kit:graph:sweep` (or `SweepGraphMailbox`) walks the folder's delta query from the stored
    link and dispatches the same `FetchGraphMessage` for every new message: missed notifications and hosts without a
    public URL. The first run reads back `sweep.initial_window` only.
@@ -943,6 +947,9 @@ security:
     access_control:
         - { path: '^/hooks/mail-kit/', roles: PUBLIC_ACCESS }
 ```
+
+Offboarding a mailbox: drop its profile from `inboundProfiles()` (its notifications are refused at once) and run
+`nowo:mail-kit:graph:subscriptions --profile=<name> --delete`.
 
 Tables: `doctrine:migrations:diff` picks up `mail_kit_graph_subscription`, `mail_kit_graph_delta` and
 `mail_kit_graph_inbound` (with `doctrine.table_prefix`) through a `postGenerateSchema` listener; without migrations,
@@ -987,9 +994,10 @@ final class TaskMailInbound implements GraphInboundHandlerInterface
 | `subject`, `text` | Control characters removed; `text` is the text body, or the plain text of the sanitised HTML. |
 | `html` | Sanitised (see below), or null for a text-only message. Still render it in a sandboxed / CSP-restricted view. |
 | `internetMessageId`, `inReplyTo`, `references`, `conversationId` | Threading ids (no angle brackets; References oldest first, newest 100). |
-| `authentication` | `AuthenticationResults` (`spf`, `dkim`, `dmarc`, `aligned()`) of the **first** `Authentication-Results` header (Exchange's); a coarse signal for your quarantine rule. |
+| `authentication` | `AuthenticationResults` (`spf`, `dkim`, `dmarc`, `aligned()`) of the **first** `Authentication-Results` header, only for mail Exchange received from outside (`X-MS-Exchange-Organization-AuthAs: Anonymous`), else null verdicts. A coarse spam signal for your quarantine rule — **not** a user authentication (neither is a plus-address tag: anyone can write to it). |
+| `oversized` | The message was over `limits.max_message_bytes`: subject, addresses and ids only (no body, headers, threading headers or verdicts). Quarantine it or fetch it yourself. |
 | `forwarded` | Subject prefix (`Fwd:`, `RV:`, `WG:` …), an attached e-mail, `Resent-From` / `X-Forwarded-*` headers or a forward marker in the text. |
-| `attachments` | `InboundAttachment`: neutralised `filename`, `declaredContentType` (informative), `contentType` **detected** with finfo, `size`, `inline` / `contentId` (for `cid:` images), `stream()` while your handler runs, or a `rejection` (`type`, `size`, `count`, `total_size`, `unsupported`, `unreadable`). |
+| `attachments` | `InboundAttachment`: neutralised `filename`, `safeFilename` (extension of the detected type — store and serve under this name), `declaredContentType` (informative), `contentType` **detected** with finfo, `size`, `inline` / `contentId` (for `cid:` images), `stream()` while your handler runs, or a `rejection` (`type`, `extension`, `size`, `count`, `total_size`, `unsupported`). Serve stored files with the detected type, `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`. |
 
 HTML sanitising (symfony/html-sanitizer): safe elements and attributes only — no `script`, `style`, `iframe`, `form`,
 event handlers or `style` attributes; links `http` / `https` / `mailto` with `rel="noopener noreferrer nofollow"`; no
@@ -1025,7 +1033,8 @@ inside your open transaction uses a savepoint). Commit your own writes inside `h
 Every inbound service is stateless: the mailbox, token and profile are resolved per message, attachment streams are
 closed when the message is done, and nothing is kept between requests or messages (tested with 600 webhook requests
 for two organizations in one kernel without the services resetter). Limits: `webhook.max_body_bytes`,
-`max_notifications`, `rate_limit`; `limits.*` for the message and its attachments. Logs carry the profile, the decision
+`max_notifications`, `rate_limit` (verified requests), `client_rate_limit` (unverified, per client IP),
+`allowed_ips`; `limits.*` for the message and its attachments (`application/zip` must be added explicitly). Logs carry the profile, the decision
 and counts — never addresses, subjects, bodies or file names.
 
 ## Admin UI

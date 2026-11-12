@@ -107,16 +107,18 @@ final class GraphInboundStore
     }
 
     /**
-     * The profile of a notification when its subscription is known and its client state matches (constant-time
+     * The profile of a notification when its subscription is known and unexpired and its client state matches (constant-time
      * comparison of SHA-256 digests), else null.
      */
     public function verifyNotification(string $subscriptionId, string $clientState): ?string
     {
-        $row      = $this->connection()->fetchAssociative('SELECT profile, client_state_hash FROM ' . $this->subscriptionTable() . ' WHERE subscription_id = ?', [$subscriptionId]);
+        $row      = $this->connection()->fetchAssociative('SELECT profile, client_state_hash, expires_at FROM ' . $this->subscriptionTable() . ' WHERE subscription_id = ?', [$subscriptionId]);
         $expected = $row !== false && is_string($row['client_state_hash'] ?? null) ? $row['client_state_hash'] : hash('sha256', 'nowo-mail-kit-unknown-subscription');
         $valid    = hash_equals($expected, hash('sha256', $clientState));
+        // An expired subscription no longer authenticates notifications (audit NQ-I2).
+        $current = $row !== false && is_numeric($row['expires_at'] ?? null) && (int) $row['expires_at'] > $this->now();
 
-        return $valid && $row !== false && is_string($row['profile'] ?? null) ? $row['profile'] : null;
+        return $valid && $current && is_string($row['profile'] ?? null) ? $row['profile'] : null;
     }
 
     /**

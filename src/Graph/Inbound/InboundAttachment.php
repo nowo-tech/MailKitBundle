@@ -15,7 +15,12 @@ use function rewind;
  * (capped, read-only for the host, deleted when MailKit finishes the message: copy it inside
  * {@see GraphInboundHandlerInterface::handle()}); its content type is the one **detected** from the bytes (finfo),
  * never the declared one. A **rejected** attachment has no stream and a reason: `type` (detected type not allowed),
- * `size`, `count`, `total_size`, `unsupported` (item / reference attachment, e.g. an attached e-mail) or `unreadable`.
+ * `size`, `count`, `total_size`, `unsupported` (item / reference attachment, e.g. an attached e-mail) or `extension` (a dangerous extension such as `.html`,
+ * `.svg`, `.js`, `.exe`, see {@see InboundFileTypes::DANGEROUS_EXTENSIONS}).
+ *
+ * Store and serve accepted files under {@see $safeFilename} (extension consistent with the detected type), with the
+ * detected `Content-Type`, `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`. ZIP archives and
+ * legacy Office files (when a host allows them) are not scanned inside.
  *
  * File names are neutralised (no directory part, control or bidi characters).
  */
@@ -36,8 +41,8 @@ final class InboundAttachment
     /** Rejection: not a file attachment (an attached e-mail, a cloud link). */
     public const REJECTED_UNSUPPORTED = 'unsupported';
 
-    /** Rejection: the bytes could not be downloaded. */
-    public const REJECTED_UNREADABLE = 'unreadable';
+    /** Rejection: a dangerous extension (`.html`, `.svg`, `.js`, `.exe`…), whatever the bytes (audit NQ-L3). */
+    public const REJECTED_EXTENSION = 'extension';
 
     /**
      * @param string $filename neutralised file name
@@ -46,6 +51,7 @@ final class InboundAttachment
      * @param int $size bytes (downloaded, or as declared by Graph when rejected)
      * @param resource|null $stream temporary stream of an accepted attachment
      * @param string|null $rejection one of the REJECTED_* reasons, null when accepted
+     * @param string|null $safeFilename name with the extension of the detected type (accepted attachments)
      */
     public function __construct(
         public readonly string $filename,
@@ -56,6 +62,7 @@ final class InboundAttachment
         public readonly ?string $contentId,
         private readonly mixed $stream,
         public readonly ?string $rejection,
+        public readonly ?string $safeFilename = null,
     ) {
     }
 

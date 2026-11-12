@@ -16,12 +16,10 @@ use Psr\Log\LoggerInterface;
 use Throwable;
 
 use function assert;
-use function base64_decode;
 use function count;
 use function fclose;
 use function fopen;
 use function fread;
-use function fwrite;
 use function is_array;
 use function is_bool;
 use function is_numeric;
@@ -30,7 +28,6 @@ use function is_string;
 use function preg_match;
 use function rawurlencode;
 use function rewind;
-use function strlen;
 use function strtolower;
 use function trim;
 
@@ -52,6 +49,12 @@ final class GraphInboundProcessor
 
     /** Fields read from Graph. */
     public const SELECT = 'id,internetMessageId,conversationId,subject,from,sender,replyTo,toRecipients,ccRecipients,receivedDateTime,body,hasAttachments,internetMessageHeaders';
+
+    /** Fields read from an oversized message (no body, no headers). */
+    public const SELECT_OVERSIZED = 'id,internetMessageId,conversationId,subject,from,sender,replyTo,toRecipients,ccRecipients,receivedDateTime,hasAttachments';
+
+    /** Cap of the oversized message's envelope read. */
+    private const MAX_OVERSIZED_BYTES = 262_144;
 
     /** Bytes of an attachment read for the content type detection. */
     private const SNIFF_BYTES = 65_536;
@@ -86,6 +89,8 @@ final class GraphInboundProcessor
         $mailbox = $this->mailboxes->mailbox($profile);
         $path    = GraphApiClient::userPath($mailbox) . '/messages/' . rawurlencode($graphMessageId);
 
+        $oversized = false;
+
         try {
             $data = $this->api->call($mailbox, 'GET', $path . '?$select=' . self::SELECT, [
                 'headers' => ['Prefer' => 'outlook.body-content-type="html", IdType="ImmutableId"'],
@@ -96,8 +101,16 @@ final class GraphInboundProcessor
 
                 return null;
             }
-
-            throw $exception;
+            if ($exception->reason !== GraphException::REASON_TOO_LARGE) {
+                throw $exception;
+            }
+            // Over limits.max_message_bytes (audit NQ-L6): hand the host the envelope without body or headers, flagged
+            // `oversized`, instead of failing (and retrying) forever.
+            $data = $this->api->call($mailbox, 'GET', $path . '?$select=' . self::SELECT_OVERSIZED, [
+                'headers' => ['Prefer' => 'IdType="ImmutableId"'],
+            ], [200], 'read message', self::MAX_OVERSIZED_BYTES);
+            $oversized = true;
+            $this->logger?->notice('Microsoft Graph inbound message over the size limit; handed over without its body.', ['bundle' => 'NowoMailKitBundle', 'profile' => $profile]);
         }
 
         $internetMessageId = trim(is_string($data['internetMessageId'] ?? null) ? $data['internetMessageId'] : '', '<> ');
@@ -115,7 +128,7 @@ final class GraphInboundProcessor
             if (($data['hasAttachments'] ?? false) === true) {
                 [$attachments, $attachedMessage] = $this->attachments($mailbox, $path);
             }
-            $message  = $this->normalizer->normalize($profile, $mailbox->address, $data, $attachments, $attachedMessage);
+            $message  = $this->normalizer->normalize($profile, $mailbox->address, $data, $attachments, $attachedMessage, $oversized);
             $decision = $this->handler->handle($message);
             $this->store->complete($profile, $key, $decision->action);
         } catch (Throwable $exception) {
@@ -169,6 +182,7 @@ final class GraphInboundProcessor
 
             $rejection = match (true) {
                 $type !== '#microsoft.graph.fileAttachment' || preg_match(self::ID_PATTERN, $id) !== 1 => InboundAttachment::REJECTED_UNSUPPORTED,
+                InboundFileTypes::dangerous(InboundFileTypes::extension($name))                        => InboundAttachment::REJECTED_EXTENSION,
                 count($attachments) >= $this->limits->maxAttachments                                   => InboundAttachment::REJECTED_COUNT,
                 $size > $this->limits->maxAttachmentBytes                                              => InboundAttachment::REJECTED_SIZE,
                 $total + $size > $this->limits->maxTotalAttachmentBytes                                => InboundAttachment::REJECTED_TOTAL_SIZE,
@@ -193,31 +207,22 @@ final class GraphInboundProcessor
 
     private function download(GraphMailbox $mailbox, string $path, string $name, string $declared, bool $inline): InboundAttachment
     {
+        $contentId = null;
+        if ($inline) {
+            // Inline parts: the Content-ID the HTML refers to (`cid:`); the bytes come from $value like any other part.
+            $meta      = $this->api->call($mailbox, 'GET', $path . '?$select=id,contentId,isInline', ['headers' => ['Prefer' => 'IdType="ImmutableId"']], [200], 'read attachment', 65_536);
+            $cid       = is_string($meta['contentId'] ?? null) ? trim($meta['contentId'], '<> ') : '';
+            $contentId = preg_match(GraphAttachment::CONTENT_ID_PATTERN, $cid) === 1 ? $cid : null;
+        }
         $stream = fopen('php://temp/maxmemory:262144', 'w+');
         assert(is_resource($stream));
-        $contentId = null;
 
         try {
-            if ($inline) {
-                // Inline parts: the JSON carries the Content-ID the HTML refers to (`cid:`); inline images are small.
-                $json  = $this->api->call($mailbox, 'GET', $path, ['headers' => ['Prefer' => 'IdType="ImmutableId"']], [200], 'read attachment', (int) ($this->limits->maxAttachmentBytes * 1.4) + 65_536);
-                $bytes = base64_decode(is_string($json['contentBytes'] ?? null) ? $json['contentBytes'] : '', true);
-                if ($bytes === false || strlen($bytes) > $this->limits->maxAttachmentBytes) {
-                    fclose($stream);
-
-                    return new InboundAttachment($name, $declared, null, 0, true, null, null, InboundAttachment::REJECTED_UNREADABLE);
-                }
-                fwrite($stream, $bytes);
-                $cid       = is_string($json['contentId'] ?? null) ? trim($json['contentId'], '<> ') : '';
-                $contentId = preg_match(GraphAttachment::CONTENT_ID_PATTERN, $cid) === 1 ? $cid : null;
-                $size      = strlen($bytes);
-            } else {
-                $size = $this->api->download($mailbox, $path . '/$value', $stream, $this->limits->maxAttachmentBytes, 'read attachment');
-            }
+            $size = $this->api->download($mailbox, $path . '/$value', $stream, $this->limits->maxAttachmentBytes, 'read attachment');
         } catch (GraphException $exception) {
             fclose($stream);
             if ($exception->reason === GraphException::REASON_TOO_LARGE) {
-                return new InboundAttachment($name, $declared, null, 0, $inline, null, null, InboundAttachment::REJECTED_SIZE);
+                return new InboundAttachment($name, $declared, null, 0, $inline, $contentId, null, InboundAttachment::REJECTED_SIZE);
             }
 
             throw $exception;
@@ -231,6 +236,6 @@ final class GraphInboundProcessor
             return new InboundAttachment($name, $declared, $detected, $size, $inline, $contentId, null, InboundAttachment::REJECTED_TYPE);
         }
 
-        return new InboundAttachment($name, $declared, $detected, $size, $inline, $contentId, $stream, null);
+        return new InboundAttachment($name, $declared, $detected, $size, $inline, $contentId, $stream, null, InboundFileTypes::safeFilename($name, $detected));
     }
 }

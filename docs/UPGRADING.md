@@ -4,7 +4,6 @@
 
 - [Unreleased](#unreleased)
 - [To 1.9.1](#to-191)
-- [To 1.9.1](#to-191-1)
 - [To 1.9.0](#to-190)
 - [To 1.8.0](#to-180)
 - [To 1.7.1](#to-171)
@@ -26,14 +25,6 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
-
-## To 1.9.1
-
-From **1.9.0**:
-
-```bash
-composer update nowo-tech/mail-kit-bundle
-```
 
 ## To 1.9.1
 

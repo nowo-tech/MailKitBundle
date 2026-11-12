@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[1.10.0] - 2026-11-12](#1100---2026-11-12)
   - [Added](#added)
   - [Changed](#changed)
   - [Tests](#tests)
@@ -60,6 +61,8 @@ All notable changes to this project are documented here. The format follows
   - [Security (re-verification follow-ups)](#security-re-verification-follow-ups)
 
 ## [Unreleased]
+
+## [1.10.0] - 2026-11-12
 
 Next minor: 1.10.0 (Beacon spec 230 block B, D-20261112-16: e-mail open and click tracking).
 

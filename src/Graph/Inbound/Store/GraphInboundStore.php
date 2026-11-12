@@ -13,6 +13,7 @@ use Psr\Clock\ClockInterface;
 use Symfony\Component\Clock\NativeClock;
 use Throwable;
 
+use function assert;
 use function hash;
 use function hash_equals;
 use function is_numeric;
@@ -162,7 +163,7 @@ final class GraphInboundStore
     /**
      * Forgets the delta link (the next sweep starts again from the initial window).
      */
-    public function clearDeltaLink(string $profile): void
+    public function deleteDeltaLink(string $profile): void
     {
         $this->connection()->executeStatement('DELETE FROM ' . $this->deltaTable() . ' WHERE profile = ?', [$profile]);
     }
@@ -321,7 +322,7 @@ final class GraphInboundStore
     public function connection(): Connection
     {
         $connection = $this->doctrine->getConnection($this->connectionName);
-        \assert($connection instanceof Connection);
+        assert($connection instanceof Connection);
 
         return $connection;
     }

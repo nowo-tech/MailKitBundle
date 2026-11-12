@@ -6,6 +6,7 @@ namespace Nowo\MailKitBundle\Graph\Inbound;
 
 use LogicException;
 
+use function fclose;
 use function is_resource;
 use function rewind;
 
@@ -79,6 +80,16 @@ final class InboundAttachment
         rewind($this->stream);
 
         return $this->stream;
+    }
+
+    /**
+     * Closes the temporary stream (MailKit calls it when the message is finished).
+     */
+    public function release(): void
+    {
+        if (is_resource($this->stream)) {
+            fclose($this->stream);
+        }
     }
 
     /**

@@ -30,8 +30,8 @@ final class InboundDecision
         ?string $reference = null,
         ?string $reason = null,
     ) {
-        $this->reference = self::clean($reference, 128);
-        $this->reason    = self::clean($reason, 64);
+        $this->reference = $this->clean($reference, 128);
+        $this->reason    = $this->clean($reason, 64);
     }
 
     /**
@@ -58,7 +58,7 @@ final class InboundDecision
         return new self(InboundAction::Discard, null, $reason);
     }
 
-    private static function clean(?string $value, int $max): ?string
+    private function clean(?string $value, int $max): ?string
     {
         $value = trim((string) preg_replace('/[\x00-\x1F\x7F]+/u', '', (string) $value));
 

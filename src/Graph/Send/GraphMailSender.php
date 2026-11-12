@@ -27,6 +27,7 @@ use function rawurlencode;
 use function sprintf;
 use function strlen;
 use function strrchr;
+use function usleep;
 
 /**
  * Sends an e-mail from a shared mailbox through Microsoft Graph with app-only credentials (1.8).
@@ -63,12 +64,14 @@ final class GraphMailSender
      * @param GraphMailboxProviderInterface $mailboxes mailbox port (configured profiles or the host's)
      * @param GraphApiClient $api Graph client
      * @param GraphSendLimits $limits limits checked before any call
+     * @param int $recheckDelayMicroseconds pause before reading `isDraft` a second time after an ambiguous send (1.9)
      */
     public function __construct(
         private readonly GraphMailboxProviderInterface $mailboxes,
         private readonly GraphApiClient $api,
         private readonly GraphSendLimits $limits = new GraphSendLimits(),
         private readonly ?LoggerInterface $logger = null,
+        private readonly int $recheckDelayMicroseconds = 2_000_000,
     ) {
     }
 
@@ -125,6 +128,16 @@ final class GraphMailSender
             // Timeout, network error, 5xx, 429 / 503: Exchange may have sent it. With immutable ids the sent copy keeps
             // the draft's id, so deleting it blindly would move a sent message to Deleted Items (audit NK-1).
             $isDraft = $this->isDraft($mailbox, $messagePath);
+            if ($isDraft === true) {
+                // Exchange may still be processing a send it accepted: look again after a short pause (1.9). A send
+                // that completes after the second read is still deleted with its draft (residual race, documented).
+                if ($this->recheckDelayMicroseconds > 0) {
+                    // Rare failure path, bounded by graph.send_recheck_delay_ms (0 disables it): a short pause beats
+                    // deleting a message Exchange is still sending.
+                    usleep($this->recheckDelayMicroseconds); // @phpstan-ignore frankenphp.hardening.noBlockingSleep
+                }
+                $isDraft = $this->isDraft($mailbox, $messagePath);
+            }
             if ($isDraft === true) {
                 $this->discardDraft($mailbox, $messagePath);
 

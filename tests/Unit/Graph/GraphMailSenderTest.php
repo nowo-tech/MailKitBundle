@@ -40,6 +40,8 @@ final class GraphMailSenderTest extends TestCase
 
     private RecordingLogger $logger;
 
+    private int $recheckDelay = 0;
+
     protected function setUp(): void
     {
         $this->mock   = new GraphApiMock();
@@ -62,7 +64,7 @@ final class GraphMailSenderTest extends TestCase
         };
         $api = new GraphApiClient($client, new GraphTokenProvider($client, new ArrayAdapter()), GraphApiClient::DEFAULT_UPLOAD_HOSTS, 5.0, $this->logger);
 
-        return new GraphMailSender($mailboxes, $api, $limits ?? new GraphSendLimits(), $this->logger);
+        return new GraphMailSender($mailboxes, $api, $limits ?? new GraphSendLimits(), $this->logger, $this->recheckDelay);
     }
 
     /**
@@ -255,7 +257,7 @@ final class GraphMailSenderTest extends TestCase
             } catch (GraphException $e) {
                 self::assertTrue($e->isRetryable(), $case);
             }
-            self::assertCount(1, $this->mock->matching('$select=isDraft', 'GET'), $case);
+            self::assertCount(2, $this->mock->matching('$select=isDraft', 'GET'), $case);
             self::assertCount(1, $this->mock->matching('/messages/draft-', 'DELETE'), $case);
 
             // No longer a draft: it was sent; success, nothing deleted.
@@ -289,6 +291,34 @@ final class GraphMailSenderTest extends TestCase
             default                               => null,
         };
         $this->assertFailure($this->mail(), GraphException::REASON_AMBIGUOUS);
+        $this->mock->override   = null;
+        $this->mock->draftState = true;
+    }
+
+    /**
+     * 1.9: after an ambiguous send, a draft is read twice (with a pause) before it is deleted.
+     */
+    public function testAmbiguousSendIsReadTwiceBeforeDeleting(): void
+    {
+        $this->mock->override = static fn (string $method, string $url): ?MockResponse => str_contains($url, '/send') ? new MockResponse('', ['http_code' => 503]) : null;
+
+        // Draft at first, sent by the second read: success, nothing deleted.
+        $this->recheckDelay      = 1000;
+        $this->mock->draftStates = [true, false];
+        $result                  = $this->sender()->send($this->mail());
+        self::assertSame('<own-1@example.com>', $result->internetMessageId);
+        self::assertCount(2, $this->mock->matching('$select=isDraft', 'GET'));
+        self::assertCount(0, $this->mock->matching('/messages/draft-', 'DELETE'));
+
+        // Draft twice: deleted, error rethrown. Unknown at the second read: kept, ambiguous.
+        $this->mock->requests    = [];
+        $this->mock->draftStates = [true, true];
+        $this->assertFailure($this->mail(), GraphException::REASON_THROTTLED);
+        self::assertCount(1, $this->mock->matching('/messages/draft-', 'DELETE'));
+        $this->mock->requests    = [];
+        $this->mock->draftStates = [true, null];
+        $this->assertFailure($this->mail(), GraphException::REASON_AMBIGUOUS);
+        self::assertCount(0, $this->mock->matching('/messages/draft-', 'DELETE'));
         $this->mock->override   = null;
         $this->mock->draftState = true;
     }

@@ -9,16 +9,16 @@ use Psr\Log\LoggerInterface;
 use Symfony\Contracts\HttpClient\Exception\ExceptionInterface as HttpClientException;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
-use function in_array;
-use function sprintf;
 use function ftell;
 use function fwrite;
+use function in_array;
 use function is_array;
 use function is_numeric;
 use function is_string;
 use function parse_url;
 use function preg_match;
 use function rawurlencode;
+use function sprintf;
 use function str_contains;
 use function str_ends_with;
 use function str_starts_with;
@@ -144,7 +144,7 @@ final class GraphApiClient
         if (!is_array($parts)
             || strtolower($parts['scheme'] ?? '') !== 'https'
             || isset($parts['user']) || isset($parts['pass'])
-            || (isset($parts['port']) && $parts['port'] !== 443)
+            || !$this->defaultHttpsPort($url, $parts)
             || strtolower($parts['host'] ?? '') !== self::GRAPH_HOST
             || !str_starts_with($parts['path'] ?? '', '/v1.0/')
             || isset($parts['fragment'])

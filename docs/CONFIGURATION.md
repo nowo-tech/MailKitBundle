@@ -13,6 +13,7 @@
 - [personal_data](#personal_data)
 - [brand](#brand)
 - [graph](#graph)
+  - [graph.inbound](#graphinbound)
 - [doctrine](#doctrine)
 - [web_ui](#web_ui)
   - [Layout and CSS stack (UiKit)](#layout-and-css-stack-uikit)
@@ -90,6 +91,38 @@ nowo_mail_kit:
             max_attachments: 50        # attachments per e-mail (0 … 250)
             max_attachment_bytes: 36700160  # one attachment (≤ 150 MiB, the Graph maximum)
             max_message_bytes: 36700160     # attachments + bodies of one e-mail
+        send_recheck_delay_ms: 2000    # 1.9: pause before the second isDraft read after an ambiguous send (0 = none)
+        inbound:                       # 1.9: read the mailboxes (webhook + delta sweep) — opt-in
+            enabled: false
+            handler: null              # service id implementing Graph\Inbound\GraphInboundHandlerInterface (required)
+            profiles: []               # mailbox profiles read; [] = the default profile
+            profiles_provider: null    # service id implementing Graph\Inbound\GraphInboundProfilesProviderInterface
+            bus: messenger.default_bus # receives FetchGraphMessage / SweepGraphMailbox / RenewGraphSubscriptions
+            connection: null           # DBAL connection of the inbound tables (null = default)
+            folder: inbox              # well-known folder read
+            webhook:
+                path: /hooks/mail-kit/v1/graph   # route of the loader type nowo_mail_kit_graph_webhook (POST)
+                notification_url: null # public https URL of that route; null = no subscriptions (sweep only)
+                max_body_bytes: 1048576
+                max_notifications: 200
+                rate_limit: 1200       # requests per minute, all senders together (429 above)
+            subscriptions:
+                lifetime_minutes: 4320 # ≤ 10070 (Graph maximum for messages)
+                renew_before_minutes: 1440
+            sweep:
+                initial_window: P2D    # first sweep reads back this long only
+                page_size: 50
+                max_pages: 20          # per run; the next run resumes
+            allow_remote_images: false # keep http(s) <img> sources (tracking) in the sanitised HTML
+            retention_days: 30         # idempotency records kept
+            stale_claim_seconds: 900   # an unfinished claim older than this is taken over
+            limits:
+                max_message_bytes: 4194304
+                max_attachments: 20
+                max_attachment_bytes: 26214400
+                max_total_attachment_bytes: 52428800
+                max_html_bytes: 1048576
+                allowed_types: [application/pdf, image/png, image/jpeg, image/gif, image/webp, text/plain, text/csv, application/zip, application/msword, application/vnd.ms-excel, application/vnd.ms-powerpoint, 'application/vnd.openxmlformats-officedocument.*', 'application/vnd.oasis.opendocument.*']
     doctrine:
         table_prefix: ''               # 'app_' => app_mail_kit_sent_mail
         entity_manager: null           # ORM entity manager name (null = default)
@@ -111,7 +144,7 @@ nowo_mail_kit:
         allow_unauthenticated: false   # DEV / DEMO only; refused unless kernel.debug is true
 ```
 
-Unknown keys are rejected. Switches (`mailer.decorate`, `dsn.allow_private_hosts`, `dsn.allow_insecure_tls`, `resend.enabled`, `log.enabled`, `log.map_entities`, `log.store_bodies`, `personal_data.enabled`, `graph.enabled`, `web_ui.enabled`, `web_ui.export.enabled`, `web_ui.export.include_bodies`, `security.allow_unauthenticated`) must be literal booleans: `%env(bool:…)%` placeholders are refused because they would read as `true` while the container is built.
+Unknown keys are rejected. Switches (`mailer.decorate`, `dsn.allow_private_hosts`, `dsn.allow_insecure_tls`, `resend.enabled`, `log.enabled`, `log.map_entities`, `log.store_bodies`, `personal_data.enabled`, `graph.enabled`, `graph.inbound.enabled`, `graph.inbound.allow_remote_images`, `web_ui.enabled`, `web_ui.export.enabled`, `web_ui.export.include_bodies`, `security.allow_unauthenticated`) must be literal booleans: `%env(bool:…)%` placeholders are refused because they would read as `true` while the container is built.
 
 ## mailer
 
@@ -230,6 +263,37 @@ changes. Microsoft 365 setup: [MICROSOFT-GRAPH-SETUP.md](MICROSOFT-GRAPH-SETUP.m
 Profile names: letters, digits, `_`, `.`, `-` (at most 64 characters). The container refuses to compile when
 `enabled` is true without `mailbox_provider` and without a profile named like `default_profile`.
 
+| Key | Default | Description |
+| --- | --- | --- |
+| `send_recheck_delay_ms` | `2000` | 1.9: after an ambiguous send failure (timeout, 5xx, 429 / 503) whose draft still reads as a draft, pause this long and read `isDraft` again before deleting it (0 … 10000; 0 = no pause). Blocks the worker only on that rare path. |
+
+### graph.inbound
+
+Since 1.9 (Beacon spec 229 block B). Opt-in; needs `graph.enabled`, symfony/messenger and doctrine/doctrine-bundle
+(DBAL). Usage: [USAGE — Inbound mail](USAGE.md#inbound-mail-from-a-graph-mailbox).
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `enabled` | `false` | Registers the webhook controller, the subscription manager, the delta sweeper, the processor, the Messenger handlers, the commands, the DBAL store and its schema listener. Literal boolean. |
+| `handler` | — | Service id implementing `Graph\Inbound\GraphInboundHandlerInterface`. Required when enabled. |
+| `profiles` / `profiles_provider` | `[]` / `null` | Mailbox profiles read: the list (empty = the mailbox provider's default profile), or your `GraphInboundProfilesProviderInterface` service (e.g. one mailbox per organization). |
+| `bus` | `messenger.default_bus` | Bus of the fetch / sweep / renew messages. Route them to an async transport: the webhook must answer within 3 s. |
+| `connection` | `null` | DBAL connection of the three inbound tables. MailKit never uses the host's entity manager for them. |
+| `folder` | `inbox` | Well-known folder subscribed to and swept. |
+| `webhook.path` | `/hooks/mail-kit/v1/graph` | Path of the notification route (container parameter `nowo_mail_kit.graph.webhook_path`). Import the loader (`type: nowo_mail_kit_graph_webhook`) and make the path public and stateless in the firewall. |
+| `webhook.notification_url` | `null` | Absolute `https://` URL of that route as Graph reaches it (no user info, no fragment). `null`: no subscriptions, the sweep is the only reader. |
+| `webhook.max_body_bytes` / `max_notifications` / `rate_limit` | `1048576` / `200` / `1200` | Request caps (413) and a global sliding-window rate per minute (429). |
+| `subscriptions.lifetime_minutes` / `renew_before_minutes` | `4320` / `1440` | Lifetime requested (≤ 10070) and renewal window. Run the renewal at least hourly. |
+| `sweep.initial_window` | `P2D` | ISO 8601 duration (`PnD`, `PTnH`, `PnDTnH`) read back by the first sweep of a profile (an existing inbox is not imported). |
+| `sweep.page_size` / `max_pages` | `50` / `20` | Page size (`Prefer: odata.maxpagesize`) and pages per run (the stored link resumes the next run). |
+| `allow_remote_images` | `false` | Keep `http(s)` image sources in the sanitised HTML (lets senders track readers). Off: `cid:` images of the message only. Literal boolean. |
+| `retention_days` | `30` | Idempotency records kept (purged after each sweep run). Keep it longer than any redelivery window. |
+| `stale_claim_seconds` | `900` | A `processing` claim older than this (crashed worker) is processed again. |
+| `limits.max_message_bytes` | `4194304` | Bytes of the Graph message JSON read (headers and body); a larger message fails with `too_large`. |
+| `limits.max_attachments` / `max_attachment_bytes` / `max_total_attachment_bytes` | `20` / `26214400` / `52428800` | Attachments beyond these are reported as rejected (`count`, `size`, `total_size`), not read. |
+| `limits.max_html_bytes` | `1048576` | HTML passed to the sanitizer (longer: cut). |
+| `limits.allowed_types` | documents, images, text, zip | Content types accepted **as detected from the bytes** (finfo), `fnmatch` patterns, lower-cased; any other type is rejected (`type`). |
+
 ## doctrine
 
 | Key | Default | Description |
@@ -344,5 +408,6 @@ The container refuses to compile when:
 - `security.allow_unauthenticated: true` outside `kernel.debug`;
 - `dsn.allowed_schemes` contains `sendmail`, `sendmail+smtp`, `native` or `null`;
 - a switch is an env placeholder, a prefix / path / interval / template id is invalid;
+- `graph.inbound.enabled` is true without `graph.enabled`, without `graph.inbound.handler`, without symfony/messenger or without DoctrineBundle, or an inbound option is invalid (profile names, folder, webhook path, notification URL, sweep window);
 - `graph.enabled` is true without `graph.mailbox_provider` and without a profile named like `graph.default_profile`, or a profile name is invalid;
 - `brand.name` is blank, too long or contains control / bidi characters, a `brand.colors` value is not `#rrggbb`, or `brand.max_image_bytes` exceeds `brand.max_total_bytes`.

@@ -184,8 +184,8 @@ nowo_http_log:
 
 ## Webhook URL requirements (inbound, MailKit 1.9)
 
-The inbound pipeline (change notifications on the mailbox, planned for MailKit 1.9) needs a notification URL that
-Microsoft Graph can reach:
+The inbound pipeline (`graph.inbound`, MailKit 1.9: change notifications on the mailbox) needs a notification URL that
+Microsoft Graph can reach — `graph.inbound.webhook.notification_url`, pointing at the `webhook.path` route:
 
 - public **HTTPS** with a certificate from a publicly trusted CA (no self-signed certificate, no IP literal);
 - reachable without authentication (no SSO / basic auth in front of the route; MailKit verifies the notification's
@@ -194,7 +194,15 @@ Microsoft Graph can reach:
   every notification within **3 seconds** (MailKit only queues work in the request);
 - a stable hostname: subscriptions last at most about 7 days for messages and are renewed by a scheduled command.
 
-Hosts without a public URL (local development) rely on the periodic delta sweep instead.
+Hosts without a public URL (local development) rely on the periodic delta sweep instead (`notification_url: null`).
+
+Operations:
+
+- `nowo:mail-kit:graph:subscriptions` creates the subscription (Graph calls the URL with a validation token at that
+  moment: the route must already be deployed) and renews it; schedule it hourly. `--remove` deletes it.
+- `nowo:mail-kit:graph:sweep` every 5 minutes catches missed notifications.
+- Rotating the subscription's `clientState` = `--remove` then create again (MailKit generates a new random one).
+- Plus addressing (step 6) is what routes a reply to its thread; keep it on.
 
 ## Troubleshooting
 
@@ -205,6 +213,8 @@ Hosts without a public URL (local development) rely on the periodic delta sweep 
 | `create draft failed with HTTP 403 (ErrorAccessDenied)` | Admin consent missing, the mailbox is outside the access policy / management scope, or the policy is still propagating. |
 | `create draft failed with HTTP 404 (ErrorInvalidUser / ResourceNotFound)` | The mailbox address is wrong or has no Exchange Online mailbox. |
 | `send failed with HTTP 403 (ErrorSendAsDenied)` | `Mail.Send` missing or restricted. |
+| `create subscription failed with HTTP 400 (ValidationError)` | Graph could not validate the notification URL: not public HTTPS, blocked, behind authentication, or slower than 10 s. |
+| Notifications answered 403 | The `clientState` does not match a stored subscription (subscription created by another environment / database): run `nowo:mail-kit:graph:subscriptions --remove` and create it again. |
 | `failed with HTTP 429` | Graph throttling: MailKit reports `retryAfter`; let Messenger retry later. |
 | Messages land as **Drafts** and stay there | The send call failed after the draft was created and the draft could not be deleted; check the logs (profile, operation, request-id). |
 

@@ -19,6 +19,7 @@ use Nowo\MailKitBundle\Tracking\Http\TrackingPixelController;
 use Nowo\MailKitBundle\Tracking\Message\RecordMailOpenHandler;
 use Nowo\MailKitBundle\Tracking\NullEmailLinkRewriter;
 use Nowo\MailKitBundle\Tracking\TrackableLinkFilterInterface;
+use Nowo\MailKitBundle\Tracking\TrackingBaseUrl;
 use Nowo\MailKitBundle\Tracking\TrackingRecipientResolverInterface;
 use Nowo\MailKitBundle\Tracking\TrackingTokenSigner;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -101,6 +102,27 @@ final class TrackingConfigurationTest extends TestCase
         $this->process($tracking);
     }
 
+    public function testAnEnvPlaceholderBaseIsAcceptedWhenTheContainerIsBuilt(): void
+    {
+        $container   = $this->container(['doctrine']);
+        $placeholder = $container->getParameterBag()->get('env(DEFAULT_URI)');
+        self::assertIsString($placeholder);
+        self::assertTrue(TrackingBaseUrl::isPlaceholder($placeholder));
+
+        $config = (new Processor())->processConfiguration(new Configuration(), [['tracking' => ['enabled' => true, 'policy' => 'app.policy', 'public_base_url' => $placeholder]]]);
+        self::assertSame($placeholder, $config['tracking']['public_base_url']);
+
+        (new NowoMailKitExtension())->load([['tracking' => ['enabled' => true, 'policy' => 'app.policy', 'public_base_url' => $placeholder]]], $container);
+        self::assertSame($placeholder, $container->getDefinition(EmailTracker::class)->getArgument(7));
+    }
+
+    public function testALiteralInvalidBaseStillFailsTheBuild(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+        $this->expectExceptionMessage('absolute http(s) URL');
+        $this->process(['public_base_url' => 'javascript:x']);
+    }
+
     public function testDisabledRegistersNothing(): void
     {
         $container = $this->container(['doctrine']);
@@ -119,7 +141,8 @@ final class TrackingConfigurationTest extends TestCase
         self::assertSame(ConfiguredTrackableLinkFilter::class, (string) $default->getAlias(TrackableLinkFilterInterface::class));
         self::assertSame([TrackingTokenSigner::class, 'fromKernelSecret'], $default->getDefinition(TrackingTokenSigner::class)->getFactory());
         self::assertSame('%kernel.secret%', $default->getDefinition(TrackingTokenSigner::class)->getArgument(0));
-        self::assertSame('https://app.example.com/e/o', $default->getDefinition(EmailTracker::class)->getArgument(7));
+        self::assertSame('https://app.example.com', $default->getDefinition(EmailTracker::class)->getArgument(7));
+        self::assertSame('/e/o', $default->getDefinition(EmailTracker::class)->getArgument(14));
         $runtime = $default->getDefinition(RuntimeTransport::class)->getArgument(9);
         self::assertInstanceOf(Reference::class, $runtime);
         self::assertSame(EmailTracker::class, (string) $runtime);

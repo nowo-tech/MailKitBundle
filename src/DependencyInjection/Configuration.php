@@ -13,6 +13,7 @@ use Nowo\MailKitBundle\Graph\Inbound\InboundLimits;
 use Nowo\MailKitBundle\Graph\Send\GraphSendLimits;
 use Nowo\MailKitBundle\Log\SentMailCsvExporter;
 use Nowo\MailKitBundle\Tracking\EmailTracker;
+use Nowo\MailKitBundle\Tracking\TrackingBaseUrl;
 use Nowo\MailKitBundle\Ui\MailKitPages;
 use Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition;
 use Symfony\Component\Config\Definition\Builder\TreeBuilder;
@@ -779,10 +780,10 @@ final class Configuration implements ConfigurationInterface
                     ->defaultNull()
                 ->end()
                 ->scalarNode('public_base_url')
-                    ->info('Absolute https URL of the application the pixel is served from (e.g. "https://app.example.com"); required when enabled (Messenger workers have no request).')
+                    ->info('Absolute https URL of the application the pixel is served from (e.g. "https://app.example.com" or "%env(DEFAULT_URI)%", an env value is re-checked when first used); required when enabled (Messenger workers have no request).')
                     ->defaultNull()
                     ->validate()
-                        ->ifTrue(static fn (mixed $v): bool => $v !== null && (!is_string($v) || preg_match('#^https?://[^/\s?\#@]+(/[^\s?\#]*)?\z#', $v) !== 1))
+                        ->ifTrue(static fn (mixed $v): bool => $v !== null && !TrackingBaseUrl::isPlaceholder($v) && !TrackingBaseUrl::isValid($v))
                         ->thenInvalid('nowo_mail_kit.tracking.public_base_url must be an absolute http(s) URL without user info, query or fragment, got %s.')
                     ->end()
                     ->validate()

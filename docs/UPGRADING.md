@@ -4,6 +4,7 @@
 
 - [Unreleased](#unreleased)
 - [To 1.10.0](#to-1100)
+- [To 1.9.1](#to-191)
 - [To 1.9.0](#to-190)
 - [To 1.8.0](#to-180)
 - [To 1.7.1](#to-171)
@@ -28,7 +29,7 @@
 
 ## To 1.10.0
 
-From **1.9.0**:
+From **1.9.1**:
 
 ```bash
 composer update nowo-tech/mail-kit-bundle
@@ -36,14 +37,11 @@ composer update nowo-tech/mail-kit-bundle
 
 Next minor: 1.10.0. **No change is needed**: e-mail open and click tracking is opt-in (`nowo_mail_kit.tracking.enabled`,
 default `false`); with it off no service, route, table, command or handler is added and every e-mail goes out exactly
-as in 1.9. Two small, compatible changes apply to everyone:
+as in 1.9.1. Two small, compatible changes apply to everyone:
 
 - `MailHeaders::strip()` also removes the new internal headers `X-Mail-Kit-Template`, `X-Mail-Kit-Recipient`,
   `X-Mail-Kit-Tenant` and `X-Mail-Kit-No-Track` before delivery (if your application sent headers with these exact
   names to recipients, rename them).
-- `RuntimeTransport` no longer removes the internal headers from **your** message object, only from the delivered copy
-  (fix of audit NU-H1: Messenger retries lost the queued log row, the tag and the redaction values). If you inspected
-  your message after `send()` and relied on the headers being gone, read them from the `SentMessage` instead.
 - `MailDeliveredEvent` and `RuntimeTransport` get an optional trailing constructor argument (`$trackingId`,
   `$tracker`); code that builds them positionally keeps working.
 
@@ -75,6 +73,25 @@ To track opens and clicks ([USAGE](USAGE.md#open-and-click-tracking), privacy no
    export section are registered (set `tracking.recipient_resolver` when your recipient ids are not `getId()`).
 7. Update your privacy policy and processing register (what is stored: send id, template, recipient id, tenant, open
    counters, truncated IP and user-agent family of the last open; default retention 90 days).
+
+## To 1.9.1
+
+From **1.9.0** (patch, no configuration change):
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
+
+`RuntimeTransport` no longer removes MailKit's internal headers (`X-Mail-Kit-Log-Id`, `-Tag`, `-Redact`) from **your**
+message object, only from the copy it delivers, so a Messenger retry keeps its sent-mail log row, its tag and its
+redaction values. If you inspected the message after `send()` and relied on those headers being gone, read the
+delivered message from the `SentMessage` instead.
+
+**If you ran with `log.store_bodies: true` and asynchronous mail with retries** (1.0.0 – 1.9.0), a retried message
+that used `MailHeaders::redact()` may have a stored body with the one-time value in clear. The affected rows are the
+extra rows written by a retry: no tag, `attempts = 1`, and a twin row (same subject and recipients, status `failed`)
+written just before. Run `nowo:mail-kit:log:purge` with a short `--older-than-days`, or delete the bodies of those rows
+(`<prefix>mail_kit_sent_mail_body`), and treat any link or code still valid in them as exposed to log readers.
 
 ## To 1.9.0
 

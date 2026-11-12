@@ -45,14 +45,17 @@ final class MessengerRetryTest extends KernelTestCase
 
         $db = $this->connection($kernel);
         self::assertSame(1, (int) $db->fetchOne('SELECT COUNT(*) FROM mail_kit_sent_mail'), 'The retry updates the queued row.');
-        self::assertSame(['sent', 'password_reset', 2], [
+        self::assertSame(['sent', 'password_reset', $logId, 2], [
             $db->fetchOne('SELECT status FROM mail_kit_sent_mail'),
             $db->fetchOne('SELECT tag FROM mail_kit_sent_mail'),
+            $db->fetchOne('SELECT id FROM mail_kit_sent_mail'),
             (int) $db->fetchOne('SELECT attempts FROM mail_kit_sent_mail'),
         ]);
+        self::assertSame(1, (int) $db->fetchOne('SELECT COUNT(*) FROM mail_kit_sent_mail_body'));
         self::assertSame(0, (int) $db->fetchOne("SELECT COUNT(*) FROM mail_kit_sent_mail_body WHERE html_body LIKE '%SECRET-TOKEN%' OR text_body LIKE '%SECRET-TOKEN%'"), 'Never stored unredacted.');
         foreach ([MailHeaders::LOG_ID, MailHeaders::TAG, MailHeaders::REDACT] as $header) {
             self::assertFalse($sent->getHeaders()->has($header), 'Delivered without ' . $header);
+            self::assertTrue($email->getHeaders()->has($header), 'The caller keeps ' . $header);
         }
     }
 

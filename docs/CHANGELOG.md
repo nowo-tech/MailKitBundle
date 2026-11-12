@@ -8,18 +8,20 @@ All notable changes to this project are documented here. The format follows
 - [[Unreleased]](#unreleased)
   - [Added](#added)
   - [Changed](#changed)
-  - [Fixed](#fixed)
   - [Tests](#tests)
+- [[1.9.1] - 2026-11-12](#191---2026-11-12)
+  - [Fixed](#fixed)
+  - [Security](#security)
 - [[1.9.0] - 2026-11-12](#190---2026-11-12)
   - [Added](#added-1)
   - [Changed](#changed-1)
   - [Audit NQ (before the 1.9.0 tag)](#audit-nq-before-the-190-tag)
   - [Audit NQ-v (verification, before the 1.9.0 tag)](#audit-nq-v-verification-before-the-190-tag)
-  - [Security](#security)
+  - [Security](#security-1)
   - [Tests](#tests-1)
 - [[1.8.0] - 2026-11-12](#180---2026-11-12)
   - [Added](#added-2)
-  - [Security](#security-1)
+  - [Security](#security-2)
   - [Tests](#tests-2)
 - [[1.7.1] - 2026-11-11](#171---2026-11-11)
   - [Fixed](#fixed-1)
@@ -36,17 +38,17 @@ All notable changes to this project are documented here. The format follows
   - [Changed](#changed-4)
 - [[1.4.0] - 2026-11-09](#140---2026-11-09)
   - [Added](#added-6)
-  - [Security](#security-2)
+  - [Security](#security-3)
 - [[1.3.0] - 2026-11-02](#130---2026-11-02)
   - [Added](#added-7)
   - [Changed](#changed-5)
-  - [Security](#security-3)
+  - [Security](#security-4)
 - [[1.2.0] - 2026-11-02](#120---2026-11-02)
   - [Added](#added-8)
   - [Changed](#changed-6)
   - [Fixed](#fixed-2)
 - [[1.1.1] - 2026-11-01](#111---2026-11-01)
-  - [Security](#security-4)
+  - [Security](#security-5)
   - [Changed](#changed-7)
   - [Fixed](#fixed-3)
 - [[1.1.0] - 2026-11-01](#110---2026-11-01)
@@ -111,25 +113,35 @@ Next minor: 1.10.0 (Beacon spec 230 block B, D-20261112-16: e-mail open and clic
   the GDPR export includes the last open's truncated address and user-agent family, and `max_opens_per_send` caps
   the counters (default 1000).
 
-### Fixed
-
-- **Messenger retries lost the internal headers (since 1.0.0, audit NU-H1).** `RuntimeTransport` stripped
-  `X-Mail-Kit-Log-Id`, `-Tag` and `-Redact` from the caller's message before delivery; Messenger re-sends that very
-  object on a retry (serialized again by the retry / failure transport), so a retried message lost its queued log row
-  (a second row was written; the first stayed `failed`), its tag and — with `log.store_bodies: true` — its redaction
-  values: the retry's row stored the one-time link / code **unredacted**. The headers are now removed from the
-  delivered copy only; with tracking, a retried security / no-track / redacted e-mail stays untracked.
-
 ### Tests
 
-- Messenger retry regression (serialized `SendEmailMessage` re-handled after a failure): one log row, tag kept, body
-  redacted; security, no-track and redacted mail never tracked on the retry.
+- Messenger retry regression (serialized `SendEmailMessage` re-handled after a failure, fix released in 1.9.1):
+  security, no-track and redacted mail are never tracked on the retry.
 - HTML rewriting edge cases (malformed HTML, comments, `<script>` / `<style>`, Outlook VML buttons, entities, quoting,
   labels, limits, `data-mail-kit-track="off"`, text part, PCRE failure), credential URLs, token forgery (every bit flip),
   rotation, expiry and clock skew, unknown / forged tokens still answer the GIF, opt-out and security templates → zero
   rows, machine-open classification, purge in batches, exact recipient ids, savepoint inside the host transaction
   (also on MySQL, MariaDB and PostgreSQL in CI), lint:container, and a DDD host serving 1 000 pixel requests for two
   tenants in one kept-alive kernel without the services resetter (flat memory, p95 < 20 ms).
+
+## [1.9.1] - 2026-11-12
+
+Next patch: 1.9.1.
+
+### Fixed
+
+- **Messenger retries lost MailKit's internal headers.** `RuntimeTransport` removed `X-Mail-Kit-Log-Id`,
+  `X-Mail-Kit-Tag` and `X-Mail-Kit-Redact` from the caller's message object before delivery. Messenger re-sends that
+  very object on a retry (serialized again by the retry or failure transport), so a retried message lost its queued
+  sent-mail log row (a second row was written while the first stayed `failed`), its tag and its redaction values. The
+  headers are now removed from the delivered copy only; the caller's message is never changed.
+
+### Security
+
+- With `log.store_bodies: true`, asynchronous mail (Messenger) whose first delivery attempt failed and was retried,
+  and a message that declared values with `MailHeaders::redact()` (one-time links, codes), the retry's log row stored
+  the HTML / text bodies **without** masking those values (1.0.0 – 1.9.0). The first attempt's row was masked. Fixed by
+  the change above. Rows written before the upgrade are not rewritten: see UPGRADING "To 1.9.1".
 
 ## [1.9.0] - 2026-11-12
 

@@ -170,7 +170,7 @@ final class TrackingStoreTest extends KernelTestCase
         self::assertFalse($store->createSend($id, null, null, null), 'Duplicate key, rolled back to the savepoint.');
         $other = TrackingTokenSigner::newSendId();
         self::assertTrue($store->createSend($other, null, null, null), 'The host transaction still works (PostgreSQL).');
-        $db->executeStatement('SELECT 1');
+        self::assertSame(1, (int) $db->fetchOne('SELECT 1'));
         $db->commit();
         self::assertNotNull($store->find($other));
     }

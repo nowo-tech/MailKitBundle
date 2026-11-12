@@ -68,6 +68,7 @@ OutboundMailReadiness ──► Twig functions, AuthKit OutboundMailReadyChecker
 | `Brand\BrandedEmailHelper`, `BrandedEmailImage`, `BrandedEmailText`, `Twig\MailKitBrandTwigExtension`, `email/branded_layout.*.twig` | Optional branded e-mails (1.4, spec 220 S7): brand from `nowo-tech/brand-contracts`, logo as an inline CID part |
 | `Graph\GraphMailboxProviderInterface`, `ConfiguredGraphMailboxProvider`, `GraphMailbox`, `GraphSecret`, `GraphTokenProvider`, `GraphApiClient`, `GraphException` | Microsoft Graph (1.8, opt-in): mailbox port, app-only token (PSR-6 cache), Graph v1.0 client (token only to graph.microsoft.com, upload host allow-list, no redirects) |
 | `Graph\Send\GraphMailSender`, `GraphOutgoingMail`, `GraphRecipient`, `GraphAttachment`, `AttachmentFilename`, `GraphSendLimits`, `GraphSendResult`, `PlusAddress`, `Graph\Transport\GraphTransport(Factory)` | Graph send: MIME draft with threading headers → Bcc → attachments / upload sessions → send; `microsoft+graph://<profile>` mailer transport |
+| `Graph\Inbound\*` (1.9, opt-in) | Inbound: `Webhook\GraphWebhookController` + route loader (verify, enqueue), `GraphSubscriptionManager`, `GraphDeltaSweeper`, `GraphInboundProcessor` (fetch, claim, attachments, normalise, host decision), `GraphMessageNormalizer`, `InboundHtmlSanitizer`, `Store\GraphInboundStore` (DBAL tables) + schema listener, `Message\*` (Messenger), `Command\*`; ports `GraphInboundHandlerInterface`, `GraphInboundProfilesProviderInterface`; DTO `GraphInboundMessage`, `InboundAddress`, `InboundAttachment`, `AuthenticationResults`, `InboundDecision` / `InboundAction` |
 | `Command\*` | CLI (purge, forget, send-test) |
 | `DependencyInjection\*`, `Doctrine\TablePrefixListener` | Wiring, table prefix |
 
@@ -90,5 +91,6 @@ and settings changes; every other service is stateless and reads the settings pe
 - `nowo_mail_kit.security.access_checker` — your `MailKitAccessCheckerInterface`.
 - `MailHeaders::tag()` / `redact()` — log category and body masking per message.
 - `nowo_mail_kit.graph.mailbox_provider` — your `Graph\GraphMailboxProviderInterface` (1.8).
+- `nowo_mail_kit.graph.inbound.handler` / `profiles_provider` — your `Graph\Inbound\GraphInboundHandlerInterface` and `GraphInboundProfilesProviderInterface` (1.9).
 - `web_ui.templates.*` — page overrides (extend + one block).
 - Instance Settings `area_roles` for the `mailer` section.

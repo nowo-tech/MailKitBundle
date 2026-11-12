@@ -9,6 +9,7 @@ use Nowo\MailKitBundle\Brand\BrandedEmailText;
 use Nowo\MailKitBundle\Dsn\MailerDsnValidator;
 use Nowo\MailKitBundle\Graph\GraphApiClient;
 use Nowo\MailKitBundle\Graph\GraphMailbox;
+use Nowo\MailKitBundle\Graph\Inbound\InboundLimits;
 use Nowo\MailKitBundle\Graph\Send\GraphSendLimits;
 use Nowo\MailKitBundle\Log\SentMailCsvExporter;
 use Nowo\MailKitBundle\Ui\MailKitPages;
@@ -20,7 +21,9 @@ use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use function array_diff;
 use function array_intersect;
 use function array_keys;
+use function array_pad;
 use function array_values;
+use function explode;
 use function filter_var;
 use function implode;
 use function is_array;
@@ -32,7 +35,10 @@ use function strtolower;
 use function strtotime;
 use function trim;
 
+use const FILTER_FLAG_IPV4;
+use const FILTER_FLAG_IPV6;
 use const FILTER_VALIDATE_EMAIL;
+use const FILTER_VALIDATE_IP;
 
 /**
  * Configuration tree of `nowo_mail_kit` (REQ-SF-006: strict nodes, safe defaults).
@@ -517,6 +523,14 @@ final class Configuration implements ConfigurationInterface
                     ->min(1.0)
                     ->max(300.0)
                 ->end()
+                ->arrayNode('draft_cleanup')
+                    ->info('1.9: after an ambiguous send failure (timeout, 5xx, 429 / 503) whose message still reads as a draft, a delayed DeleteGraphDraft message deletes it later only if it is still a draft. Without a bus the state is read once more at once (residual race).')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->scalarNode('bus')->info('Messenger bus service id of the delayed clean-up (route DeleteGraphDraft to a transport that supports delays); null = no delayed clean-up.')->defaultNull()->end()
+                        ->integerNode('delay_ms')->info('Delay of the clean-up message.')->defaultValue(5000)->min(1000)->max(600_000)->end()
+                    ->end()
+                ->end()
                 ->arrayNode('upload_hosts')
                     ->info('Hosts accepted in attachment upload session URLs returned by Graph (HTTPS only, exact match).')
                     ->scalarPrototype()->cannotBeEmpty()->end()
@@ -544,15 +558,192 @@ final class Configuration implements ConfigurationInterface
                         ->end()
                     ->end()
                 ->end()
+                ->append($this->graphInboundNode())
             ->end()
             ->validate()
                 ->ifTrue(static fn (array $v): bool => ($v['enabled'] ?? false) === true
                     && (!is_string($v['mailbox_provider'] ?? null) || $v['mailbox_provider'] === '')
                     && !isset($v['profiles'][$v['default_profile'] ?? '']))
                 ->thenInvalid('nowo_mail_kit.graph.enabled needs a mailbox_provider service or a profile named like graph.default_profile.')
+            ->end()
+            ->validate()
+                ->ifTrue(static fn (array $v): bool => ($v['inbound']['enabled'] ?? false) === true && ($v['enabled'] ?? false) !== true)
+                ->thenInvalid('nowo_mail_kit.graph.inbound.enabled needs nowo_mail_kit.graph.enabled: true.')
             ->end();
 
         return $node;
+    }
+
+    /**
+     * `graph.inbound` (1.9, spec 229 block B): change notifications, delta sweep and the host routing port. Off by default.
+     */
+    private function graphInboundNode(): ArrayNodeDefinition
+    {
+        /** @var ArrayNodeDefinition $node */
+        $node = (new TreeBuilder('inbound'))->getRootNode();
+        $node
+            ->info('1.9: read mail from the Graph mailboxes (webhook + delta sweep) and hand each message, normalised, to your GraphInboundHandlerInterface. Needs symfony/messenger and a DBAL connection. Off by default.')
+            ->addDefaultsIfNotSet()
+            ->children()
+                ->booleanNode('enabled')->defaultFalse()->end()
+                ->scalarNode('handler')
+                    ->info('Service id implementing Graph\\Inbound\\GraphInboundHandlerInterface (route / quarantine / discard). Required when enabled.')
+                    ->defaultNull()
+                ->end()
+                ->arrayNode('profiles')
+                    ->info('Mailbox profiles whose inbox is read; empty = graph.default_profile.')
+                    ->scalarPrototype()->cannotBeEmpty()->end()
+                    ->defaultValue([])
+                    ->validate()
+                        ->ifTrue(static function (array $v): bool {
+                            foreach ($v as $name) {
+                                if (preg_match(GraphMailbox::PROFILE_PATTERN, (string) $name) !== 1) {
+                                    return true;
+                                }
+                            }
+
+                            return false;
+                        })
+                        ->thenInvalid('nowo_mail_kit.graph.inbound.profiles must contain profile names (letters, digits, "_", ".", "-").')
+                    ->end()
+                ->end()
+                ->scalarNode('profiles_provider')
+                    ->info('Service id implementing Graph\\Inbound\\GraphInboundProfilesProviderInterface (e.g. one mailbox per organization); null = profiles above.')
+                    ->defaultNull()
+                ->end()
+                ->scalarNode('bus')->info('Messenger bus service id that receives the fetch / sweep / renew messages (route them to an async transport).')->defaultValue('messenger.default_bus')->cannotBeEmpty()->end()
+                ->scalarNode('connection')->info('DBAL connection of the inbound tables (null = default).')->defaultNull()->end()
+                ->scalarNode('folder')
+                    ->info('Well-known mail folder read (inbox).')
+                    ->defaultValue('inbox')
+                    ->validate()
+                        ->ifTrue(static fn (mixed $v): bool => !is_string($v) || preg_match('/^[A-Za-z]{1,64}\z/', $v) !== 1)
+                        ->thenInvalid('nowo_mail_kit.graph.inbound.folder must be a well-known folder name such as "inbox", got %s.')
+                    ->end()
+                ->end()
+                ->arrayNode('webhook')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->scalarNode('path')
+                            ->info('Path of the notification route (loader type nowo_mail_kit_graph_webhook). Make it public and stateless in the firewall.')
+                            ->defaultValue('/hooks/mail-kit/v1/graph')
+                            ->validate()
+                                ->ifTrue(static fn (mixed $v): bool => !is_string($v) || preg_match('#^/[A-Za-z0-9/_.-]{1,200}\z#', $v) !== 1)
+                                ->thenInvalid('nowo_mail_kit.graph.inbound.webhook.path must be an absolute path, got %s.')
+                            ->end()
+                        ->end()
+                        ->scalarNode('notification_url')
+                            ->info('Public HTTPS URL of that route given to Graph (e.g. "https://app.example.com/hooks/mail-kit/v1/graph"); null = no subscriptions, sweep only.')
+                            ->defaultNull()
+                            ->validate()
+                                ->ifTrue(static fn (mixed $v): bool => $v !== null && (!is_string($v) || preg_match('#^https://[^/\s?\#@]+/[^\s\#]*\z#', $v) !== 1))
+                                ->thenInvalid('nowo_mail_kit.graph.inbound.webhook.notification_url must be an absolute https:// URL without user info or fragment, got %s.')
+                            ->end()
+                        ->end()
+                        ->integerNode('max_body_bytes')->info('Largest notification request read.')->defaultValue(1_048_576)->min(1024)->max(16_777_216)->end()
+                        ->integerNode('max_notifications')->info('Most notifications in one request.')->defaultValue(200)->min(1)->max(1000)->end()
+                        ->integerNode('rate_limit')->info('Requests with at least one valid notification accepted per minute (all together; 429 above).')->defaultValue(1200)->min(10)->max(100_000)->end()
+                        ->integerNode('client_rate_limit')->info('Unverified requests (validation, rejected or malformed) accepted per minute and client IP (429 above).')->defaultValue(60)->min(1)->max(100_000)->end()
+                        ->arrayNode('allowed_ips')
+                            ->info('Optional source allow-list (addresses or CIDR ranges, e.g. the Microsoft 365 Graph change-notification ranges); empty = any. Behind a proxy, configure framework.trusted_proxies.')
+                            ->scalarPrototype()->cannotBeEmpty()->end()
+                            ->defaultValue([])
+                            ->validate()
+                                ->ifTrue(static function (array $v): bool {
+                                    foreach ($v as $range) {
+                                        if (!self::isIpRange((string) $range)) {
+                                            return true;
+                                        }
+                                    }
+
+                                    return false;
+                                })
+                                ->thenInvalid('nowo_mail_kit.graph.inbound.webhook.allowed_ips must contain IP addresses or CIDR ranges (e.g. "203.0.113.0/24", "2001:db8::/32").')
+                            ->end()
+                        ->end()
+                    ->end()
+                ->end()
+                ->arrayNode('subscriptions')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->integerNode('lifetime_minutes')->info('Lifetime requested for a subscription (Graph maximum for messages: 10070).')->defaultValue(4320)->min(60)->max(10_070)->end()
+                        ->integerNode('renew_before_minutes')->info('Renew when the subscription expires within this many minutes.')->defaultValue(1440)->min(15)->max(10_000)->end()
+                    ->end()
+                ->end()
+                ->arrayNode('sweep')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->scalarNode('initial_window')
+                            ->info('ISO 8601 duration read back by the first sweep of a profile (an existing inbox is not imported).')
+                            ->defaultValue('P2D')
+                            ->validate()
+                                ->ifTrue(static fn (mixed $v): bool => !is_string($v) || preg_match('/^P(?:\d+D|T\d+H|\d+DT\d+H)\z/', $v) !== 1)
+                                ->thenInvalid('nowo_mail_kit.graph.inbound.sweep.initial_window must be an ISO 8601 duration in days / hours such as "P2D" or "PT12H", got %s.')
+                            ->end()
+                        ->end()
+                        ->integerNode('page_size')->defaultValue(50)->min(1)->max(1000)->end()
+                        ->integerNode('max_pages')->info('Pages read by one sweep run (the next run resumes).')->defaultValue(20)->min(1)->max(1000)->end()
+                    ->end()
+                ->end()
+                ->booleanNode('allow_remote_images')
+                    ->info('Keep http(s) image sources in the sanitised HTML (lets senders track readers). Off: only cid: images of the message.')
+                    ->defaultFalse()
+                ->end()
+                ->integerNode('retention_days')->info('Idempotency records kept (purged after each sweep).')->defaultValue(30)->min(1)->max(3650)->end()
+                ->integerNode('stale_claim_seconds')->info('A message claimed this long ago and never finished is processed again.')->defaultValue(900)->min(60)->max(86_400)->end()
+                ->arrayNode('limits')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->integerNode('max_message_bytes')->info('Bytes of the Graph message JSON (headers and body).')->defaultValue(4_194_304)->min(65_536)->max(67_108_864)->end()
+                        ->integerNode('max_attachments')->defaultValue(20)->min(0)->max(250)->end()
+                        ->integerNode('max_attachment_bytes')->defaultValue(26_214_400)->min(1)->max(157_286_400)->end()
+                        ->integerNode('max_total_attachment_bytes')->defaultValue(52_428_800)->min(1)->max(1_073_741_824)->end()
+                        ->integerNode('max_html_bytes')->info('Bytes of HTML passed to the sanitizer (longer: cut).')->defaultValue(1_048_576)->min(1024)->max(16_777_216)->end()
+                        ->arrayNode('allowed_types')
+                            ->info('Attachment content types accepted, as detected from the bytes (fnmatch patterns such as "image/*").')
+                            ->scalarPrototype()->cannotBeEmpty()->end()
+                            ->defaultValue(InboundLimits::DEFAULT_ALLOWED_TYPES)
+                            ->validate()
+                                ->always(static fn (array $v): array => self::lower($v))
+                            ->end()
+                        ->end()
+                    ->end()
+                ->end()
+            ->end()
+            ->validate()
+                ->ifTrue(static fn (array $v): bool => ($v['retention_days'] ?? 30) * 86_400 <= self::durationSeconds((string) ($v['sweep']['initial_window'] ?? 'P2D')) + 86_400)
+                ->thenInvalid('nowo_mail_kit.graph.inbound.retention_days must exceed graph.inbound.sweep.initial_window by more than one day (records of messages the first sweep can see again must still exist).')
+            ->end()
+            ->validate()
+                ->ifTrue(static fn (array $v): bool => ($v['enabled'] ?? false) === true && (!is_string($v['handler'] ?? null) || $v['handler'] === ''))
+                ->thenInvalid('nowo_mail_kit.graph.inbound.enabled needs graph.inbound.handler (your GraphInboundHandlerInterface service).')
+            ->end();
+
+        return $node;
+    }
+
+    /**
+     * True for an IPv4 / IPv6 address, optionally with a CIDR prefix length in range.
+     */
+    public static function isIpRange(string $range): bool
+    {
+        [$address, $bits] = array_pad(explode('/', $range, 2), 2, null);
+        $v4               = filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false;
+        if (!$v4 && filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) === false) {
+            return false;
+        }
+
+        return $bits === null || (preg_match('/^\d{1,3}\z/', $bits) === 1 && (int) $bits <= ($v4 ? 32 : 128));
+    }
+
+    /**
+     * Seconds of a validated `PnD` / `PTnH` / `PnDTnH` duration.
+     */
+    public static function durationSeconds(string $duration): int
+    {
+        preg_match('/^P(?:(\d+)D)?(?:T(\d+)H)?\z/', $duration, $m);
+
+        return (int) ($m[1] ?? 0) * 86_400 + (int) ($m[2] ?? 0) * 3600;
     }
 
     /**

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\MailKitBundle\DependencyInjection;
 
+use finfo;
 use LogicException;
 use Nowo\AuthKitBundle\Mailer\OutboundMailReadyCheckerInterface;
 use Nowo\Brand\Contract\BrandAssetReaderInterface;
@@ -37,6 +38,28 @@ use Nowo\MailKitBundle\Graph\ConfiguredGraphMailboxProvider;
 use Nowo\MailKitBundle\Graph\GraphApiClient;
 use Nowo\MailKitBundle\Graph\GraphMailboxProviderInterface;
 use Nowo\MailKitBundle\Graph\GraphTokenProvider;
+use Nowo\MailKitBundle\Graph\Inbound\Command\GraphSchemaCommand;
+use Nowo\MailKitBundle\Graph\Inbound\Command\GraphSubscriptionsCommand;
+use Nowo\MailKitBundle\Graph\Inbound\Command\GraphSweepCommand;
+use Nowo\MailKitBundle\Graph\Inbound\ConfiguredInboundProfiles;
+use Nowo\MailKitBundle\Graph\Inbound\GraphDeltaSweeper;
+use Nowo\MailKitBundle\Graph\Inbound\GraphInboundHandlerInterface;
+use Nowo\MailKitBundle\Graph\Inbound\GraphInboundProcessor;
+use Nowo\MailKitBundle\Graph\Inbound\GraphInboundProfilesProviderInterface;
+use Nowo\MailKitBundle\Graph\Inbound\GraphMessageNormalizer;
+use Nowo\MailKitBundle\Graph\Inbound\GraphSubscriptionManager;
+use Nowo\MailKitBundle\Graph\Inbound\InboundHtmlSanitizer;
+use Nowo\MailKitBundle\Graph\Inbound\InboundLimits;
+use Nowo\MailKitBundle\Graph\Inbound\Message\FetchGraphMessage;
+use Nowo\MailKitBundle\Graph\Inbound\Message\GraphInboundMessageHandler;
+use Nowo\MailKitBundle\Graph\Inbound\Message\RenewGraphSubscriptions;
+use Nowo\MailKitBundle\Graph\Inbound\Message\SweepGraphMailbox;
+use Nowo\MailKitBundle\Graph\Inbound\Store\GraphInboundSchemaListener;
+use Nowo\MailKitBundle\Graph\Inbound\Store\GraphInboundStore;
+use Nowo\MailKitBundle\Graph\Inbound\Webhook\GraphWebhookController;
+use Nowo\MailKitBundle\Graph\Inbound\Webhook\GraphWebhookRouteLoader;
+use Nowo\MailKitBundle\Graph\Send\DeleteGraphDraft;
+use Nowo\MailKitBundle\Graph\Send\DeleteGraphDraftHandler;
 use Nowo\MailKitBundle\Graph\Send\GraphMailSender;
 use Nowo\MailKitBundle\Graph\Send\GraphSendLimits;
 use Nowo\MailKitBundle\Graph\Transport\GraphTransportFactory;
@@ -90,11 +113,14 @@ use Symfony\Component\DependencyInjection\Definition;
 use Symfony\Component\DependencyInjection\Extension\Extension;
 use Symfony\Component\DependencyInjection\Extension\PrependExtensionInterface;
 use Symfony\Component\DependencyInjection\Reference;
+use Symfony\Component\HtmlSanitizer\HtmlSanitizer;
 use Symfony\Component\HttpKernel\KernelEvents;
+use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\RateLimiter\RateLimiterFactory;
 use Symfony\Component\RateLimiter\Storage\CacheStorage;
 
 use function array_key_exists;
+use function class_exists;
 use function implode;
 use function interface_exists;
 use function is_array;
@@ -117,6 +143,12 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
 
     /** Service id of the test e-mail rate limiter factory. */
     public const LIMITER_ID = 'nowo_mail_kit.test_email.limiter';
+
+    /** Service id of the Graph webhook rate limiter factory of verified requests (1.9). */
+    public const GRAPH_WEBHOOK_LIMITER_ID = 'nowo_mail_kit.graph.webhook_limiter';
+
+    /** Service id of the per-client-IP rate limiter factory of unverified webhook requests (1.9). */
+    public const GRAPH_WEBHOOK_CLIENT_LIMITER_ID = 'nowo_mail_kit.graph.webhook_client_limiter';
 
     /** Container parameter: true when the configuration is read from Instance Settings (1.6). */
     public const INSTANCE_SETTINGS_PARAMETER = 'nowo_mail_kit.instance_settings';
@@ -225,7 +257,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $config = $this->processConfiguration(new Configuration(), $configs);
         $this->assertLiteralBooleans($config);
 
-        /** @var array{mailer: array{decorate: bool, dsn_provider: string|null, sender_provider: string|null, fallback_counts_as_ready: bool}, dsn: array{allowed_schemes: list<string>, allowed_hosts: list<string>, allow_private_hosts: bool, allow_insecure_tls: bool, resolve_dns: bool, dns_timeout: float}, sender: array{default_from: string|null, default_from_name: string|null, require_public_domain: bool}, resend: array{enabled: bool, api_timeout: float}, bootstrap: array{mailer_dsn: string|null, resend_api_key: string|null}, test_email: array{rate_limit: int, rate_interval: string}, log: array{enabled: bool, map_entities: bool, store_bodies: bool, retention_days: int, purge_batch_size: int}, personal_data: array{enabled: bool, subject_resolver: string|null}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>, page_size: int, export: array{enabled: bool, max_rows: int, access_roles: list<string>, include_bodies: bool, body_batch_bytes: int}}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}, brand: array{mode: string, name: string|null, colors: array<string, string>, max_image_bytes: int, max_total_bytes: int, max_image_side: int}, graph: array{enabled: bool, mailbox_provider: string|null, default_profile: string, profiles: array<string, array{tenant_id: string, client_id: string, client_secret: string, mailbox: string}>, http_client: string, token_cache: string, timeout: float, upload_hosts: list<string>, limits: array{max_attachments: int, max_attachment_bytes: int, max_message_bytes: int}}} $config */
+        /** @var array{mailer: array{decorate: bool, dsn_provider: string|null, sender_provider: string|null, fallback_counts_as_ready: bool}, dsn: array{allowed_schemes: list<string>, allowed_hosts: list<string>, allow_private_hosts: bool, allow_insecure_tls: bool, resolve_dns: bool, dns_timeout: float}, sender: array{default_from: string|null, default_from_name: string|null, require_public_domain: bool}, resend: array{enabled: bool, api_timeout: float}, bootstrap: array{mailer_dsn: string|null, resend_api_key: string|null}, test_email: array{rate_limit: int, rate_interval: string}, log: array{enabled: bool, map_entities: bool, store_bodies: bool, retention_days: int, purge_batch_size: int}, personal_data: array{enabled: bool, subject_resolver: string|null}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>, page_size: int, export: array{enabled: bool, max_rows: int, access_roles: list<string>, include_bodies: bool, body_batch_bytes: int}}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}, brand: array{mode: string, name: string|null, colors: array<string, string>, max_image_bytes: int, max_total_bytes: int, max_image_side: int}, graph: array{enabled: bool, mailbox_provider: string|null, default_profile: string, profiles: array<string, array{tenant_id: string, client_id: string, client_secret: string, mailbox: string}>, http_client: string, token_cache: string, timeout: float, draft_cleanup: array{bus: string|null, delay_ms: int}, upload_hosts: list<string>, limits: array{max_attachments: int, max_attachment_bytes: int, max_message_bytes: int}, inbound: array{enabled: bool, webhook: array{path: string}}}} $config */
         $webUi = $config['web_ui'];
 
         $settings = $this->hasBundle($container, 'NowoInstanceSettingsBundle') || $container->hasExtension('nowo_instance_settings');
@@ -256,16 +288,22 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $this->registerTestMail($container, $config, $settings);
         $this->registerWebUi($container, $config, $settings);
         $this->registerBrand($container, $config['brand']);
-        $this->registerGraph($container, $config['graph']);
+        $this->registerGraph($container, $config['graph'], $config['doctrine']);
+        $container->setParameter('nowo_mail_kit.graph.webhook_path', $config['graph']['inbound']['webhook']['path']);
+        $container->setDefinition(GraphWebhookRouteLoader::class, (new Definition(GraphWebhookRouteLoader::class, [
+            $config['graph']['inbound']['enabled'],
+            $config['graph']['inbound']['webhook']['path'],
+        ]))->addTag('routing.loader'));
     }
 
     /**
      * 1.8 (spec 229): Microsoft Graph sending, only with `graph.enabled: true` (nothing is registered otherwise). The
      * token provider, API client and sender are stateless; the mailbox port is the configured profiles or a host service.
      *
-     * @param array{enabled: bool, mailbox_provider: string|null, default_profile: string, profiles: array<string, array{tenant_id: string, client_id: string, client_secret: string, mailbox: string}>, http_client: string, token_cache: string, timeout: float, upload_hosts: list<string>, limits: array{max_attachments: int, max_attachment_bytes: int, max_message_bytes: int}} $graph
+     * @param array{enabled: bool, mailbox_provider: string|null, default_profile: string, profiles: array<string, array{tenant_id: string, client_id: string, client_secret: string, mailbox: string}>, http_client: string, token_cache: string, timeout: float, draft_cleanup: array{bus: string|null, delay_ms: int}, upload_hosts: list<string>, limits: array{max_attachments: int, max_attachment_bytes: int, max_message_bytes: int}, inbound: array{enabled: bool, webhook: array{path: string}}} $graph
+     * @param array{table_prefix: string, entity_manager: string|null} $doctrine
      */
-    private function registerGraph(ContainerBuilder $container, array $graph): void
+    private function registerGraph(ContainerBuilder $container, array $graph, array $doctrine): void
     {
         if (!$graph['enabled']) {
             return;
@@ -299,12 +337,136 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             new Reference(GraphApiClient::class),
             new Definition(GraphSendLimits::class, [$graph['limits']['max_attachments'], $graph['limits']['max_attachment_bytes'], $graph['limits']['max_message_bytes']]),
             $logger,
+            is_string($graph['draft_cleanup']['bus']) && $graph['draft_cleanup']['bus'] !== '' ? new Reference($graph['draft_cleanup']['bus']) : null,
+            $graph['draft_cleanup']['delay_ms'],
         ]))->setPublic(true));
+        if (is_string($graph['draft_cleanup']['bus']) && $graph['draft_cleanup']['bus'] !== '') {
+            self::requireInterface(MessageBusInterface::class, 'NowoMailKitBundle: nowo_mail_kit.graph.draft_cleanup.bus requires symfony/messenger.');
+            $container->setDefinition(DeleteGraphDraftHandler::class, (new Definition(DeleteGraphDraftHandler::class, [new Reference(GraphMailSender::class)]))
+                ->addTag('messenger.message_handler', ['handles' => DeleteGraphDraft::class]));
+        }
         $container->setDefinition(GraphTransportFactory::class, (new Definition(GraphTransportFactory::class, [
             new Reference(GraphMailSender::class),
             new Reference('event_dispatcher', ContainerInterface::NULL_ON_INVALID_REFERENCE),
             $logger,
         ]))->addTag('mailer.transport_factory'));
+
+        $this->registerGraphInbound($container, $graph['inbound'], $doctrine);
+    }
+
+    /**
+     * 1.9: the inbound pipeline, only with `graph.inbound.enabled` (webhook controller, subscriptions, delta sweep,
+     * processor, Messenger handlers, commands, DBAL store and its schema listener).
+     *
+     * @param array<string, mixed> $inbound
+     * @param array{table_prefix: string, entity_manager: string|null} $doctrine
+     */
+    private function registerGraphInbound(ContainerBuilder $container, array $inbound, array $doctrine): void
+    {
+        /** @var array{enabled: bool, handler: string, profiles: list<string>, profiles_provider: string|null, bus: string, connection: string|null, folder: string, webhook: array{path: string, notification_url: string|null, max_body_bytes: int, max_notifications: int, rate_limit: int, client_rate_limit: int, allowed_ips: list<string>}, subscriptions: array{lifetime_minutes: int, renew_before_minutes: int}, sweep: array{initial_window: string, page_size: int, max_pages: int}, allow_remote_images: bool, retention_days: int, stale_claim_seconds: int, limits: array{max_message_bytes: int, max_attachments: int, max_attachment_bytes: int, max_total_attachment_bytes: int, max_html_bytes: int, allowed_types: list<string>}} $inbound */
+        if (!$inbound['enabled']) {
+            return;
+        }
+        self::requireInterface(MessageBusInterface::class, 'NowoMailKitBundle: nowo_mail_kit.graph.inbound requires symfony/messenger (the webhook and the sweep only enqueue work).');
+        self::requireInterface(HtmlSanitizer::class, 'NowoMailKitBundle: nowo_mail_kit.graph.inbound requires symfony/html-sanitizer (inbound HTML is sanitised).');
+        self::requireInterface(finfo::class, 'NowoMailKitBundle: nowo_mail_kit.graph.inbound requires the PHP fileinfo extension (attachment types are detected from the bytes).');
+        if (!$this->hasBundle($container, 'DoctrineBundle') && !$container->hasExtension('doctrine')) {
+            throw new LogicException('NowoMailKitBundle: nowo_mail_kit.graph.inbound requires doctrine/doctrine-bundle (DBAL connection of the inbound tables).');
+        }
+        $logger = new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE);
+        $clock  = new Reference('clock', ContainerInterface::NULL_ON_INVALID_REFERENCE);
+        $bus    = new Reference($inbound['bus']);
+        $limits = $inbound['limits'];
+
+        $container->setDefinition(GraphInboundStore::class, new Definition(GraphInboundStore::class, [new Reference('doctrine'), $inbound['connection'], $doctrine['table_prefix'], $clock]));
+        $container->setDefinition(GraphInboundSchemaListener::class, (new Definition(GraphInboundSchemaListener::class, [new Reference(GraphInboundStore::class), new Reference('doctrine'), $doctrine['entity_manager']]))
+            ->addTag('doctrine.event_listener', ['event' => 'postGenerateSchema']));
+
+        $profilesProvider = $inbound['profiles_provider'];
+        if (is_string($profilesProvider) && $profilesProvider !== '') {
+            $container->setAlias(GraphInboundProfilesProviderInterface::class, $profilesProvider);
+        } else {
+            $container->setDefinition(ConfiguredInboundProfiles::class, new Definition(ConfiguredInboundProfiles::class, [$inbound['profiles'], new Reference(GraphMailboxProviderInterface::class)]));
+            $container->setAlias(GraphInboundProfilesProviderInterface::class, ConfiguredInboundProfiles::class);
+        }
+        $container->setAlias(GraphInboundHandlerInterface::class, $inbound['handler']);
+
+        $container->setDefinition(GraphMessageNormalizer::class, new Definition(GraphMessageNormalizer::class, [
+            new Definition(InboundHtmlSanitizer::class, [$inbound['allow_remote_images'], $limits['max_html_bytes']]),
+        ]));
+        $container->setDefinition(GraphInboundProcessor::class, (new Definition(GraphInboundProcessor::class, [
+            new Reference(GraphMailboxProviderInterface::class),
+            new Reference(GraphApiClient::class),
+            new Reference(GraphInboundStore::class),
+            new Reference(GraphInboundHandlerInterface::class),
+            new Reference(GraphMessageNormalizer::class),
+            new Definition(InboundLimits::class, [$limits['max_message_bytes'], $limits['max_attachments'], $limits['max_attachment_bytes'], $limits['max_total_attachment_bytes'], $limits['max_html_bytes'], $limits['allowed_types']]),
+            $inbound['stale_claim_seconds'],
+            $logger,
+        ]))->setPublic(true));
+        $container->setDefinition(GraphDeltaSweeper::class, (new Definition(GraphDeltaSweeper::class, [
+            new Reference(GraphMailboxProviderInterface::class),
+            new Reference(GraphApiClient::class),
+            new Reference(GraphInboundStore::class),
+            $bus,
+            $inbound['sweep']['initial_window'],
+            $inbound['sweep']['page_size'],
+            $inbound['folder'],
+            $clock,
+            $logger,
+        ]))->setPublic(true));
+        $container->setDefinition(GraphSubscriptionManager::class, (new Definition(GraphSubscriptionManager::class, [
+            new Reference(GraphMailboxProviderInterface::class),
+            new Reference(GraphApiClient::class),
+            new Reference(GraphInboundStore::class),
+            $inbound['webhook']['notification_url'],
+            $inbound['subscriptions']['lifetime_minutes'],
+            $inbound['subscriptions']['renew_before_minutes'],
+            $inbound['folder'],
+            $clock,
+            $logger,
+        ]))->setPublic(true));
+        $container->setDefinition(GraphInboundMessageHandler::class, (new Definition(GraphInboundMessageHandler::class, [
+            new Reference(GraphInboundProcessor::class),
+            new Reference(GraphDeltaSweeper::class),
+            new Reference(GraphSubscriptionManager::class),
+            new Reference(GraphInboundProfilesProviderInterface::class),
+            new Reference(GraphInboundStore::class),
+            $inbound['sweep']['max_pages'],
+            $inbound['retention_days'],
+            $clock,
+            $logger,
+        ]))
+            ->addTag('messenger.message_handler', ['handles' => FetchGraphMessage::class, 'method' => 'fetch'])
+            ->addTag('messenger.message_handler', ['handles' => SweepGraphMailbox::class, 'method' => 'sweep'])
+            ->addTag('messenger.message_handler', ['handles' => RenewGraphSubscriptions::class, 'method' => 'renew']));
+
+        $container->setDefinition(self::GRAPH_WEBHOOK_LIMITER_ID, new Definition(RateLimiterFactory::class, [
+            ['id' => 'nowo_mail_kit_graph_webhook', 'policy' => 'sliding_window', 'limit' => $inbound['webhook']['rate_limit'], 'interval' => '1 minute'],
+            new Definition(CacheStorage::class, [new Reference('cache.app')]),
+        ]));
+        $container->setDefinition(self::GRAPH_WEBHOOK_CLIENT_LIMITER_ID, new Definition(RateLimiterFactory::class, [
+            ['id' => 'nowo_mail_kit_graph_webhook_client', 'policy' => 'sliding_window', 'limit' => $inbound['webhook']['client_rate_limit'], 'interval' => '1 minute'],
+            new Definition(CacheStorage::class, [new Reference('cache.app')]),
+        ]));
+        $container->setDefinition(GraphWebhookController::class, (new Definition(GraphWebhookController::class, [
+            new Reference(GraphInboundStore::class),
+            $bus,
+            new Reference(self::GRAPH_WEBHOOK_LIMITER_ID),
+            new Reference(self::GRAPH_WEBHOOK_CLIENT_LIMITER_ID),
+            new Reference(GraphInboundProfilesProviderInterface::class),
+            $inbound['webhook']['max_body_bytes'],
+            $inbound['webhook']['max_notifications'],
+            $inbound['webhook']['allowed_ips'],
+            $logger,
+        ]))->setPublic(true)->addTag('controller.service_arguments'));
+
+        $container->setDefinition(GraphSubscriptionsCommand::class, (new Definition(GraphSubscriptionsCommand::class, [new Reference(GraphSubscriptionManager::class), new Reference(GraphInboundProfilesProviderInterface::class)]))
+            ->addTag('console.command', ['command' => GraphSubscriptionsCommand::NAME]));
+        $container->setDefinition(GraphSweepCommand::class, (new Definition(GraphSweepCommand::class, [new Reference(GraphInboundMessageHandler::class)]))
+            ->addTag('console.command', ['command' => GraphSweepCommand::NAME]));
+        $container->setDefinition(GraphSchemaCommand::class, (new Definition(GraphSchemaCommand::class, [new Reference(GraphInboundStore::class)]))
+            ->addTag('console.command', ['command' => GraphSchemaCommand::NAME]));
     }
 
     /**
@@ -793,24 +955,36 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
     {
         /** @var array<string, array<string, mixed>> $config */
         $switches = [
-            'mailer.decorate'                => $config['mailer']['decorate'] ?? null,
-            'dsn.allow_private_hosts'        => $config['dsn']['allow_private_hosts'] ?? null,
-            'dsn.allow_insecure_tls'         => $config['dsn']['allow_insecure_tls'] ?? null,
-            'resend.enabled'                 => $config['resend']['enabled'] ?? null,
-            'log.enabled'                    => $config['log']['enabled'] ?? null,
-            'log.map_entities'               => $config['log']['map_entities'] ?? null,
-            'log.store_bodies'               => $config['log']['store_bodies'] ?? null,
-            'personal_data.enabled'          => $config['personal_data']['enabled'] ?? null,
-            'graph.enabled'                  => $config['graph']['enabled'] ?? null,
-            'web_ui.enabled'                 => $config['web_ui']['enabled'] ?? null,
-            'web_ui.export.enabled'          => $config['web_ui']['export']['enabled'] ?? null,
-            'web_ui.export.include_bodies'   => $config['web_ui']['export']['include_bodies'] ?? null,
-            'security.allow_unauthenticated' => $config['security']['allow_unauthenticated'] ?? null,
+            'mailer.decorate'                   => $config['mailer']['decorate'] ?? null,
+            'dsn.allow_private_hosts'           => $config['dsn']['allow_private_hosts'] ?? null,
+            'dsn.allow_insecure_tls'            => $config['dsn']['allow_insecure_tls'] ?? null,
+            'resend.enabled'                    => $config['resend']['enabled'] ?? null,
+            'log.enabled'                       => $config['log']['enabled'] ?? null,
+            'log.map_entities'                  => $config['log']['map_entities'] ?? null,
+            'log.store_bodies'                  => $config['log']['store_bodies'] ?? null,
+            'personal_data.enabled'             => $config['personal_data']['enabled'] ?? null,
+            'graph.enabled'                     => $config['graph']['enabled'] ?? null,
+            'graph.inbound.enabled'             => $config['graph']['inbound']['enabled'] ?? null,
+            'graph.inbound.allow_remote_images' => $config['graph']['inbound']['allow_remote_images'] ?? null,
+            'web_ui.enabled'                    => $config['web_ui']['enabled'] ?? null,
+            'web_ui.export.enabled'             => $config['web_ui']['export']['enabled'] ?? null,
+            'web_ui.export.include_bodies'      => $config['web_ui']['export']['include_bodies'] ?? null,
+            'security.allow_unauthenticated'    => $config['security']['allow_unauthenticated'] ?? null,
         ];
         foreach ($switches as $path => $value) {
             if (!is_bool($value)) {
                 throw new InvalidConfigurationException(sprintf('nowo_mail_kit.%s must be a literal boolean (true or false); environment placeholders such as %%env(bool:...)%% are not supported for these switches.', $path));
             }
+        }
+    }
+
+    /**
+     * Fails the build when an optional component's interface or class is missing.
+     */
+    public static function requireInterface(string $interface, string $message): void
+    {
+        if (!interface_exists($interface) && !class_exists($interface)) {
+            throw new LogicException($message);
         }
     }
 

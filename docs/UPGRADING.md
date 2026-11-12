@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.9.0](#to-190)
 - [To 1.8.0](#to-180)
 - [To 1.7.1](#to-171)
 - [To 1.7.0](#to-170)
@@ -23,6 +24,47 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+## To 1.9.0
+
+From **1.8.0**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
+
+Next minor: 1.9.0. **No change is needed**: the Graph inbound pipeline is opt-in (`nowo_mail_kit.graph.inbound.enabled`,
+default `false`); with it off no route, table, handler or command is added and no new package is required.
+`graph.inbound` needs `symfony/messenger`, `symfony/html-sanitizer` and the PHP `fileinfo` extension (suggested; the
+container refuses to compile without them). New sender option `graph.draft_cleanup` (`bus`, `delay_ms`): after an
+ambiguous send failure a delayed `DeleteGraphDraft` message deletes the draft only if it is still a draft (route it
+to a transport that supports delays); without a bus the draft state is read once more at once.
+
+The default `graph.inbound.limits.allowed_types` does **not** include `application/zip` (owner decision 2026-11-12):
+add it explicitly if your users must send archives (their content is not scanned).
+
+To read the shared mailbox ([USAGE](USAGE.md#inbound-mail-from-a-graph-mailbox)):
+
+1. Require `symfony/messenger` and `symfony/html-sanitizer` (and the `fileinfo` extension), and route `Nowo\MailKitBundle\Graph\Inbound\Message\FetchGraphMessage`,
+   `SweepGraphMailbox` and `RenewGraphSubscriptions` to an async transport.
+2. Implement `GraphInboundHandlerInterface` (route / quarantine / discard; copy attachment streams inside the call).
+3. Enable it:
+
+   ```yaml
+   nowo_mail_kit:
+       graph:
+           inbound:
+               enabled: true
+               handler: App\Mail\TaskMailInbound
+               webhook:
+                   notification_url: 'https://app.example.com/hooks/mail-kit/v1/graph'
+   ```
+
+4. Create the tables: `doctrine:migrations:diff` (ORM hosts) or `nowo:mail-kit:graph:schema` (prints the SQL).
+5. Import the webhook route (`type: nowo_mail_kit_graph_webhook`) and make its path public and stateless in the
+   firewall (`access_control: { path: ^/hooks/mail-kit/, roles: PUBLIC_ACCESS }`).
+6. Schedule `nowo:mail-kit:graph:subscriptions` (hourly) and `nowo:mail-kit:graph:sweep` (every 5 minutes), or the
+   `RenewGraphSubscriptions` / `SweepGraphMailbox` messages with Symfony Scheduler.
 
 ## To 1.8.0
 

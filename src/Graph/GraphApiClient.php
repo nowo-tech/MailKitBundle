@@ -9,6 +9,8 @@ use Psr\Log\LoggerInterface;
 use Symfony\Contracts\HttpClient\Exception\ExceptionInterface as HttpClientException;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
+use function ftell;
+use function fwrite;
 use function in_array;
 use function is_array;
 use function is_numeric;
@@ -16,6 +18,7 @@ use function is_string;
 use function parse_url;
 use function preg_match;
 use function rawurlencode;
+use function sprintf;
 use function str_contains;
 use function str_ends_with;
 use function str_starts_with;
@@ -43,6 +46,9 @@ final class GraphApiClient
 
     /** The only host that receives a Graph bearer token. */
     public const GRAPH_HOST = 'graph.microsoft.com';
+
+    /** Largest JSON answer read by default (16 MiB). */
+    public const MAX_RESPONSE_BYTES = 16_777_216;
 
     /** Hosts of attachment upload sessions (Outlook REST). */
     public const DEFAULT_UPLOAD_HOSTS = ['outlook.office.com', 'outlook.office365.com'];
@@ -75,22 +81,92 @@ final class GraphApiClient
      * @param array<string, mixed> $options HttpClient options (json, body, headers)
      * @param list<int> $expected accepted statuses
      * @param string $operation fixed label for errors and logs ("create draft", "send"...)
+     * @param int $maxBytes largest response body read (a longer one fails with {@see GraphException::REASON_TOO_LARGE})
      *
      * @throws GraphException
      *
      * @return array<mixed>
      */
-    public function call(GraphMailbox $mailbox, string $method, string $path, array $options, array $expected, string $operation): array
+    public function call(GraphMailbox $mailbox, string $method, string $path, array $options, array $expected, string $operation, int $maxBytes = self::MAX_RESPONSE_BYTES): array
     {
         if (!str_starts_with($path, '/')) {
             throw GraphException::untrustedUrl($operation);
         }
 
+        return $this->authorized($mailbox, $method, self::BASE_URL . $path, $options, $expected, $operation, $maxBytes, null);
+    }
+
+    /**
+     * Calls an absolute URL returned by Graph (`@odata.nextLink`, `@odata.deltaLink`) after {@see assertGraphUrl()}.
+     *
+     * @param array<string, mixed> $options
+     * @param list<int> $expected
+     *
+     * @throws GraphException
+     *
+     * @return array<mixed>
+     */
+    public function callUrl(GraphMailbox $mailbox, string $method, string $url, array $options, array $expected, string $operation, int $maxBytes = self::MAX_RESPONSE_BYTES): array
+    {
+        $this->assertGraphUrl($url, $operation);
+
+        return $this->authorized($mailbox, $method, $url, $options, $expected, $operation, $maxBytes, null);
+    }
+
+    /**
+     * Streams a 2xx response body (e.g. an attachment's `$value`) into `$sink`, at most `$maxBytes` (a longer body
+     * fails with {@see GraphException::REASON_TOO_LARGE}); returns the bytes written.
+     *
+     * @param resource $sink writable stream
+     *
+     * @throws GraphException
+     */
+    public function download(GraphMailbox $mailbox, string $path, mixed $sink, int $maxBytes, string $operation): int
+    {
+        if (!str_starts_with($path, '/')) {
+            throw GraphException::untrustedUrl($operation);
+        }
+        $start = (int) ftell($sink);
+        $this->authorized($mailbox, 'GET', self::BASE_URL . $path, ['headers' => ['Accept' => '*/*']], [200], $operation, $maxBytes, $sink);
+
+        return (int) ftell($sink) - $start;
+    }
+
+    /**
+     * Refuses a URL that is not `https://graph.microsoft.com/v1.0/…` (port 443, no user info): links in Graph answers
+     * are followed only on Graph itself, so the bearer token never leaves it (SSRF guard).
+     *
+     * @throws GraphException
+     */
+    public function assertGraphUrl(string $url, string $operation = 'link'): void
+    {
+        $parts = parse_url($url);
+        if (!is_array($parts)
+            || strtolower($parts['scheme'] ?? '') !== 'https'
+            || isset($parts['user']) || isset($parts['pass'])
+            || !$this->defaultHttpsPort($url, $parts)
+            || strtolower($parts['host'] ?? '') !== self::GRAPH_HOST
+            || !str_starts_with($parts['path'] ?? '', '/v1.0/')
+            || isset($parts['fragment'])
+        ) {
+            throw GraphException::untrustedUrl($operation);
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $options
+     * @param list<int> $expected
+     * @param resource|null $sink
+     *
+     * @return array<mixed>
+     */
+    private function authorized(GraphMailbox $mailbox, string $method, string $url, array $options, array $expected, string $operation, int $maxBytes, mixed $sink): array
+    {
         for ($attempt = 0;; ++$attempt) {
-            $headers                                  = is_array($options['headers'] ?? null) ? $options['headers'] : [];
-            $headers['Authorization']                 = 'Bearer ' . $this->tokens->token($mailbox);
-            $headers['Accept']                        = 'application/json';
-            [$status, $data, $requestId, $retryAfter] = $this->send($method, self::BASE_URL . $path, ['headers' => $headers] + $options, $operation, $mailbox);
+            $headers                  = is_array($options['headers'] ?? null) ? $options['headers'] : [];
+            $headers['Authorization'] = 'Bearer ' . $this->tokens->token($mailbox);
+            $headers['Accept'] ??= 'application/json';
+            [$status, $data, $requestId, $retryAfter] = $this->send($method, $url, ['headers' => $headers] + $options, $operation, $mailbox, $maxBytes, $sink);
             if ($status === 401 && $attempt === 0) {
                 $this->tokens->forget($mailbox);
 
@@ -199,10 +275,11 @@ final class GraphApiClient
 
     /**
      * @param array<string, mixed> $options
+     * @param resource|null $sink receives a 2xx body instead of the JSON decoding
      *
      * @return array{0: int, 1: array<mixed>, 2: string|null, 3: int|null} status, JSON body, request id, Retry-After
      */
-    private function send(string $method, string $url, array $options, string $operation, GraphMailbox $mailbox): array
+    private function send(string $method, string $url, array $options, string $operation, GraphMailbox $mailbox, int $maxBytes = self::MAX_RESPONSE_BYTES, mixed $sink = null): array
     {
         try {
             $response = $this->client->request($method, $url, $options + [
@@ -212,7 +289,23 @@ final class GraphApiClient
             ]);
             $status  = $response->getStatusCode();
             $headers = $response->getHeaders(false);
-            $content = $response->getContent(false);
+            $toSink  = $sink !== null && $status >= 200 && $status < 300;
+            $content = '';
+            $size    = 0;
+            foreach ($this->client->stream($response) as $chunk) {
+                $piece = $chunk->getContent();
+                $size += strlen($piece);
+                if ($size > $maxBytes) {
+                    $response->cancel();
+
+                    throw new GraphException(sprintf('Microsoft Graph %s answer exceeds the size limit (%d bytes).', $operation, $maxBytes), GraphException::REASON_TOO_LARGE, $status);
+                }
+                if ($toSink) {
+                    fwrite($sink, $piece);
+                } else {
+                    $content .= $piece;
+                }
+            }
         } catch (HttpClientException) {
             $this->logger?->warning('Microsoft Graph call failed.', ['bundle' => 'NowoMailKitBundle', 'profile' => $mailbox->profile, 'operation' => $operation, 'error' => 'transport']);
 

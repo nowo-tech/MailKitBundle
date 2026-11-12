@@ -96,6 +96,7 @@
         "symfony/browser-kit": "^7.4 || ^8.0",
         "symfony/css-selector": "^7.4 || ^8.0",
         "symfony/dom-crawler": "^7.4 || ^8.0",
+        "symfony/html-sanitizer": "^7.4 || ^8.0",
         "symfony/mailgun-mailer": "^7.4 || ^8.0",
         "symfony/messenger": "^7.4 || ^8.0",
         "symfony/phpunit-bridge": "^7.4 || ^8.0",
@@ -114,6 +115,9 @@
         "nowo-tech/brand-contracts": "^1.0 — brand name, colours and logo (CID) of the optional branded e-mail layout from a BrandProviderInterface service (nowo_mail_kit.brand, spec 220)",
         "nowo-tech/user-kit-bundle": "GDPR export / erasure: registers the emails_received eraser and export section (personal_data.enabled, 1.7)",
         "symfony/flex": "For automatic recipe installation",
+        "ext-fileinfo": "Required for the Microsoft Graph inbound pipeline (graph.inbound, 1.9): attachment types are detected from the bytes",
+        "symfony/html-sanitizer": "Required for the Microsoft Graph inbound pipeline (graph.inbound, 1.9): inbound HTML is sanitised",
+        "symfony/messenger": "Required for the Microsoft Graph inbound pipeline (graph.inbound, 1.9): the webhook and the sweep only enqueue work",
         "symfony/resend-mailer": "Required for resend+api:// DSNs and the optional Resend settings section",
         "symfony/security-bundle": "Required for the admin UI unless security.allow_unauthenticated is true (dev / demo only)"
     },

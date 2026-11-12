@@ -6,47 +6,173 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
-- [[1.8.0] - 2026-11-12](#180---2026-11-12)
   - [Added](#added)
+  - [Changed](#changed)
+  - [Audit NQ (before the 1.9.0 tag)](#audit-nq-before-the-190-tag)
+  - [Audit NQ-v (verification, before the 1.9.0 tag)](#audit-nq-v-verification-before-the-190-tag)
   - [Security](#security)
   - [Tests](#tests)
+- [[1.8.0] - 2026-11-12](#180---2026-11-12)
+  - [Added](#added-1)
+  - [Security](#security-1)
+  - [Tests](#tests-1)
 - [[1.7.1] - 2026-11-11](#171---2026-11-11)
   - [Fixed](#fixed)
-  - [Tests](#tests-1)
+  - [Tests](#tests-2)
   - [Documentation](#documentation)
 - [[1.7.0] - 2026-11-11](#170---2026-11-11)
-  - [Added](#added-1)
-  - [Changed](#changed)
-- [[1.6.0] - 2026-11-11](#160---2026-11-11)
   - [Added](#added-2)
   - [Changed](#changed-1)
-- [[1.5.0] - 2026-11-10](#150---2026-11-10)
+- [[1.6.0] - 2026-11-11](#160---2026-11-11)
   - [Added](#added-3)
   - [Changed](#changed-2)
-- [[1.4.0] - 2026-11-09](#140---2026-11-09)
+- [[1.5.0] - 2026-11-10](#150---2026-11-10)
   - [Added](#added-4)
-  - [Security](#security-1)
-- [[1.3.0] - 2026-11-02](#130---2026-11-02)
-  - [Added](#added-5)
   - [Changed](#changed-3)
+- [[1.4.0] - 2026-11-09](#140---2026-11-09)
+  - [Added](#added-5)
   - [Security](#security-2)
-- [[1.2.0] - 2026-11-02](#120---2026-11-02)
+- [[1.3.0] - 2026-11-02](#130---2026-11-02)
   - [Added](#added-6)
   - [Changed](#changed-4)
+  - [Security](#security-3)
+- [[1.2.0] - 2026-11-02](#120---2026-11-02)
+  - [Added](#added-7)
+  - [Changed](#changed-5)
   - [Fixed](#fixed-1)
 - [[1.1.1] - 2026-11-01](#111---2026-11-01)
-  - [Security](#security-3)
-  - [Changed](#changed-5)
+  - [Security](#security-4)
+  - [Changed](#changed-6)
   - [Fixed](#fixed-2)
 - [[1.1.0] - 2026-11-01](#110---2026-11-01)
-  - [Added](#added-7)
-  - [Changed](#changed-6)
-- [[1.0.0] - 2026-10-31](#100---2026-10-31)
   - [Added](#added-8)
+  - [Changed](#changed-7)
+- [[1.0.0] - 2026-10-31](#100---2026-10-31)
+  - [Added](#added-9)
   - [Security (independent audit, Appendix CA)](#security-independent-audit-appendix-ca)
   - [Security (re-verification follow-ups)](#security-re-verification-follow-ups)
 
 ## [Unreleased]
+
+Next minor: 1.9.0 (Beacon spec 229 block B, D-20261112-09: inbound client e-mail from the Graph mailbox).
+
+### Added
+
+- **Inbound mail from Microsoft Graph mailboxes (opt-in, `graph.inbound.enabled`; needs `graph.enabled`,
+  symfony/messenger and a DBAL connection).** Each new message is fetched, normalised and handed to your
+  `Graph\Inbound\GraphInboundHandlerInterface`, which returns an `InboundDecision` (`InboundAction::Route`,
+  `Quarantine` or `Discard`).
+- **Webhook** (route loader `nowo_mail_kit_graph_webhook`, `POST graph.inbound.webhook.path`, default
+  `/hooks/mail-kit/v1/graph`, stateless): echoes Graph's `validationToken` as `text/plain` (1–1024 printable ASCII
+  characters, `nosniff`, `default-src 'none'`), checks every notification against a stored subscription and its
+  `clientState` (SHA-256 digests, `hash_equals`), caps the body (`max_body_bytes`), the batch (`max_notifications`) and
+  the rate (per-client-IP and verified buckets, 429), refuses anything else (400 / 403 / 413 / 415) and only **enqueues**
+  `FetchGraphMessage` (lifecycle events: `RenewGraphSubscriptions` / `SweepGraphMailbox`).
+- **Subscriptions** (`GraphSubscriptionManager`, command `nowo:mail-kit:graph:subscriptions [--profile] [--delete]`,
+  message `RenewGraphSubscriptions`): one per profile on the folder's messages (`created`, immutable ids, lifecycle
+  URL), a fresh random 256-bit `clientState` stored as SHA-256 only, renewed `renew_before_minutes` before expiry,
+  recreated when Graph forgot it.
+- **Delta sweep** (`GraphDeltaSweeper`, command `nowo:mail-kit:graph:sweep`, message `SweepGraphMailbox`): missed
+  notifications and hosts without a public URL; the delta / next link is stored per profile after every page, links
+  are followed only on `https://graph.microsoft.com/v1.0/`, the first run reads back `initial_window` (`P2D`) only, an
+  expired token (410) restarts from the window; old idempotency records are purged after each run (`retention_days`).
+- **Normalised DTO** `GraphInboundMessage`: from / sender / reply-to / to / cc (`InboundAddress` with the
+  plus-address tag of the mailbox), `plusTags` (To, Cc and envelope headers), subject, text, sanitised HTML,
+  `internetMessageId`, `inReplyTo`, `references`, `conversationId`, received time, `AuthenticationResults` (SPF / DKIM
+  / DMARC of the first `Authentication-Results` header), a `forwarded` flag (subject prefixes, attached e-mail,
+  `Resent-*` / `X-Forwarded-*` headers, forward markers) and `InboundAttachment`s.
+- **Idempotency** by internetMessageId per profile in the bundle table `<prefix>mail_kit_graph_inbound` (SHA-256 key,
+  no id or address in clear): a message seen by the webhook and the sweep is processed once; a host exception releases
+  the claim (retry); a claim older than `stale_claim_seconds` is taken over. DBAL on the configured connection (never
+  the host's entity manager, never a flush), in a savepoint when a host transaction is open.
+- Tables `mail_kit_graph_subscription`, `mail_kit_graph_delta`, `mail_kit_graph_inbound` (with `doctrine.table_prefix`):
+  added to the ORM schema of the configured entity manager (`postGenerateSchema`, so migrations diff creates them) and
+  printed / created by `nowo:mail-kit:graph:schema [--force]`.
+- Host port `GraphInboundProfilesProviderInterface` (default: `graph.inbound.profiles`, else the default profile).
+- `GraphApiClient::callUrl()` (absolute Graph links, `assertGraphUrl()`), `download()` (streamed into a sink, capped)
+  and a response size cap on every call (`GraphException::REASON_TOO_LARGE`).
+- Dependencies: `symfony/messenger`, `symfony/html-sanitizer` and `ext-fileinfo` are suggested; `graph.inbound`
+  refuses to compile without them (no new hard requirement for hosts that do not read mail).
+
+### Changed
+
+- After an ambiguous send failure that still reads as a draft (review of NK-1, audit NQ-L5): with
+  `graph.draft_cleanup.bus` the sender dispatches a delayed `DeleteGraphDraft` (`DelayStamp`, `delay_ms`, default
+  5 s) that deletes the message only if it is still a draft, and never blocks the worker; without a bus it reads
+  `isDraft` once more at once before deleting (a send Exchange completes after that read is still deleted with its
+  draft: residual race, documented).
+
+### Audit NQ (before the 1.9.0 tag)
+
+- M1: the webhook reads the request body to the cap whatever the stream's chunk size (`php://input` hands out 8 KiB
+  per `fread()`); test with an 8 KiB-chunk stream wrapper.
+- M2: two rate-limit buckets — a per-client-IP bucket for unverified traffic (validation, malformed, rejected;
+  `webhook.client_rate_limit`, default 60 per minute) and the global `webhook.rate_limit` consumed only by requests
+  with a valid notification; each subscription is verified once per request; a request stops with 403 after 5
+  rejected items; optional source allow-list `webhook.allowed_ips` (CIDR).
+- L1: lifecycle events carry a reason: `reauthorizationRequired` → `POST /subscriptions/{id}/reauthorize` (404 →
+  recreate), `subscriptionRemoved` → forget and recreate (`RenewGraphSubscriptions::$reason`).
+- L2: inline attachments stream through `$value` like the others; their Content-ID comes from
+  `?$select=id,contentId,isInline` (no base64 in memory).
+- L3: dangerous extensions (`html`, `svg`, `js`, `php*`, `exe`, `bat`, `ps1`, `lnk`, macro-enabled Office…,
+  `InboundFileTypes::DANGEROUS_EXTENSIONS`) are rejected (`extension`) without being downloaded, whatever the bytes;
+  `InboundAttachment::$safeFilename` carries the extension of the detected type when the name disagrees;
+  **`application/zip` is no longer in the default `allowed_types`** (owner decision 2026-11-12; add it explicitly).
+- L4: SPF / DKIM / DMARC are read only when Exchange marked the message as received from outside
+  (`X-MS-Exchange-Organization-AuthAs: Anonymous`); otherwise null.
+- L5: see Changed.
+- L6: a message over `limits.max_message_bytes` is handed to the host without body or headers, flagged
+  `GraphInboundMessage::$oversized`, instead of failing and retrying forever; `retention_days` must exceed the sweep's
+  `initial_window` by more than a day (checked at compile time).
+- I2: notifications of an expired subscription or of a profile no longer in `inboundProfiles()` are refused;
+  `nowo:mail-kit:graph:subscriptions --delete` offboards a mailbox. I3: delta links are followed only when shaped as a user's
+  mail-folder message delta (`users/{id}/…` or `users('{id}')/…` with `mailFolders` and `messages/delta`); an
+  identifier other than the profile's address (Graph often uses the object id) is logged once per run and followed. I7: renewals purge old idempotency records too. I9: see the dependencies.
+
+
+### Audit NQ-v (verification, before the 1.9.0 tag)
+
+- M1: an exhausted per-client-IP bucket no longer refuses verifiable notifications (Graph shares Microsoft's egress
+  addresses): it narrows the request to a cheap path (the first unknown subscription ends it, else 429). IPv6 clients
+  are keyed by /64. Docs: `trusted_proxies` must list only your proxies.
+- L1: delta links must match exactly `/v1.0/users/{id}/mailFolders/{folder}/messages/delta` (or the `('…')` key
+  forms), with no `.` / `..` segment, `;` or stray quote even after a second URL-decoding; `{id}` is the profile's
+  address or a GUID (logged once per run).
+- L2: `RenewGraphSubscriptions::$subscriptionId`: lifecycle events act only on the profile's current subscription
+  (else `stale`); only `subscriptionRemoved` recreates (with a best-effort DELETE of the old one); unknown lifecycle
+  values are logged and ignored; rejected subscriptions are counted distinct and a request with valid items is never
+  refused for stale ones.
+- L3: with a clean-up bus, an ambiguous send whose message is still a draft fails with `ambiguous` (not retried) while
+  the delayed `DeleteGraphDraft` resolves it; a failing dispatch falls back to the immediate decision without
+  replacing the original error; the handler ignores malformed ids.
+- L4: oversized messages are handed over without attachments; an envelope over 256 KiB is read again without To / Cc.
+- I1: SECURITY / USAGE state the Exchange Online Protection header-firewall assumption and the hybrid caveat. I2:
+  `allowed_ips` validated at compile time. I3: IPv6 /64 keying. I5: attachment names lose `:` and trailing dots /
+  spaces; more dangerous extensions (`ps1xml`, `psc1`, `wsc`, `sct`, `ws`, `msc`, `msh*`, `xll`, `xla`, `mht`,
+  `mhtml`, `jnlp`, `cab`, `settingcontent-ms`, `library-ms`, `search-ms`, `ade`, `adp`, `mde`, `accde`, `pyw`,
+  `command`, `desktop`, `apk`, `dmg`, `pkg` …).
+### Security
+
+- Untrusted inbound content: HTML through symfony/html-sanitizer (safe elements only, no script / style / iframe /
+  form / event handlers / `style` attributes, links http(s) / mailto with `rel="noopener noreferrer nofollow"`, images
+  `cid:` only unless `allow_remote_images`), input cut to `max_html_bytes`; attachments streamed into capped
+  `php://temp` streams, content type **detected** with finfo (the declared one is informative only) and checked against
+  `limits.allowed_types`, names neutralised, size / count / total limits, item and reference attachments not read;
+  the message JSON is capped (`limits.max_message_bytes`). Logs carry profiles, decisions and counts only.
+- The webhook trusts nothing but the stored client-state digest; Graph links in delta pages are followed only on
+  Graph (SSRF guard shared with 1.8); `assertGraphUrl()` refuses ports other than a literal `:443`.
+
+### Tests
+
+- Webhook (validation echo, client state, forged cross-tenant notification, caps, rate limit, lifecycle), subscription
+  create / renew / recreate / remove, delta sweep (paging, stored links, untrusted links, 410), normalisation
+  (plus-address tags, envelope headers, forwarded, Authentication-Results, references cap), sanitizer, processor
+  (finfo types, limits, inline Content-IDs, idempotency, host failure release, 404), store on SQLite (savepoints, stale
+  claims, purge), commands, Messenger handler, schema listener.
+- `tests/Integration/Graph/GraphInboundKernelTest.php`: DDD host (no Instance Settings, host mailbox and handler ports)
+  serving 600 webhook requests through `http_kernel` with two organizations alternating, no services resetter, each
+  request with a forged notification for the other organization (refused); each message read from its own mailbox
+  with its own token; one token per tenant; memory under 2 MiB; `lint:container`.
 
 ## [1.8.0] - 2026-11-12
 

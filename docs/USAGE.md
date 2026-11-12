@@ -40,6 +40,12 @@
   - [Errors](#errors)
   - [DDD / hexagonal host: your own mailbox port](#ddd--hexagonal-host-your-own-mailbox-port)
   - [Worker mode](#worker-mode)
+- [Inbound mail from a Graph mailbox](#inbound-mail-from-a-graph-mailbox)
+  - [How a message comes in](#how-a-message-comes-in)
+  - [Standard Symfony host](#standard-symfony-host)
+  - [The normalised message](#the-normalised-message)
+  - [DDD / hexagonal host](#ddd--hexagonal-host)
+  - [Worker mode and limits](#worker-mode-and-limits)
 - [Admin UI](#admin-ui)
   - [Forms (FormKit)](#forms-formkit)
   - [Overriding templates (REQ-TWIG-001)](#overriding-templates-req-twig-001)
@@ -716,9 +722,19 @@ in [CONFIGURATION.md](CONFIGURATION.md#graph). Nothing changes while `graph.enab
    upload session in 3.75 MiB chunks read from the stream).
 4. The draft is sent (`POST …/send`) and saved in Sent Items with the same immutable id. A failure in step 3, or a
    definite refusal of the send (4xx), deletes the draft. An ambiguous send failure (network error, timeout, 5xx,
-   429 / 503) reads `isDraft` first: still a draft → deleted, error rethrown (safe to retry); sent → success;
-   unknown → the draft is kept and the send fails with the non-retryable reason `ambiguous` (the mailer transport
-   throws a Messenger `UnrecoverableExceptionInterface`, so the message is not sent twice).
+   429 / 503) reads `isDraft` first:
+   - sent → success;
+   - unknown → the draft is kept and the send fails with the non-retryable reason `ambiguous`;
+   - still a draft, **with** `graph.draft_cleanup.bus` (1.9) → a delayed `DeleteGraphDraft` (default 5 s) is
+     dispatched, which deletes the message later only if it is still a draft, and the send fails with `ambiguous`
+     (not retried: Exchange may still send it); the worker never waits. Route `DeleteGraphDraft` to a transport that
+     supports delays (Doctrine, Redis, AMQP; a `sync://` transport ignores the delay);
+   - still a draft, **without** a bus (or when the dispatch fails) → `isDraft` is read once more at once: still a
+     draft → deleted and the original (retryable) error rethrown; a send Exchange completes after that read is still
+     deleted with its draft (residual race).
+
+   The mailer transport turns `ambiguous` into a Messenger `UnrecoverableExceptionInterface`, so a queued e-mail is
+   not sent twice.
 
 The From address is always the mailbox (Graph sends as that mailbox); only its display name is yours.
 
@@ -880,6 +896,153 @@ The token provider, Graph client, sender and transport hold no tenant, token or 
 resolved and the token read from the cache on every send, so two organizations alternating on one FrankenPHP worker
 (kernel reset false, no services resetter) each use their own mailbox and token. See
 [FRANKENPHP-WORKER-AUDIT.md](FRANKENPHP-WORKER-AUDIT.md).
+
+## Inbound mail from a Graph mailbox
+
+Since 1.9 (opt-in, `graph.inbound.enabled`; needs `graph.enabled`, symfony/messenger and a DBAL connection) MailKit
+reads the inbox of the Graph mailboxes and hands every new message, normalised, to **your**
+`GraphInboundHandlerInterface`, which routes, quarantines or discards it. Microsoft 365 side (permissions, webhook
+URL): [MICROSOFT-GRAPH-SETUP.md](MICROSOFT-GRAPH-SETUP.md#webhook-url-requirements-inbound-mailkit-19); options:
+[CONFIGURATION.md](CONFIGURATION.md#graphinbound).
+
+### How a message comes in
+
+1. **Webhook** — Graph POSTs a change notification to `graph.inbound.webhook.path`. MailKit checks the subscription
+   (stored, unexpired, of an inbound profile) and its `clientState` (constant time), then only dispatches
+   `FetchGraphMessage(profile, graphId)` and answers 202. Lifecycle events dispatch `RenewGraphSubscriptions` with a
+   reason and the subscription id (`reauthorize` → `POST /subscriptions/{id}/reauthorize`; `removed` → best-effort
+   delete and recreate; both only when the id is the profile's current subscription) or `SweepGraphMailbox`
+   (missed); unknown lifecycle values are logged and ignored.
+2. **Delta sweep** — `nowo:mail-kit:graph:sweep` (or `SweepGraphMailbox`) walks the folder's delta query from the stored
+   link and dispatches the same `FetchGraphMessage` for every new message: missed notifications and hosts without a
+   public URL. The first run reads back `sweep.initial_window` only.
+3. **Fetch** (your Messenger worker) — `GraphInboundProcessor` reads the message (capped), **claims** it by
+   internetMessageId (a message seen by both paths is processed once), reads the attachments into capped temporary
+   streams (type detected from the bytes), builds a `GraphInboundMessage` and calls your handler. The decision is
+   stored with the claim; your exception releases the claim, so Messenger's retry processes the message again.
+
+### Standard Symfony host
+
+```yaml
+# config/packages/nowo_mail_kit.yaml
+nowo_mail_kit:
+    graph:
+        enabled: true
+        profiles:
+            default: { tenant_id: '%env(MAIL_KIT_GRAPH_TENANT_ID)%', client_id: '%env(MAIL_KIT_GRAPH_CLIENT_ID)%', client_secret: '%env(MAIL_KIT_GRAPH_CLIENT_SECRET)%', mailbox: projects@example.com }
+        inbound:
+            enabled: true
+            handler: App\Mail\TaskMailInbound
+            webhook:
+                notification_url: 'https://app.example.com/hooks/mail-kit/v1/graph'
+
+# config/packages/messenger.yaml — the webhook must answer fast: handle the fetch asynchronously
+framework:
+    messenger:
+        routing:
+            Nowo\MailKitBundle\Graph\Inbound\Message\FetchGraphMessage: async
+            Nowo\MailKitBundle\Graph\Inbound\Message\SweepGraphMailbox: async
+            Nowo\MailKitBundle\Graph\Inbound\Message\RenewGraphSubscriptions: async
+
+# config/routes/nowo_mail_kit.yaml
+nowo_mail_kit_graph_webhook:
+    resource: .
+    type: nowo_mail_kit_graph_webhook
+
+# config/packages/security.yaml — public (Graph sends no credentials; MailKit checks the client state), stateless
+security:
+    access_control:
+        - { path: '^/hooks/mail-kit/', roles: PUBLIC_ACCESS }
+```
+
+Offboarding a mailbox: drop its profile from `inboundProfiles()` (its notifications are refused at once) and run
+`nowo:mail-kit:graph:subscriptions --profile=<name> --delete`.
+
+Tables: `doctrine:migrations:diff` picks up `mail_kit_graph_subscription`, `mail_kit_graph_delta` and
+`mail_kit_graph_inbound` (with `doctrine.table_prefix`) through a `postGenerateSchema` listener; without migrations,
+`nowo:mail-kit:graph:schema` prints the SQL (`--force` runs it). Schedule `nowo:mail-kit:graph:subscriptions`
+hourly and `nowo:mail-kit:graph:sweep` every 5 minutes (cron, or Symfony Scheduler with
+`RecurringMessage::every('1 hour', new RenewGraphSubscriptions())` and `RecurringMessage::every('5 minutes', new SweepGraphMailbox())`).
+
+```php
+use Nowo\MailKitBundle\Graph\Inbound\GraphInboundHandlerInterface;
+use Nowo\MailKitBundle\Graph\Inbound\GraphInboundMessage;
+use Nowo\MailKitBundle\Graph\Inbound\InboundDecision;
+
+final class TaskMailInbound implements GraphInboundHandlerInterface
+{
+    public function handle(GraphInboundMessage $message): InboundDecision
+    {
+        $task = $this->tasks->byMailTag($message->plusTags[0] ?? null)
+            ?? $this->tasks->byThread($message->inReplyTo, $message->references, $message->conversationId);
+        if ($task === null) {
+            return InboundDecision::quarantine('no_task');
+        }
+        if (!$task->hasContact($message->from?->address)) {
+            return InboundDecision::quarantine('unknown_sender', $this->quarantine->store($task, $message)->id());
+        }
+        foreach ($message->attachments as $attachment) {
+            if ($attachment->isAccepted()) {
+                $this->files->store($task, $attachment->filename, $attachment->contentType, $attachment->stream()); // copy now
+            }
+        }
+
+        return InboundDecision::route($this->thread->append($task, $message)->id());
+    }
+}
+```
+
+### The normalised message
+
+| Field | Content |
+| --- | --- |
+| `from`, `sender`, `replyTo`, `to`, `cc` | `InboundAddress` (lower-cased address, display name without control / bidi characters, `tag` = plus-address tag of the receiving mailbox). |
+| `plusTags` | Distinct tags of the mailbox found in To, Cc and the envelope headers Exchange may keep (`Delivered-To`, `X-Original-To`, …): a Bcc or a forward to `projects+t-42@…` still names its thread when such a header is present. |
+| `subject`, `text` | Control characters removed; `text` is the text body, or the plain text of the sanitised HTML. |
+| `html` | Sanitised (see below), or null for a text-only message. Still render it in a sandboxed / CSP-restricted view. |
+| `internetMessageId`, `inReplyTo`, `references`, `conversationId` | Threading ids (no angle brackets; References oldest first, newest 100). |
+| `authentication` | `AuthenticationResults` (`spf`, `dkim`, `dmarc`, `aligned()`) of the **first** `Authentication-Results` header, only for mail Exchange received from outside (`X-MS-Exchange-Organization-AuthAs: Anonymous`), else null verdicts. This assumes Exchange Online Protection strips `X-MS-Exchange-Organization-*` and its own `Authentication-Results` from incoming mail (header firewall); in hybrid / on-premises routing (mail entering through your own servers) the first header may be another hop's — treat verdicts as advisory there. A coarse spam signal for your quarantine rule — **not** a user authentication (neither is a plus-address tag: anyone can write to it). |
+| `oversized` | The message was over `limits.max_message_bytes`: subject, sender and ids only — no body, headers, threading headers, verdicts or attachments, and no To / Cc when even the envelope is over 256 KiB. Quarantine it or fetch it yourself. |
+| `forwarded` | Subject prefix (`Fwd:`, `RV:`, `WG:` …), an attached e-mail, `Resent-From` / `X-Forwarded-*` headers or a forward marker in the text. |
+| `attachments` | `InboundAttachment`: neutralised `filename`, `safeFilename` (extension of the detected type — store and serve under this name), `declaredContentType` (informative), `contentType` **detected** with finfo, `size`, `inline` / `contentId` (for `cid:` images), `stream()` while your handler runs, or a `rejection` (`type`, `extension`, `size`, `count`, `total_size`, `unsupported`). Serve stored files with the detected type, `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`. |
+
+HTML sanitising (symfony/html-sanitizer): safe elements and attributes only — no `script`, `style`, `iframe`, `form`,
+event handlers or `style` attributes; links `http` / `https` / `mailto` with `rel="noopener noreferrer nofollow"`; no
+relative URLs; images `cid:` (the message's inline parts) only, remote `http(s)` images only with
+`allow_remote_images: true`. The input is cut to `limits.max_html_bytes`.
+
+### DDD / hexagonal host
+
+The ports are plain PHP: `GraphInboundHandlerInterface` (a `GraphInboundMessage` in, an `InboundDecision` out),
+`GraphInboundProfilesProviderInterface` (the profiles to read, e.g. the organizations with a configured mailbox) and the
+1.8 `GraphMailboxProviderInterface`. Without Instance Settings and with your own mailbox port:
+
+```yaml
+nowo_mail_kit:
+    mailer: { dsn_provider: App\Mail\DsnProvider, sender_provider: App\Mail\SenderProvider }
+    log: { enabled: false }
+    graph:
+        enabled: true
+        mailbox_provider: App\Mail\OrganizationMailboxes
+        inbound:
+            enabled: true
+            handler: App\Mail\TaskMailInbound
+            profiles_provider: App\Mail\OrganizationInboundProfiles
+            connection: default
+            webhook: { notification_url: '%env(MAIL_KIT_GRAPH_WEBHOOK_URL)%' }
+```
+
+MailKit writes its three tables through DBAL on `connection` (never your entity manager, never a flush; a claim made
+inside your open transaction uses a savepoint). Commit your own writes inside `handle()`.
+
+### Worker mode and limits
+
+Every inbound service is stateless: the mailbox, token and profile are resolved per message, attachment streams are
+closed when the message is done, and nothing is kept between requests or messages (tested with 600 webhook requests
+for two organizations in one kernel without the services resetter). Limits: `webhook.max_body_bytes`,
+`max_notifications`, `rate_limit` (verified requests), `client_rate_limit` (unverified, per client IP),
+`allowed_ips`; `limits.*` for the message and its attachments (`application/zip` must be added explicitly). Logs carry the profile, the decision
+and counts — never addresses, subjects, bodies or file names.
 
 ## Admin UI
 

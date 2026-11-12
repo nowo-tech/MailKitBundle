@@ -14,8 +14,13 @@ use Symfony\Component\Cache\Adapter\ArrayAdapter;
 use Symfony\Component\HttpClient\Exception\TransportException;
 use Symfony\Component\HttpClient\Response\MockResponse;
 
+use function fopen;
+use function ftell;
 use function print_r;
+use function rewind;
 use function str_contains;
+use function str_repeat;
+use function stream_get_contents;
 
 final class GraphApiClientTest extends TestCase
 {
@@ -197,5 +202,77 @@ final class GraphApiClientTest extends TestCase
         $this->mock->override = static fn (): never => throw new TransportException('down');
         $api->cancelUpload(GraphApiMock::mailboxA(), 'https://outlook.office.com/upload/s');
         self::assertCount(0, $this->mock->matching('evil.example'));
+    }
+
+    public function testLinksAndDownloads(): void
+    {
+        $api = $this->api();
+        $api->assertGraphUrl('https://graph.microsoft.com/v1.0/users/x/messages/delta?$deltatoken=a');
+        $api->assertGraphUrl('https://GRAPH.microsoft.com:443/v1.0/x');
+        foreach ([
+            'http://graph.microsoft.com/v1.0/x',
+            'https://graph.microsoft.com/beta/x',
+            'https://graph.microsoft.com.evil.example/v1.0/x',
+            'https://evil.example/v1.0/x',
+            'https://user@graph.microsoft.com/v1.0/x',
+            'https://graph.microsoft.com:8443/v1.0/x',
+            'https://graph.microsoft.com:0443/v1.0/x',
+            'https://graph.microsoft.com/v1.0/x#frag',
+            'not a url',
+        ] as $url) {
+            try {
+                $api->assertGraphUrl($url, 'link');
+                self::fail('Accepted ' . $url);
+            } catch (GraphException $e) {
+                self::assertSame(GraphException::REASON_UNTRUSTED_URL, $e->reason);
+            }
+        }
+
+        $this->mock->override = static fn (string $method, string $url): ?MockResponse => str_contains($url, '/next') ? GraphApiMock::json(['value' => [1]]) : null;
+        self::assertSame(['value' => [1]], $api->callUrl(GraphApiMock::mailboxA(), 'GET', 'https://graph.microsoft.com/v1.0/next', [], [200], 'page'));
+        try {
+            $api->callUrl(GraphApiMock::mailboxA(), 'GET', 'https://evil.example/v1.0/next', [], [200], 'page');
+            self::fail('Untrusted link called.');
+        } catch (GraphException $e) {
+            self::assertSame(GraphException::REASON_UNTRUSTED_URL, $e->reason);
+        }
+        self::assertCount(0, $this->mock->matching('evil.example'));
+
+        // Streamed download into a sink, capped; a JSON answer is capped too.
+        $this->mock->override = static fn (string $method, string $url): ?MockResponse => str_contains($url, '/$value') ? new MockResponse(['chunk-1', 'chunk-2']) : (str_contains($url, '/big') ? GraphApiMock::json(['data' => str_repeat('x', 500)]) : null);
+        $sink                 = fopen('php://temp', 'w+');
+        self::assertIsResource($sink);
+        self::assertSame(14, $api->download(GraphApiMock::mailboxA(), '/users/x/messages/m/attachments/a/$value', $sink, 100, 'read attachment'));
+        rewind($sink);
+        self::assertSame('chunk-1chunk-2', stream_get_contents($sink));
+        try {
+            $api->download(GraphApiMock::mailboxA(), '/users/x/messages/m/attachments/a/$value', $sink, 10, 'read attachment');
+            self::fail('Over the cap.');
+        } catch (GraphException $e) {
+            self::assertSame(GraphException::REASON_TOO_LARGE, $e->reason);
+        }
+        try {
+            $api->download(GraphApiMock::mailboxA(), 'https://evil.example/x', $sink, 10, 'read attachment');
+            self::fail('Absolute path refused.');
+        } catch (GraphException $e) {
+            self::assertSame(GraphException::REASON_UNTRUSTED_URL, $e->reason);
+        }
+        try {
+            $api->call(GraphApiMock::mailboxA(), 'GET', '/users/x/big', [], [200], 'read', 100);
+            self::fail('Over the JSON cap.');
+        } catch (GraphException $e) {
+            self::assertSame(GraphException::REASON_TOO_LARGE, $e->reason);
+        }
+
+        // An error answer is not written to the sink.
+        $this->mock->override = static fn (): MockResponse => GraphApiMock::json(['error' => ['code' => 'ErrorItemNotFound']], 404);
+        $before               = ftell($sink);
+        try {
+            $api->download(GraphApiMock::mailboxA(), '/users/x/messages/m/attachments/a/$value', $sink, 1000, 'read attachment');
+            self::fail('404 must throw.');
+        } catch (GraphException $e) {
+            self::assertSame('ErrorItemNotFound', $e->graphCode);
+        }
+        self::assertSame($before, ftell($sink));
     }
 }

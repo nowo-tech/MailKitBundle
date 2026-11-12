@@ -10,10 +10,13 @@ use Nowo\MailKitBundle\Graph\GraphSecret;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
 
+use function array_shift;
 use function base64_decode;
+use function base64_encode;
 use function count;
 use function is_array;
 use function is_string;
+use function json_decode;
 use function json_encode;
 use function parse_str;
 use function preg_match;
@@ -59,6 +62,17 @@ final class GraphApiMock
 
     /** @var (Closure(string, string, array<string, string>, string): ?MockResponse)|null */
     public ?Closure $override = null;
+
+    /** @var list<bool|null> isDraft answers consumed one per read before falling back to */
+    public array $draftStates = [];
+
+    /** @var array<string, array<string, array<string, mixed>>> mailbox => Graph id => message resource (+ `_attachments`) */
+    public array $inbox = [];
+
+    /** @var list<array<mixed>> bodies of POST /subscriptions */
+    public array $subscriptionRequests = [];
+
+    private int $subscriptionCount = 0;
 
     /** isDraft reported by GET …/messages/{id}?$select=isDraft (null = answer 500). */
     public ?bool $draftState = true;
@@ -181,6 +195,37 @@ final class GraphApiMock
                 : self::json(['nextExpectedRanges' => [($end + 1) . '-']]);
         }
 
+        if (preg_match('#^https://graph\.microsoft\.com/v1\.0/subscriptions(?:/([^/?]+)(/reauthorize)?)?$#', $url, $m) === 1) {
+            $token = (string) preg_replace('/^Bearer /', '', $headers['authorization'] ?? '');
+            if (!isset($this->tokens[$token])) {
+                return self::json(['error' => ['code' => 'InvalidAuthenticationToken']], 401);
+            }
+            $sub = isset($m[1]) ? rawurldecode($m[1]) : null;
+            if ($method === 'POST' && $sub === null) {
+                ++$this->subscriptionCount;
+                $payload                      = json_decode($body, true);
+                $this->subscriptionRequests[] = is_array($payload) ? $payload : [];
+
+                return self::json(['id' => 'sub-' . $this->subscriptionCount . '-0000', 'expirationDateTime' => is_array($payload) ? ($payload['expirationDateTime'] ?? null) : null], 201);
+            }
+            if ($method === 'POST' && $sub !== null && isset($m[2])) {
+                return str_starts_with($sub, 'sub-') ? new MockResponse('', ['http_code' => 204]) : self::json(['error' => ['code' => 'ResourceNotFound']], 404);
+            }
+            if ($method === 'PATCH' && $sub !== null) {
+                if (!str_starts_with($sub, 'sub-')) {
+                    return self::json(['error' => ['code' => 'ResourceNotFound']], 404);
+                }
+                $payload = json_decode($body, true);
+
+                return self::json(['id' => $sub, 'expirationDateTime' => is_array($payload) ? ($payload['expirationDateTime'] ?? null) : null]);
+            }
+            if ($method === 'DELETE' && $sub !== null) {
+                return new MockResponse('', ['http_code' => 204]);
+            }
+
+            return self::json(['error' => ['code' => 'NotSupported']], 400);
+        }
+
         if (preg_match('#^https://graph\.microsoft\.com/v1\.0/users/([^/]+)(/.*)?$#', $url, $m) !== 1) {
             return self::json(['error' => ['code' => 'NotFound']], 404);
         }
@@ -204,7 +249,47 @@ final class GraphApiMock
             ], 201);
         }
         if ($method === 'GET' && preg_match('#^/messages/[^/?]+\?\$select=isDraft$#', $path) === 1) {
+            if ($this->draftStates !== []) {
+                $this->draftState = array_shift($this->draftStates);
+            }
+
             return $this->draftState === null ? self::json(['error' => ['code' => 'ErrorInternalServerError']], 500) : self::json(['isDraft' => $this->draftState]);
+        }
+        if ($method === 'GET' && preg_match('#^/messages/([^/?]+)(?:/attachments(?:/([^/?]+)(/\$value)?)?)?(?:\?.*)?$#', $path, $parts) === 1) {
+            $id      = rawurldecode($parts[1]);
+            $message = $this->inbox[$mailbox][$id] ?? null;
+            if ($message === null) {
+                return self::json(['error' => ['code' => 'ErrorItemNotFound']], 404);
+            }
+            $attachments = $message['_attachments'] ?? [];
+            unset($message['_attachments']);
+            if (!str_contains($path, '/attachments')) {
+                return self::json($message);
+            }
+            if (!isset($parts[2]) || $parts[2] === '') {
+                $list = [];
+                foreach ($attachments as $attachment) {
+                    if (is_array($attachment)) {
+                        unset($attachment['_bytes'], $attachment['contentId']);
+                    }
+                    $list[] = $attachment;
+                }
+
+                return self::json(['value' => $list]);
+            }
+            foreach ($attachments as $attachment) {
+                if (is_array($attachment) && ($attachment['id'] ?? null) === rawurldecode($parts[2])) {
+                    if (isset($parts[3])) {
+                        return new MockResponse((string) ($attachment['_bytes'] ?? ''), ['http_code' => 200, 'response_headers' => ['Content-Type' => 'application/octet-stream']]);
+                    }
+                    $attachment['contentBytes'] ??= base64_encode((string) ($attachment['_bytes'] ?? ''));
+                    unset($attachment['_bytes']);
+
+                    return self::json($attachment);
+                }
+            }
+
+            return self::json(['error' => ['code' => 'ErrorItemNotFound']], 404);
         }
         if ($method === 'PATCH' && preg_match('#^/messages/[^/]+$#', $path) === 1) {
             return self::json(['id' => 'x'], 200);

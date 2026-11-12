@@ -33,6 +33,13 @@ use Nowo\MailKitBundle\EventListener\MailKitAccessListener;
 use Nowo\MailKitBundle\EventListener\SettingsChangedListener;
 use Nowo\MailKitBundle\Form\LegacyResendSettingsTypeExtension;
 use Nowo\MailKitBundle\Form\SentMailFilterType;
+use Nowo\MailKitBundle\Graph\ConfiguredGraphMailboxProvider;
+use Nowo\MailKitBundle\Graph\GraphApiClient;
+use Nowo\MailKitBundle\Graph\GraphMailboxProviderInterface;
+use Nowo\MailKitBundle\Graph\GraphTokenProvider;
+use Nowo\MailKitBundle\Graph\Send\GraphMailSender;
+use Nowo\MailKitBundle\Graph\Send\GraphSendLimits;
+use Nowo\MailKitBundle\Graph\Transport\GraphTransportFactory;
 use Nowo\MailKitBundle\Integration\AuthKit\MailKitOutboundMailReadyChecker;
 use Nowo\MailKitBundle\Integration\UserKit\EmailsReceivedPersonalDataEraser;
 use Nowo\MailKitBundle\Integration\UserKit\EmailsReceivedPersonalDataExportProvider;
@@ -218,7 +225,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $config = $this->processConfiguration(new Configuration(), $configs);
         $this->assertLiteralBooleans($config);
 
-        /** @var array{mailer: array{decorate: bool, dsn_provider: string|null, sender_provider: string|null, fallback_counts_as_ready: bool}, dsn: array{allowed_schemes: list<string>, allowed_hosts: list<string>, allow_private_hosts: bool, allow_insecure_tls: bool, resolve_dns: bool, dns_timeout: float}, sender: array{default_from: string|null, default_from_name: string|null, require_public_domain: bool}, resend: array{enabled: bool, api_timeout: float}, bootstrap: array{mailer_dsn: string|null, resend_api_key: string|null}, test_email: array{rate_limit: int, rate_interval: string}, log: array{enabled: bool, map_entities: bool, store_bodies: bool, retention_days: int, purge_batch_size: int}, personal_data: array{enabled: bool, subject_resolver: string|null}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>, page_size: int, export: array{enabled: bool, max_rows: int, access_roles: list<string>, include_bodies: bool, body_batch_bytes: int}}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}, brand: array{mode: string, name: string|null, colors: array<string, string>, max_image_bytes: int, max_total_bytes: int, max_image_side: int}} $config */
+        /** @var array{mailer: array{decorate: bool, dsn_provider: string|null, sender_provider: string|null, fallback_counts_as_ready: bool}, dsn: array{allowed_schemes: list<string>, allowed_hosts: list<string>, allow_private_hosts: bool, allow_insecure_tls: bool, resolve_dns: bool, dns_timeout: float}, sender: array{default_from: string|null, default_from_name: string|null, require_public_domain: bool}, resend: array{enabled: bool, api_timeout: float}, bootstrap: array{mailer_dsn: string|null, resend_api_key: string|null}, test_email: array{rate_limit: int, rate_interval: string}, log: array{enabled: bool, map_entities: bool, store_bodies: bool, retention_days: int, purge_batch_size: int}, personal_data: array{enabled: bool, subject_resolver: string|null}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>, page_size: int, export: array{enabled: bool, max_rows: int, access_roles: list<string>, include_bodies: bool, body_batch_bytes: int}}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}, brand: array{mode: string, name: string|null, colors: array<string, string>, max_image_bytes: int, max_total_bytes: int, max_image_side: int}, graph: array{enabled: bool, mailbox_provider: string|null, default_profile: string, profiles: array<string, array{tenant_id: string, client_id: string, client_secret: string, mailbox: string}>, http_client: string, token_cache: string, timeout: float, upload_hosts: list<string>, limits: array{max_attachments: int, max_attachment_bytes: int, max_message_bytes: int}}} $config */
         $webUi = $config['web_ui'];
 
         $settings = $this->hasBundle($container, 'NowoInstanceSettingsBundle') || $container->hasExtension('nowo_instance_settings');
@@ -249,6 +256,55 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $this->registerTestMail($container, $config, $settings);
         $this->registerWebUi($container, $config, $settings);
         $this->registerBrand($container, $config['brand']);
+        $this->registerGraph($container, $config['graph']);
+    }
+
+    /**
+     * 1.8 (spec 229): Microsoft Graph sending, only with `graph.enabled: true` (nothing is registered otherwise). The
+     * token provider, API client and sender are stateless; the mailbox port is the configured profiles or a host service.
+     *
+     * @param array{enabled: bool, mailbox_provider: string|null, default_profile: string, profiles: array<string, array{tenant_id: string, client_id: string, client_secret: string, mailbox: string}>, http_client: string, token_cache: string, timeout: float, upload_hosts: list<string>, limits: array{max_attachments: int, max_attachment_bytes: int, max_message_bytes: int}} $graph
+     */
+    private function registerGraph(ContainerBuilder $container, array $graph): void
+    {
+        if (!$graph['enabled']) {
+            return;
+        }
+        $logger = new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE);
+
+        $provider = $graph['mailbox_provider'];
+        if (is_string($provider) && $provider !== '') {
+            $container->setAlias(GraphMailboxProviderInterface::class, $provider)->setPublic(true);
+        } else {
+            $container->setDefinition(ConfiguredGraphMailboxProvider::class, new Definition(ConfiguredGraphMailboxProvider::class, [$graph['profiles'], $graph['default_profile']]));
+            $container->setAlias(GraphMailboxProviderInterface::class, ConfiguredGraphMailboxProvider::class)->setPublic(true);
+        }
+
+        $container->setDefinition(GraphTokenProvider::class, new Definition(GraphTokenProvider::class, [
+            new Reference($graph['http_client']),
+            new Reference($graph['token_cache']),
+            $graph['timeout'],
+            new Reference('clock', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            $logger,
+        ]));
+        $container->setDefinition(GraphApiClient::class, new Definition(GraphApiClient::class, [
+            new Reference($graph['http_client']),
+            new Reference(GraphTokenProvider::class),
+            $graph['upload_hosts'],
+            $graph['timeout'],
+            $logger,
+        ]));
+        $container->setDefinition(GraphMailSender::class, (new Definition(GraphMailSender::class, [
+            new Reference(GraphMailboxProviderInterface::class),
+            new Reference(GraphApiClient::class),
+            new Definition(GraphSendLimits::class, [$graph['limits']['max_attachments'], $graph['limits']['max_attachment_bytes'], $graph['limits']['max_message_bytes']]),
+            $logger,
+        ]))->setPublic(true));
+        $container->setDefinition(GraphTransportFactory::class, (new Definition(GraphTransportFactory::class, [
+            new Reference(GraphMailSender::class),
+            new Reference('event_dispatcher', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            $logger,
+        ]))->addTag('mailer.transport_factory'));
     }
 
     /**
@@ -745,6 +801,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             'log.map_entities'               => $config['log']['map_entities'] ?? null,
             'log.store_bodies'               => $config['log']['store_bodies'] ?? null,
             'personal_data.enabled'          => $config['personal_data']['enabled'] ?? null,
+            'graph.enabled'                  => $config['graph']['enabled'] ?? null,
             'web_ui.enabled'                 => $config['web_ui']['enabled'] ?? null,
             'web_ui.export.enabled'          => $config['web_ui']['export']['enabled'] ?? null,
             'web_ui.export.include_bodies'   => $config['web_ui']['export']['include_bodies'] ?? null,

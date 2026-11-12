@@ -7,6 +7,9 @@ namespace Nowo\MailKitBundle\DependencyInjection;
 use Nowo\MailKitBundle\Brand\BrandedEmailHelper;
 use Nowo\MailKitBundle\Brand\BrandedEmailText;
 use Nowo\MailKitBundle\Dsn\MailerDsnValidator;
+use Nowo\MailKitBundle\Graph\GraphApiClient;
+use Nowo\MailKitBundle\Graph\GraphMailbox;
+use Nowo\MailKitBundle\Graph\Send\GraphSendLimits;
 use Nowo\MailKitBundle\Log\SentMailCsvExporter;
 use Nowo\MailKitBundle\Ui\MailKitPages;
 use Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition;
@@ -235,6 +238,7 @@ final class Configuration implements ConfigurationInterface
                     ->end()
                 ->end()
                 ->append($this->brandNode())
+                ->append($this->graphNode())
                 ->arrayNode('doctrine')
                     ->addDefaultsIfNotSet()
                     ->children()
@@ -440,6 +444,112 @@ final class Configuration implements ConfigurationInterface
             ->validate()
                 ->ifTrue(static fn (array $v): bool => $v['max_image_bytes'] > $v['max_total_bytes'])
                 ->thenInvalid('nowo_mail_kit.brand.max_image_bytes must not exceed nowo_mail_kit.brand.max_total_bytes.')
+            ->end();
+
+        return $node;
+    }
+
+    /**
+     * `graph` (1.8, spec 229): Microsoft Graph sending from shared mailboxes with app-only credentials. Off by default.
+     */
+    private function graphNode(): ArrayNodeDefinition
+    {
+        /** @var ArrayNodeDefinition $node */
+        $node = (new TreeBuilder('graph'))->getRootNode();
+        $node
+            ->info('1.8: send through Microsoft Graph (sendMail from a shared mailbox, app-only client credentials): GraphMailSender and the microsoft+graph://<profile> mailer transport. Off by default.')
+            ->addDefaultsIfNotSet()
+            ->children()
+                ->booleanNode('enabled')
+                    ->info('Register the Graph sender and the microsoft+graph mailer transport factory.')
+                    ->defaultFalse()
+                ->end()
+                ->scalarNode('mailbox_provider')
+                    ->info('Service id implementing Graph\\GraphMailboxProviderInterface (tenant, client id, secret and mailbox per profile, e.g. from encrypted host settings); null = the profiles below.')
+                    ->defaultNull()
+                ->end()
+                ->scalarNode('default_profile')
+                    ->info('Profile used when the caller names none (with the configured profiles).')
+                    ->defaultValue('default')
+                    ->validate()
+                        ->ifTrue(static fn (mixed $v): bool => !is_string($v) || preg_match(GraphMailbox::PROFILE_PATTERN, $v) !== 1)
+                        ->thenInvalid('nowo_mail_kit.graph.default_profile must be a profile name (letters, digits, "_", ".", "-"), got %s.')
+                    ->end()
+                ->end()
+                ->arrayNode('profiles')
+                    ->info('Mailboxes by profile name. Use %env()% for every value; never commit the client secret.')
+                    ->useAttributeAsKey('name')
+                    ->normalizeKeys(false)
+                    ->arrayPrototype()
+                        ->children()
+                            ->scalarNode('tenant_id')->info('Entra tenant id (GUID) or verified domain.')->isRequired()->cannotBeEmpty()->end()
+                            ->scalarNode('client_id')->info('Application (client) id of the app registration (GUID).')->isRequired()->cannotBeEmpty()->end()
+                            ->scalarNode('client_secret')->info('Client secret, e.g. "%env(MAIL_KIT_GRAPH_CLIENT_SECRET)%".')->isRequired()->cannotBeEmpty()->end()
+                            ->scalarNode('mailbox')->info('Shared mailbox address (the From of every message).')->isRequired()->cannotBeEmpty()->end()
+                        ->end()
+                    ->end()
+                    ->validate()
+                        ->ifTrue(static function (array $v): bool {
+                            foreach (array_keys($v) as $name) {
+                                if (preg_match(GraphMailbox::PROFILE_PATTERN, (string) $name) !== 1) {
+                                    return true;
+                                }
+                            }
+
+                            return false;
+                        })
+                        ->thenInvalid('nowo_mail_kit.graph.profiles names must contain only letters, digits, "_", "." and "-" (at most 64 characters).')
+                    ->end()
+                ->end()
+                ->scalarNode('http_client')
+                    ->info('HTTP client service id. Keep the decorated "http_client" so HttpLog counts the calls under the outbound provider you declare for graph.microsoft.com, login.microsoftonline.com and the upload hosts (e.g. microsoft_graph); HttpLog never records bodies, query strings or headers.')
+                    ->defaultValue('http_client')
+                    ->cannotBeEmpty()
+                ->end()
+                ->scalarNode('token_cache')
+                    ->info('PSR-6 cache pool service id of the access tokens (cached until 5 minutes before expiry). Use an encrypted pool (SodiumMarshaller) when the cache is shared.')
+                    ->defaultValue('cache.app')
+                    ->cannotBeEmpty()
+                ->end()
+                ->floatNode('timeout')
+                    ->info('Idle deadline of one Graph / token call, in seconds (REQ-RUNTIME-001).')
+                    ->defaultValue(30.0)
+                    ->min(1.0)
+                    ->max(300.0)
+                ->end()
+                ->arrayNode('upload_hosts')
+                    ->info('Hosts accepted in attachment upload session URLs returned by Graph (HTTPS only, exact match).')
+                    ->scalarPrototype()->cannotBeEmpty()->end()
+                    ->defaultValue(GraphApiClient::DEFAULT_UPLOAD_HOSTS)
+                    ->requiresAtLeastOneElement()
+                    ->validate()
+                        ->always(static fn (array $v): array => self::lower($v))
+                    ->end()
+                ->end()
+                ->arrayNode('limits')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->integerNode('max_attachments')->info('Attachments of one e-mail.')->defaultValue(50)->min(0)->max(250)->end()
+                        ->integerNode('max_attachment_bytes')
+                            ->info('Bytes of one attachment (Graph maximum 150 MiB; Exchange default message limit 35 MiB).')
+                            ->defaultValue(GraphSendLimits::DEFAULT_MAX_BYTES)
+                            ->min(1)
+                            ->max(GraphSendLimits::GRAPH_MAX_ATTACHMENT_BYTES)
+                        ->end()
+                        ->integerNode('max_message_bytes')
+                            ->info('Bytes of all attachments plus the bodies of one e-mail.')
+                            ->defaultValue(GraphSendLimits::DEFAULT_MAX_BYTES)
+                            ->min(1)
+                            ->max(1_073_741_824)
+                        ->end()
+                    ->end()
+                ->end()
+            ->end()
+            ->validate()
+                ->ifTrue(static fn (array $v): bool => ($v['enabled'] ?? false) === true
+                    && (!is_string($v['mailbox_provider'] ?? null) || $v['mailbox_provider'] === '')
+                    && !isset($v['profiles'][$v['default_profile'] ?? '']))
+                ->thenInvalid('nowo_mail_kit.graph.enabled needs a mailbox_provider service or a profile named like graph.default_profile.')
             ->end();
 
         return $node;

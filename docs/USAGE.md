@@ -32,6 +32,14 @@
   - [UserKit bridge](#userkit-bridge)
 - [Reacting to changes and auditing](#reacting-to-changes-and-auditing)
 - [Using it from a DDD / hexagonal application](#using-it-from-a-ddd--hexagonal-application)
+- [Microsoft Graph (shared mailbox)](#microsoft-graph-shared-mailbox)
+  - [How a Graph send works](#how-a-graph-send-works)
+  - [Standard Symfony host: the mailer transport](#standard-symfony-host-the-mailer-transport)
+  - [Getting the Graph id back: `GraphMailSender`](#getting-the-graph-id-back-graphmailsender)
+  - [Threading and plus addressing](#threading-and-plus-addressing)
+  - [Errors](#errors)
+  - [DDD / hexagonal host: your own mailbox port](#ddd--hexagonal-host-your-own-mailbox-port)
+  - [Worker mode](#worker-mode)
 - [Admin UI](#admin-ui)
   - [Forms (FormKit)](#forms-formkit)
   - [Overriding templates (REQ-TWIG-001)](#overriding-templates-req-twig-001)
@@ -686,6 +694,192 @@ in `doctrine.entity_manager`.
   moves them to `suggest`.
 - `SentMailRepository` returns the `SentMail` entity (admin read model): wrap it in your own query port if your
   application layer must not depend on it.
+
+## Microsoft Graph (shared mailbox)
+
+Since 1.8 (opt-in, `graph.enabled: true`) MailKit sends from a Microsoft 365 **shared mailbox** through Microsoft
+Graph with app-only credentials: the message stays in the mailbox's Sent Items, Outlook threads it with the
+replies, and the caller gets the Graph id and the `internetMessageId` back. The Microsoft 365 side (app registration,
+permissions, access policy, secret rotation) is in [MICROSOFT-GRAPH-SETUP.md](MICROSOFT-GRAPH-SETUP.md); the options
+in [CONFIGURATION.md](CONFIGURATION.md#graph). Nothing changes while `graph.enabled` is false (the default).
+
+### How a Graph send works
+
+1. The mailbox of the profile comes from `GraphMailboxProviderInterface` (the configured `graph.profiles`, or your
+   service). An app-only token is requested from `login.microsoftonline.com/{tenant}` (client credentials) and cached
+   in `graph.token_cache` until five minutes before it expires.
+2. The headers and bodies are rendered as MIME — with your `Message-ID`, `In-Reply-To`, `References` and `Reply-To` —
+   and a **draft** is created from it (`POST /users/{mailbox}/messages`, base64 MIME, immutable ids). Graph's JSON
+   `internetMessageHeaders` only take custom `x-` headers, which is why MailKit uses the MIME path: it is the one
+   that keeps the RFC 5322 threading headers.
+3. Bcc recipients are set on the draft; each attachment is added (below 2.9 MB in one call, from 2.9 MB with an
+   upload session in 3.75 MiB chunks read from the stream).
+4. The draft is sent (`POST …/send`) and saved in Sent Items with the same immutable id. A failure in step 3, or a
+   definite refusal of the send (4xx), deletes the draft. An ambiguous send failure (network error, timeout, 5xx,
+   429 / 503) reads `isDraft` first: still a draft → deleted, error rethrown (safe to retry); sent → success;
+   unknown → the draft is kept and the send fails with the non-retryable reason `ambiguous` (the mailer transport
+   throws a Messenger `UnrecoverableExceptionInterface`, so the message is not sent twice).
+
+The From address is always the mailbox (Graph sends as that mailbox); only its display name is yours.
+
+### Standard Symfony host: the mailer transport
+
+Configure the profile(s) and use the `microsoft+graph://<profile>` DSN (`default` = `graph.default_profile`). The
+DSN carries no credentials.
+
+```yaml
+# config/packages/nowo_mail_kit.yaml
+nowo_mail_kit:
+    graph:
+        enabled: true
+        profiles:
+            default:
+                tenant_id: '%env(MAIL_KIT_GRAPH_TENANT_ID)%'
+                client_id: '%env(MAIL_KIT_GRAPH_CLIENT_ID)%'
+                client_secret: '%env(MAIL_KIT_GRAPH_CLIENT_SECRET)%'
+                mailbox: projects@example.com
+
+# config/packages/mailer.yaml — Graph as a named transport next to the usual one
+framework:
+    mailer:
+        transports:
+            main: '%env(MAILER_DSN)%'
+            graph: 'microsoft+graph://default'
+```
+
+```php
+use Nowo\MailKitBundle\Graph\Send\PlusAddress;
+use Symfony\Component\Mime\Email;
+
+$email = (new Email())
+    ->to('client@example.net')
+    ->replyTo(PlusAddress::compose('projects@example.com', 't-42'))
+    ->subject('Re: Offer for task 42')
+    ->text('…')
+    ->attachFromPath('/path/to/offer.pdf');
+$email->getHeaders()->addTextHeader('X-Transport', 'graph');
+$email->getHeaders()->addIdHeader('In-Reply-To', 'previous-message-id@example.net');
+$mailer->send($email); // or queue it: the Email is serializable
+```
+
+The transport maps To, Cc, Reply-To, subject, text, HTML, attachments (inline parts keep their `cid:`), and the
+`Message-ID`, `In-Reply-To` and `References` headers; envelope recipients that are neither To nor Cc become Bcc.
+Other custom headers are not sent. The `SentMessage` carries Graph's internetMessageId as message id (so the
+sent-mail log and `MailDeliveredEvent` record it) and the Graph id in its debug output. `MAILER_DSN=microsoft+graph://default`
+also works when Graph is your only transport. MailKit's runtime DSN from the settings does **not** accept
+`microsoft+graph` (the scheme is not in `dsn.allowed_schemes`): Graph credentials never live in a DSN.
+
+### Getting the Graph id back: `GraphMailSender`
+
+When you store the sent message (to match replies later), call the sender directly. Its input is plain value objects:
+
+```php
+use Nowo\MailKitBundle\Graph\Send\GraphAttachment;
+use Nowo\MailKitBundle\Graph\Send\GraphMailSender;
+use Nowo\MailKitBundle\Graph\Send\GraphOutgoingMail;
+use Nowo\MailKitBundle\Graph\Send\GraphRecipient;
+use Nowo\MailKitBundle\Graph\Send\PlusAddress;
+
+$result = $graphMailSender->send(new GraphOutgoingMail(
+    to: [new GraphRecipient('client@example.net', 'Client')],
+    subject: 'Offer for task 42',
+    text: $text,
+    html: $sanitisedHtml,
+    cc: [],
+    bcc: [],
+    replyTo: [new GraphRecipient(PlusAddress::compose('projects@example.com', 't-42'))],
+    attachments: [
+        GraphAttachment::fromPath($path, 'offer.pdf', 'application/pdf'),   // read while uploading
+        GraphAttachment::fromStream($stream, 'plan.png', 'image/png', inline: true, contentId: 'plan@task-42'),
+    ],
+    messageId: $ownId,            // e.g. "t42-7f3c…@example.com"; null = generated on the mailbox domain
+    inReplyTo: $parentMessageId,  // without angle brackets (brackets are stripped)
+    references: $threadIds,       // oldest first, the newest 50 are kept
+    fromName: 'Projects',
+), 'default');                    // profile; null = the provider's default
+
+$result->graphId;            // immutable Graph id (Drafts → Sent Items keeps it)
+$result->internetMessageId;  // "<t42-7f3c…@example.com>" as Graph reports it
+$result->conversationId;     // Outlook conversation id (reply fallback)
+```
+
+`GraphAttachment` sources: `fromPath()` (opened only while uploading), `fromStream()` (a non-seekable stream is
+copied once to `php://temp`, capped at 35 MiB unless you pass `$maxBytes` — pass your `graph.limits.max_attachment_bytes`), `fromString()`. File names are neutralised (no directory part, no control or
+bidi characters, at most 200 characters); a content type that is not a plain `type/subtype` token becomes
+`application/octet-stream`. The HTML is sent as you pass it: sanitise user-written HTML first. The value objects
+hold streams and are not serializable; queue an ID and build the mail in the handler (or use the mailer transport,
+whose `Email` is serializable).
+
+Limits (`graph.limits`) are checked before any call: number of attachments, bytes per attachment, bytes per message.
+The MIME part (headers and bodies, no attachments) is capped at 2.9 MB so its base64 request stays under Graph's
+4 MB limit.
+
+### Threading and plus addressing
+
+- Give every message your own `messageId` and store it (and the returned `internetMessageId`); answer with
+  `inReplyTo` = the parent and `references` = the thread. MailKit writes them into the MIME; if Exchange ever
+  replaced the Message-ID, the result returns Graph's value and a notice is logged.
+- `PlusAddress::compose('projects@example.com', 't-42')` gives `projects+t-42@example.com` (tags:
+  `[A-Za-z0-9._=-]{1,64}`); `PlusAddress::tag($address, $mailbox)` reads the tag back from a recipient (for the
+  inbound side).
+
+### Errors
+
+Everything fails with `Nowo\MailKitBundle\Graph\GraphException` (the transport rethrows it as a Mailer
+`TransportException` with the same message): `reason` (`configuration`, `authentication`, `api`, `throttled`,
+`transport`, `invalid_message`, `untrusted_url`, `ambiguous`), `status`, `graphCode`, `requestId`, `retryAfter`, and
+`isRetryable()`. Messages contain only those — never a response body, a URL, a token, the secret or message content
+— and no `previous` exception. Throttling (429 / 503) is not retried in the request: retry later (Messenger).
+
+### DDD / hexagonal host: your own mailbox port
+
+Keep the tenant, client id, secret and mailbox in your own (encrypted) settings and implement the port; profiles
+can be any key you choose (an organization id…). MailKit calls it on every send and keeps nothing:
+
+```php
+use Nowo\MailKitBundle\Graph\GraphException;
+use Nowo\MailKitBundle\Graph\GraphMailbox;
+use Nowo\MailKitBundle\Graph\GraphMailboxProviderInterface;
+use Nowo\MailKitBundle\Graph\GraphSecret;
+
+final readonly class OrganizationMailboxes implements GraphMailboxProviderInterface
+{
+    public function __construct(private MailSettingsRepository $settings) {}
+
+    public function mailbox(string $profile): GraphMailbox
+    {
+        $s = $this->settings->forOrganization($profile) ?? throw GraphException::configuration('Not configured.');
+
+        return new GraphMailbox($profile, $s->tenantId, $s->clientId, new GraphSecret($s->decryptedSecret()), $s->mailbox);
+    }
+
+    public function defaultProfile(): string
+    {
+        return 'instance';
+    }
+}
+```
+
+```yaml
+nowo_mail_kit:
+    mailer: { dsn_provider: App\Mail\DsnProvider, sender_provider: App\Mail\SenderProvider }  # without Instance Settings
+    log: { enabled: false }
+    graph:
+        enabled: true
+        mailbox_provider: App\Mail\OrganizationMailboxes
+```
+
+The port, `GraphMailbox`, `GraphSecret`, `GraphOutgoingMail`, `GraphRecipient`, `GraphAttachment`, `GraphSendResult`
+and `GraphException` use no Doctrine, HttpFoundation or Mime type. `GraphMailbox` validates the values (tenant GUID or
+domain, client id GUID, mailbox address, profile `[A-Za-z0-9_.-]{1,64}`) so they cannot inject a path into the token
+or Graph URLs; `GraphSecret` is never printed (`[redacted]`) and refuses serialization.
+
+### Worker mode
+
+The token provider, Graph client, sender and transport hold no tenant, token or secret in a property: the mailbox is
+resolved and the token read from the cache on every send, so two organizations alternating on one FrankenPHP worker
+(kernel reset false, no services resetter) each use their own mailbox and token. See
+[FRANKENPHP-WORKER-AUDIT.md](FRANKENPHP-WORKER-AUDIT.md).
 
 ## Admin UI
 

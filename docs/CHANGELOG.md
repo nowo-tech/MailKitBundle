@@ -6,43 +6,124 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+  - [Added](#added)
+  - [Security](#security)
+  - [Tests](#tests)
 - [[1.7.1] - 2026-11-11](#171---2026-11-11)
   - [Fixed](#fixed)
-  - [Tests](#tests)
+  - [Tests](#tests-1)
   - [Documentation](#documentation)
 - [[1.7.0] - 2026-11-11](#170---2026-11-11)
-  - [Added](#added)
+  - [Added](#added-1)
   - [Changed](#changed)
 - [[1.6.0] - 2026-11-11](#160---2026-11-11)
-  - [Added](#added-1)
+  - [Added](#added-2)
   - [Changed](#changed-1)
 - [[1.5.0] - 2026-11-10](#150---2026-11-10)
-  - [Added](#added-2)
+  - [Added](#added-3)
   - [Changed](#changed-2)
 - [[1.4.0] - 2026-11-09](#140---2026-11-09)
-  - [Added](#added-3)
-  - [Security](#security)
-- [[1.3.0] - 2026-11-02](#130---2026-11-02)
   - [Added](#added-4)
-  - [Changed](#changed-3)
   - [Security](#security-1)
-- [[1.2.0] - 2026-11-02](#120---2026-11-02)
+- [[1.3.0] - 2026-11-02](#130---2026-11-02)
   - [Added](#added-5)
+  - [Changed](#changed-3)
+  - [Security](#security-2)
+- [[1.2.0] - 2026-11-02](#120---2026-11-02)
+  - [Added](#added-6)
   - [Changed](#changed-4)
   - [Fixed](#fixed-1)
 - [[1.1.1] - 2026-11-01](#111---2026-11-01)
-  - [Security](#security-2)
+  - [Security](#security-3)
   - [Changed](#changed-5)
   - [Fixed](#fixed-2)
 - [[1.1.0] - 2026-11-01](#110---2026-11-01)
-  - [Added](#added-6)
+  - [Added](#added-7)
   - [Changed](#changed-6)
 - [[1.0.0] - 2026-10-31](#100---2026-10-31)
-  - [Added](#added-7)
+  - [Added](#added-8)
   - [Security (independent audit, Appendix CA)](#security-independent-audit-appendix-ca)
   - [Security (re-verification follow-ups)](#security-re-verification-follow-ups)
 
 ## [Unreleased]
+
+Next minor: 1.8.0 (Beacon spec 229, D-20261112-09: client e-mail threads; the inbound Graph pipeline follows in 1.9.0).
+
+### Added
+
+- **Microsoft Graph sending from a shared mailbox (opt-in, `graph.enabled`).** `Graph\Send\GraphMailSender::send()`
+  sends a `GraphOutgoingMail` (plain value objects: recipients, Reply-To, subject, text / HTML, attachments,
+  `messageId`, `inReplyTo`, `references`) from the profile's mailbox with app-only credentials (OAuth 2.0 client
+  credentials, scope `https://graph.microsoft.com/.default`) and returns a `GraphSendResult`: the immutable Graph id,
+  the `internetMessageId` and the conversation id. The message is created as a draft from MIME (the only Graph path
+  that keeps `Message-ID`, `In-Reply-To` and `References`; JSON `internetMessageHeaders` accept `x-` headers only),
+  Bcc is set on the draft, attachments are added (below 2.9 MB in one call, from 2.9 MB through an upload session in
+  3.75 MiB chunks read from the stream), then the draft is sent and saved in Sent Items. A failure before the send
+  call, or a definite refusal of it (4xx), deletes the draft; an ambiguous send failure (network error, timeout, 5xx,
+  429 / 503) reads the draft state first: still a draft → deleted and the error rethrown; sent → success; unknown →
+  the draft is kept and the send fails with the non-retryable reason `ambiguous`. `PlusAddress::compose()` / `tag()` build and read plus addresses (`projects+t-42@…`) for a per-thread Reply-To.
+- **`microsoft+graph://<profile>` mailer transport** (`GraphTransportFactory`, tag `mailer.transport_factory`):
+  standard hosts send a Mailer `Email` through Graph as a named transport or `MAILER_DSN` (queued e-mails stay
+  serializable). The `SentMessage` carries Graph's internetMessageId; envelope-only recipients become Bcc. The DSN
+  carries no credentials (refused).
+- **Host port `Graph\GraphMailboxProviderInterface`** (tenant, client id, `GraphSecret`, mailbox per profile) with the
+  default `ConfiguredGraphMailboxProvider` (`graph.default_profile` + `graph.profiles`, REQ-CFG-001 shape) or your
+  service (`graph.mailbox_provider`, e.g. encrypted settings per organization). `GraphMailbox` validates the tenant
+  (GUID or domain), the client id (GUID), the mailbox and the profile name.
+- **Token cache** (`GraphTokenProvider`): PSR-6 pool `graph.token_cache` (default `cache.app`), key = SHA-256 of
+  tenant, client id and secret fingerprint (a rotated secret gets a new token at once), kept until 5 minutes before
+  expiry, expiry re-checked on read; one retry with a fresh token on 401.
+- Configuration `nowo_mail_kit.graph` (`enabled`, `mailbox_provider`, `default_profile`, `profiles`, `http_client`,
+  `token_cache`, `timeout`, `upload_hosts`, `limits.max_attachments` / `max_attachment_bytes` / `max_message_bytes`).
+- `docs/MICROSOFT-GRAPH-SETUP.md`: Entra app registration (`Mail.ReadWrite` + `Mail.Send` application permissions),
+  `New-ApplicationAccessPolicy` (or RBAC for Applications) to restrict the app to the mailbox, plus addressing, secret
+  rotation, size limits, egress / HttpLog hosts and the webhook URL requirements of the coming inbound pipeline.
+- Dependency: `psr/cache` `^2.0 || ^3.0` (already installed through the framework bundle).
+
+### Security
+
+- Graph secrets and tokens never reach a log, an exception or a dump: `GraphSecret` / `GraphMailbox` /
+  `ConfiguredGraphMailboxProvider` redact `__debugInfo()`, `GraphSecret` and `GraphAttachment` refuse serialization,
+  `#[SensitiveParameter]` on secret parameters. `GraphException` messages hold fixed text, the HTTP status, the Graph
+  / Entra error code and the request id (both token-checked) — never a response body, a URL (upload URLs carry a
+  token), a token, the secret or content — and no `previous`. Logs carry the profile, operation, status and counts only.
+- Only `graph.microsoft.com` receives the bearer token (relative paths only); upload session URLs returned by Graph
+  must be HTTPS on port 443 to a `graph.upload_hosts` host (default `outlook.office.com`, `outlook.office365.com`)
+  and get no token; no redirects are followed on any call; deadlines on every call.
+- Outgoing attachment names are neutralised (`AttachmentFilename`: no directory part, control or bidi characters,
+  leading dots; at most 200 characters), content types must be a `type/subtype` token, Content-IDs are checked;
+  subject line breaks are removed; message ids are validated before they reach a header.
+- Limits checked before any Graph call: attachments per e-mail, bytes per attachment (≤ 150 MiB), bytes per e-mail,
+  and the MIME part capped at 2.9 MB.
+- Audit NK (before the 1.8.0 tag):
+  - NK-1 (Medium): an ambiguous failure of the send call no longer deletes the draft blindly (with immutable ids the
+    sent copy keeps the draft's id, so a delete could move a sent message to Deleted Items, and a retry duplicated
+    it). The draft state decides (see above); an unknown outcome is `GraphException::REASON_AMBIGUOUS`
+    (`isRetryable()` false), thrown by the transport as `GraphUnrecoverableTransportException` and kept by
+    `DeliveryFailedException::from()` as `UnrecoverableDeliveryFailedException` (both Messenger
+    `UnrecoverableExceptionInterface`), so Messenger does not retry it. `DeliveryFailedException` is no longer `final`.
+  - NK-2 (Low): upload sessions from 2.9 MB (`GraphMailSender::LARGE_ATTACHMENT_BYTES` = `MAX_MIME_BYTES`), so a
+    plain attachment POST stays under Graph's 4 MB request limit after base64.
+  - NK-3 (Low): `GraphAttachment::fromStream()` spools a non-seekable stream up to 35 MiB by default
+    (`GraphSendLimits::DEFAULT_MAX_BYTES`, was 150 MiB); pass your attachment limit as `$maxBytes`.
+  - NK-4 (Info): upload URL host check removes one trailing dot only and refuses a leading dot, empty labels and a
+    port written other than `:443` (e.g. `:0443`).
+  - NK-5 (Info): HttpLog wording: HttpLog never records bodies, query strings or headers; `microsoft_graph` is a
+    provider the host declares.
+  - NK-6 (Info): comment of the Bcc-only rendering fixed (the placeholder Bcc only satisfies Symfony Mime; delivery
+    relies on the PATCH of `bccRecipients`).
+
+### Tests
+
+- Graph simulated with `MockHttpClient` (`tests/Support/GraphApiMock.php`, fixture tenants, clients and mailboxes):
+  token flow and cache (expiry, rotation, refusal without leaking the secret), 401 retry, error mapping, throttling,
+  send with the threading headers and plus-address Reply-To, Bcc, small / inline / large attachments with the upload
+  session (chunk ranges, no token on the upload host), SSRF-refused upload URL, draft clean-up, limits, no content in
+  logs; the mailer transport (mapping, envelope Bcc, `cid:` parts, errors).
+- Kernel tests (`tests/Integration/Graph/GraphKernelTest.php`): off by default; standard host (configured profile,
+  transport factory from `mailer.transport_factory`); strict DDD host (no Instance Settings, no ORM, host mailbox
+  port) serving 600 requests through `http_kernel` with two organizations alternating, no services resetter (each
+  request uses its own mailbox, token and Reply-To; one token per tenant; memory under 2 MiB); `lint:container`.
 
 ## [1.7.1] - 2026-11-11
 

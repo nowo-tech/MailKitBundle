@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.8.0](#to-180)
 - [To 1.7.1](#to-171)
 - [To 1.7.0](#to-170)
 - [To 1.6.0](#to-160)
@@ -22,6 +23,51 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+## To 1.8.0
+
+From **1.7.1**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
+
+Next minor: 1.8.0. **No change is needed**: Microsoft Graph sending is opt-in (`nowo_mail_kit.graph.enabled`, default
+`false`); with it off no new service, route, table or listener is registered and every existing send, setting and
+page behaves as in 1.7.1. No database migration. New runtime requirement `psr/cache` (`^2.0 || ^3.0`), already
+installed with the framework bundle.
+
+To send from a Microsoft 365 shared mailbox:
+
+1. Do the Microsoft 365 steps once ([MICROSOFT-GRAPH-SETUP.md](MICROSOFT-GRAPH-SETUP.md)): app registration with the
+   **application** permissions `Mail.Send` and `Mail.ReadWrite` (admin consent), a client secret, and an
+   application access policy (`New-ApplicationAccessPolicy`) or RBAC for Applications that limits the app to the
+   mailbox.
+2. Enable Graph with a profile (secrets from the environment) or point `graph.mailbox_provider` at your own
+   `GraphMailboxProviderInterface` service (credentials from your encrypted settings):
+
+   ```yaml
+   nowo_mail_kit:
+       graph:
+           enabled: true
+           profiles:
+               default:
+                   tenant_id: '%env(MAIL_KIT_GRAPH_TENANT_ID)%'
+                   client_id: '%env(MAIL_KIT_GRAPH_CLIENT_ID)%'
+                   client_secret: '%env(MAIL_KIT_GRAPH_CLIENT_SECRET)%'
+                   mailbox: '%env(MAIL_KIT_GRAPH_MAILBOX)%'
+   ```
+
+3. Send with `GraphMailSender::send()` (returns the Graph id and internetMessageId) or through a
+   `microsoft+graph://default` mailer transport ([USAGE](USAGE.md#microsoft-graph-shared-mailbox)).
+4. With HttpLog, add `outlook.office.com` and `outlook.office365.com` (attachment upload sessions) to the hosts of
+   your `microsoft_graph` outbound provider next to `graph.microsoft.com` and `login.microsoftonline.com`, with body
+   capture off.
+5. Tokens are cached in `cache.app` by default; on a shared or persistent cache, point `graph.token_cache` at a pool
+   with an encrypting marshaller.
+
+`microsoft+graph` is not added to `dsn.allowed_schemes`: the runtime DSN from the settings cannot select Graph (its
+credentials never live in a DSN).
 
 ## To 1.7.1
 

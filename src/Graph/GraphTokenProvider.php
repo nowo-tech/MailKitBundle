@@ -33,7 +33,8 @@ use function strlen;
  * kernel reset false): two mailboxes alternating on one worker each get their own token.
  *
  * Neither the secret nor the token ever reaches a log or an exception message; the token request goes through the
- * configured HTTP client (the decorated `http_client` by default, so it is counted by HttpLog with redacted bodies).
+ * configured HTTP client (the decorated `http_client` by default, so HttpLog counts it under the outbound provider the host
+ * declares for these hosts, e.g. `microsoft_graph`; HttpLog never records bodies, query strings or headers).
  */
 final class GraphTokenProvider
 {

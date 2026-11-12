@@ -19,6 +19,7 @@ use Nowo\MailKitBundle\Tests\Support\GraphApiMock;
 use Nowo\MailKitBundle\Tests\Support\RecordingLogger;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Cache\Adapter\ArrayAdapter;
+use Symfony\Component\HttpClient\Exception\TransportException;
 use Symfony\Component\HttpClient\Response\MockResponse;
 
 use function base64_decode;
@@ -222,13 +223,83 @@ final class GraphMailSenderTest extends TestCase
             self::assertCount(1, $this->mock->matching('outlook.office.com', 'DELETE'));
         }
 
-        // The draft cannot be deleted either: logged, original error rethrown.
+        // A definite refusal of the send and the draft cannot be deleted either: logged, original error rethrown.
         $this->mock->requests = [];
-        $this->mock->override = static fn (string $method, string $url): ?MockResponse => $method === 'DELETE' || str_contains($url, '/send')
-            ? GraphApiMock::json(['error' => ['code' => 'ErrorInternalServerError']], 500)
-            : null;
+        $this->mock->override = static fn (string $method, string $url): ?MockResponse => match (true) {
+            $method === 'DELETE'        => GraphApiMock::json(['error' => ['code' => 'ErrorInternalServerError']], 500),
+            str_contains($url, '/send') => GraphApiMock::json(['error' => ['code' => 'ErrorInvalidRecipients']], 400),
+            default                     => null,
+        };
         $this->assertFailure($this->mail(), GraphException::REASON_API);
         self::assertTrue($this->logger->has('draft of a failed send could not be deleted'));
+    }
+
+    /**
+     * Audit NK-1: an ambiguous send failure (network, 5xx, throttling) never deletes a message that may have been sent.
+     */
+    public function testAmbiguousSendFailures(): void
+    {
+        $ambiguous = [
+            'timeout'  => static fn (string $method, string $url): ?MockResponse => str_contains($url, '/send') ? throw new TransportException('timeout') : null,
+            'http 503' => static fn (string $method, string $url): ?MockResponse => str_contains($url, '/send') ? new MockResponse('', ['http_code' => 503]) : null,
+            'http 500' => static fn (string $method, string $url): ?MockResponse => str_contains($url, '/send') ? GraphApiMock::json(['error' => ['code' => 'ErrorInternalServerError']], 500) : null,
+        ];
+        foreach ($ambiguous as $case => $override) {
+            // Still a draft: not sent, so the draft is deleted and the original (retryable) error is rethrown.
+            $this->mock->requests   = [];
+            $this->mock->override   = $override;
+            $this->mock->draftState = true;
+            try {
+                $this->sender()->send($this->mail());
+                self::fail($case . ': expected a failure.');
+            } catch (GraphException $e) {
+                self::assertTrue($e->isRetryable(), $case);
+            }
+            self::assertCount(1, $this->mock->matching('$select=isDraft', 'GET'), $case);
+            self::assertCount(1, $this->mock->matching('/messages/draft-', 'DELETE'), $case);
+
+            // No longer a draft: it was sent; success, nothing deleted.
+            $this->mock->requests   = [];
+            $this->mock->draftState = false;
+            $result                 = $this->sender()->send($this->mail());
+            self::assertSame('<own-1@example.com>', $result->internetMessageId, $case);
+            self::assertCount(0, $this->mock->matching('/messages/draft-', 'DELETE'), $case);
+            self::assertTrue($this->logger->has('send call failed but the message was sent'));
+
+            // State unknown: keep the draft, not retryable.
+            $this->mock->requests   = [];
+            $this->mock->draftState = null;
+            try {
+                $this->sender()->send($this->mail());
+                self::fail($case . ': expected an ambiguous failure.');
+            } catch (GraphException $e) {
+                self::assertSame(GraphException::REASON_AMBIGUOUS, $e->reason, $case);
+                self::assertFalse($e->isRetryable());
+                self::assertStringContainsString('not retried', $e->getMessage());
+            }
+            self::assertCount(0, $this->mock->matching('/messages/draft-', 'DELETE'), $case);
+        }
+        self::assertTrue($this->logger->has('outcome unknown'));
+
+        // A malformed state answer counts as unknown.
+        $this->mock->requests = [];
+        $this->mock->override = static fn (string $method, string $url): ?MockResponse => match (true) {
+            str_contains($url, '/send')           => new MockResponse('', ['http_code' => 503]),
+            str_contains($url, '$select=isDraft') => GraphApiMock::json(['isDraft' => 'yes']),
+            default                               => null,
+        };
+        $this->assertFailure($this->mail(), GraphException::REASON_AMBIGUOUS);
+        $this->mock->override   = null;
+        $this->mock->draftState = true;
+    }
+
+    public function testAttachmentPathBoundary(): void
+    {
+        $this->sender()->send($this->mail([GraphAttachment::fromString(str_repeat('a', GraphMailSender::LARGE_ATTACHMENT_BYTES - 1), 'below.bin')]));
+        self::assertCount(0, $this->mock->matching('createUploadSession'));
+        $this->mock->requests = [];
+        $this->sender()->send($this->mail([GraphAttachment::fromString(str_repeat('a', GraphMailSender::LARGE_ATTACHMENT_BYTES), 'at.bin')]));
+        self::assertCount(1, $this->mock->matching('createUploadSession'));
     }
 
     public function testDraftWithoutIdAndShortAttachment(): void

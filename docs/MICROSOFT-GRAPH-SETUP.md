@@ -156,7 +156,7 @@ expected From, Reply-To and subject.
 - Exchange Online's default message size limit is **35 MB** (`Get-Mailbox projects@… | fl MaxSendSize`); raise it
   with `Set-Mailbox -MaxSendSize` (up to 150 MB) when you need larger messages, then raise
   `nowo_mail_kit.graph.limits` accordingly.
-- Graph attachments go up to 150 MB through upload sessions; MailKit switches to an upload session at 3 MiB per
+- Graph attachments go up to 150 MB through upload sessions; MailKit switches to an upload session at 2.9 MB per
   attachment.
 
 ## Network and HttpLog

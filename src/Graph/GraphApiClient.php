@@ -14,10 +14,14 @@ use function is_array;
 use function is_numeric;
 use function is_string;
 use function parse_url;
+use function preg_match;
 use function rawurlencode;
+use function str_contains;
+use function str_ends_with;
 use function str_starts_with;
 use function strlen;
 use function strtolower;
+use function substr;
 use function trim;
 
 use const JSON_THROW_ON_ERROR;
@@ -159,11 +163,38 @@ final class GraphApiClient
         if (!is_array($parts)
             || strtolower($parts['scheme'] ?? '') !== 'https'
             || isset($parts['user']) || isset($parts['pass'])
-            || (isset($parts['port']) && $parts['port'] !== 443)
-            || !in_array(strtolower(trim($parts['host'] ?? '', '.')), $this->uploadHosts, true)
+            || !$this->defaultHttpsPort($url, $parts)
+            || !in_array($this->host($parts['host'] ?? ''), $this->uploadHosts, true)
         ) {
             throw GraphException::untrustedUrl('upload session');
         }
+    }
+
+    /**
+     * True when the URL has no port or the literal ":443" (`:0443` and other spellings are refused, audit NK-4).
+     *
+     * @param array<string, mixed> $parts parse_url() result
+     */
+    private function defaultHttpsPort(string $url, array $parts): bool
+    {
+        if (!isset($parts['port'])) {
+            return true;
+        }
+
+        return $parts['port'] === 443 && preg_match('#^https://[^/?\#]*:443(?:[/?\#]|\z)#i', $url) === 1;
+    }
+
+    /**
+     * Lower-cased host with at most one trailing dot removed; '' for a leading dot or an empty label (audit NK-4).
+     */
+    private function host(string $host): string
+    {
+        $host = strtolower($host);
+        if (str_ends_with($host, '.')) {
+            $host = substr($host, 0, -1);
+        }
+
+        return $host === '' || str_starts_with($host, '.') || str_contains($host, '..') || str_ends_with($host, '.') ? '' : $host;
     }
 
     /**

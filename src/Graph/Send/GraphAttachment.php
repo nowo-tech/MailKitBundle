@@ -32,15 +32,15 @@ use const SEEK_CUR;
  * An attachment of a {@see GraphOutgoingMail} (1.8), streamed: a file path (opened only while uploading), a stream or
  * a string. The size is known up front (file size, `fstat()`, or a non-seekable stream copied once to `php://temp`
  * with a cap), so the sender checks the limits before calling Graph and picks the upload path: a plain attachment
- * below 3 MiB, an upload session (chunks of 3.75 MiB) above.
+ * below 2.9 MB, an upload session (chunks of 3.75 MiB) from there.
  *
  * The file name is neutralised ({@see AttachmentFilename}); the content type must be a plain `type/subtype` token
  * (else `application/octet-stream`). Inline parts carry a Content-ID referenced by the HTML (`cid:`).
  */
 final class GraphAttachment
 {
-    /** Default cap of a non-seekable stream copied to php://temp (150 MiB, the Graph maximum). */
-    public const MAX_SPOOL_BYTES = 157_286_400;
+    /** Default cap of a non-seekable stream copied to php://temp: the default attachment limit (35 MiB, audit NK-3). */
+    public const MAX_SPOOL_BYTES = GraphSendLimits::DEFAULT_MAX_BYTES;
 
     /** Accepted Content-ID of an inline part (RFC 5322 dot-atom characters, at most 128). */
     public const CONTENT_ID_PATTERN = '/^[A-Za-z0-9!#$%&\'*+\/=?^_`{|}~.@-]{1,128}\z/';
@@ -83,7 +83,7 @@ final class GraphAttachment
     }
 
     /**
-     * Attachment read from a file when it is uploaded (never loaded whole above 3 MiB).
+     * Attachment read from a file when it is uploaded (never loaded whole from 2.9 MB).
      */
     public static function fromPath(string $path, ?string $filename = null, ?string $contentType = null, bool $inline = false, ?string $contentId = null): self
     {
@@ -98,7 +98,7 @@ final class GraphAttachment
 
     /**
      * Attachment read from a stream. A non-seekable stream is copied to `php://temp` (at most `$maxBytes`; a longer
-     * one is refused). The caller keeps ownership of the stream (and closes it after the send).
+     * one is refused): pass your `graph.limits.max_attachment_bytes` when it differs from the 35 MiB default. The caller keeps ownership of the stream (and closes it after the send).
      *
      * @param resource $stream readable stream
      */

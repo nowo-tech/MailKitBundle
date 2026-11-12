@@ -502,7 +502,7 @@ final class Configuration implements ConfigurationInterface
                     ->end()
                 ->end()
                 ->scalarNode('http_client')
-                    ->info('HTTP client service id. Keep the decorated "http_client" so HttpLog records the calls (provider microsoft_graph: graph.microsoft.com, login.microsoftonline.com and the upload hosts).')
+                    ->info('HTTP client service id. Keep the decorated "http_client" so HttpLog counts the calls under the outbound provider you declare for graph.microsoft.com, login.microsoftonline.com and the upload hosts (e.g. microsoft_graph); HttpLog never records bodies, query strings or headers.')
                     ->defaultValue('http_client')
                     ->cannotBeEmpty()
                 ->end()

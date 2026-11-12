@@ -60,6 +60,9 @@ final class GraphApiMock
     /** @var (Closure(string, string, array<string, string>, string): ?MockResponse)|null */
     public ?Closure $override = null;
 
+    /** isDraft reported by GET …/messages/{id}?$select=isDraft (null = answer 500). */
+    public ?bool $draftState = true;
+
     /** internetMessageId Graph reports for drafts (null = the MIME Message-ID). */
     public ?string $reportedMessageId = null;
 
@@ -199,6 +202,9 @@ final class GraphApiMock
                 'conversationId'    => 'conv-' . $this->drafts,
                 'isDraft'           => true,
             ], 201);
+        }
+        if ($method === 'GET' && preg_match('#^/messages/[^/?]+\?\$select=isDraft$#', $path) === 1) {
+            return $this->draftState === null ? self::json(['error' => ['code' => 'ErrorInternalServerError']], 500) : self::json(['isDraft' => $this->draftState]);
         }
         if ($method === 'PATCH' && preg_match('#^/messages/[^/]+$#', $path) === 1) {
             return self::json(['id' => 'x'], 200);

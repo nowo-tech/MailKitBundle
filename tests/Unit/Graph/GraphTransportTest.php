@@ -12,6 +12,9 @@ use Nowo\MailKitBundle\Graph\GraphTokenProvider;
 use Nowo\MailKitBundle\Graph\Send\GraphMailSender;
 use Nowo\MailKitBundle\Graph\Transport\GraphTransport;
 use Nowo\MailKitBundle\Graph\Transport\GraphTransportFactory;
+use Nowo\MailKitBundle\Graph\Transport\GraphUnrecoverableTransportException;
+use Nowo\MailKitBundle\Mailer\DeliveryFailedException;
+use Nowo\MailKitBundle\Mailer\UnrecoverableDeliveryFailedException;
 use Nowo\MailKitBundle\Tests\Support\GraphApiMock;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Cache\Adapter\ArrayAdapter;
@@ -21,6 +24,7 @@ use Symfony\Component\Mailer\Exception\InvalidArgumentException;
 use Symfony\Component\Mailer\Exception\TransportException;
 use Symfony\Component\Mailer\Exception\UnsupportedSchemeException;
 use Symfony\Component\Mailer\Transport\Dsn;
+use Symfony\Component\Messenger\Exception\UnrecoverableExceptionInterface;
 use Symfony\Component\Mime\Address;
 use Symfony\Component\Mime\Email;
 use Symfony\Component\Mime\Header\Headers;
@@ -165,6 +169,19 @@ final class GraphTransportTest extends TestCase
             self::assertInstanceOf(GraphException::class, $previous);
             self::assertNull($previous->getPrevious());
         }
+
+        // Audit NK-1: an unknown send outcome must not be retried by Messenger, also through MailKit's runtime transport.
+        $this->mock->override = static fn (string $method, string $url): ?MockResponse => str_contains($url, '/send') || str_contains($url, '$select=isDraft')
+            ? new MockResponse('', ['http_code' => 503])
+            : null;
+        try {
+            $transport->send((new Email())->from('app@example.com')->to('client@example.net')->text('x'));
+            self::fail('An ambiguous failure must throw.');
+        } catch (GraphUnrecoverableTransportException $e) {
+            $wrapped = DeliveryFailedException::from($e);
+            self::assertInstanceOf(UnrecoverableDeliveryFailedException::class, $wrapped);
+        }
+        self::assertNotInstanceOf(UnrecoverableExceptionInterface::class, DeliveryFailedException::from(new TransportException('x')));
 
         try {
             $transport->send(new RawMessage('raw'), new Envelope(new Address('a@example.com'), [new Address('b@example.com')]));

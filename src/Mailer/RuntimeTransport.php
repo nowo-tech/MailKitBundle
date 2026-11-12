@@ -14,6 +14,8 @@ use Nowo\MailKitBundle\Event\MailDeliveredEvent;
 use Nowo\MailKitBundle\Event\MailDeliveryFailedEvent;
 use Nowo\MailKitBundle\Log\SentMailRecorder;
 use Nowo\MailKitBundle\Sender\SenderPolicy;
+use Nowo\MailKitBundle\Tracking\EmailTracker;
+use Nowo\MailKitBundle\Tracking\TrackedEmail;
 use Psr\Clock\ClockInterface;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Log\LoggerInterface;
@@ -44,9 +46,13 @@ use function strlen;
  * `SettingsChangedEvent` for the mail sections).
  *
  * The internal {@see MailHeaders} are removed from the copy that is delivered (never from the caller's message, which a
- * Messenger retry sends again, 1.9.1); the outcome is written to the sent-mail log when it
+ * Messenger retry sends again, 1.10 / audit NU-H1); the outcome is written to the sent-mail log when it
  * is enabled. A failure is rethrown as {@see DeliveryFailedException}: scrubbed message and reference, never the
  * provider response body (so it is safe in flashes, the log and the Messenger failure transport).
+ *
+ * Since 1.10, with `tracking.enabled`, the {@see EmailTracker} prepares a tracked copy (open pixel, rewritten links)
+ * right before delivery; the original message is never changed, a failed delivery forgets the send, and
+ * {@see MailDeliveredEvent::$trackingId} carries its id.
  *
  * Since 1.5 every outcome is also dispatched as an id-only PSR-14 event ({@see MailDeliveredEvent},
  * {@see MailDeliveryFailedEvent}) after the log write; a failing listener is logged and never changes the outcome.
@@ -72,6 +78,7 @@ final class RuntimeTransport implements TransportInterface, ResetInterface
      * @param Transport $factory `mailer.transport_factory` (every installed bridge)
      * @param EventDispatcherInterface|null $dispatcher receives the delivery events (1.5)
      * @param ClockInterface|null $clock time of the delivery events (1.5)
+     * @param EmailTracker|null $tracker open / click tracking (1.10, `tracking.enabled`)
      */
     public function __construct(
         private readonly TransportInterface $fallback,
@@ -83,6 +90,7 @@ final class RuntimeTransport implements TransportInterface, ResetInterface
         private readonly ?LoggerInterface $logger = null,
         private readonly ?EventDispatcherInterface $dispatcher = null,
         private readonly ?ClockInterface $clock = null,
+        private readonly ?EmailTracker $tracker = null,
     ) {
     }
 
@@ -160,10 +168,11 @@ final class RuntimeTransport implements TransportInterface, ResetInterface
         $snapshot = $message instanceof Message ? clone $message : $message;
         $id       = $message instanceof Message ? MailHeaders::value($message, MailHeaders::LOG_ID) : null;
         $tag      = $message instanceof Message ? MailHeaders::value($message, MailHeaders::TAG) : null;
-        // The caller's message is never changed (1.9.1): a Messenger retry re-sends that very object, which must still
-        // carry the log row id, the tag and the redaction values. Only the copy that leaves the application loses the
-        // internal headers.
-        $outgoing = $message instanceof Message ? clone $message : $message;
+        $tracked  = $message instanceof Message ? $this->tracker?->track($message, $envelope, $id) : null;
+        // The caller's message is never changed (audit NU-H1): a Messenger retry re-sends that very object, which must
+        // still carry the log row id, the tag, the redaction values and the tracking opt-outs. Only the copy that
+        // leaves the application loses the internal headers.
+        $outgoing = $tracked instanceof TrackedEmail ? $tracked->email : ($message instanceof Message ? clone $message : $message);
         if ($outgoing instanceof Message) {
             MailHeaders::strip($outgoing);
         }
@@ -172,6 +181,9 @@ final class RuntimeTransport implements TransportInterface, ResetInterface
         try {
             $sent = ($dsn instanceof RuntimeDsn ? $this->transportFor($dsn) : $this->fallback)->send($outgoing, $envelope);
         } catch (Throwable $exception) {
+            if ($tracked instanceof TrackedEmail) {
+                $this->tracker?->discard($tracked);
+            }
             // Scrubbed message + reference only: no provider body, no credential, no `previous` (CA M1 / L3 / I3).
             $failure = DeliveryFailedException::from($exception, ...$this->credentials($dsn));
             $logId   = $this->recorder?->failed($id, $snapshot, $label, $failure->getMessage()) ?? $id;
@@ -191,7 +203,10 @@ final class RuntimeTransport implements TransportInterface, ResetInterface
         // A raw (non-MIME) message has no Message-ID: SentMessage leaves it unset.
         $providerId = $sent instanceof SentMessage && $sent->getOriginalMessage() instanceof Message ? $sent->getMessageId() : null;
         $logId      = $this->recorder?->sent($id, $snapshot, $label, $providerId, $size) ?? $id;
-        $this->notify(new MailDeliveredEvent($logId, $tag, $label, $providerId, $size, $this->now()));
+        if ($tracked instanceof TrackedEmail && $logId !== null && $logId !== $id) {
+            $this->tracker?->attachLog($tracked, $logId);
+        }
+        $this->notify(new MailDeliveredEvent($logId, $tag, $label, $providerId, $size, $this->now(), $tracked?->sendId));
 
         return $sent;
     }

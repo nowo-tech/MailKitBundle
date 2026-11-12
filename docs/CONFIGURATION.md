@@ -14,6 +14,7 @@
 - [brand](#brand)
 - [graph](#graph)
   - [graph.inbound](#graphinbound)
+- [tracking](#tracking)
 - [doctrine](#doctrine)
 - [web_ui](#web_ui)
   - [Layout and CSS stack (UiKit)](#layout-and-css-stack-uikit)
@@ -127,6 +128,34 @@ nowo_mail_kit:
                 max_total_attachment_bytes: 52428800
                 max_html_bytes: 1048576
                 allowed_types: [application/pdf, image/png, image/jpeg, image/gif, image/webp, text/plain, text/csv, application/msword, application/vnd.ms-excel, application/vnd.ms-powerpoint, 'application/vnd.openxmlformats-officedocument.*', 'application/vnd.oasis.opendocument.*']
+    tracking:                          # 1.10 — open pixel + click link rewriting; off: nothing is registered
+        enabled: false
+        policy: null                   # service id implementing Tracking\EmailTrackingPolicyInterface (required when enabled)
+        link_rewriter: null            # service id implementing Tracking\EmailLinkRewriterInterface; null = links kept
+        link_filter: null              # service id implementing Tracking\TrackableLinkFilterInterface; null = links.* allow-list
+        recipient_resolver: null       # service id implementing Tracking\TrackingRecipientResolverInterface (UserKit bridge); null = getId()
+        public_base_url: null          # e.g. https://app.example.com (required when enabled)
+        path_prefix: /e/o              # pixel route <prefix>/{token}.gif (loader type nowo_mail_kit_tracking)
+        secret: null                   # ≥ 32 bytes, e.g. '%env(MAIL_KIT_TRACKING_SECRET)%'; null = derived from kernel.secret
+        previous_secrets: []           # still verified while rotating
+        retention: P90D                # rows purged by nowo:mail-kit:tracking:purge; older tokens refused
+        purge_batch_size: 1000
+        connection: null               # DBAL connection of the tracking table (null = default)
+        bus: null                      # Messenger bus: the pixel only dispatches RecordMailOpen; null = one synchronous UPDATE
+        extra_never_track_templates: []  # added to the built-in security patterns (EmailTracker::SECURITY_TEMPLATES, always applied)
+        max_opens_per_send: 1000       # opens (human + machine) counted per send at most
+        skip_redacted: true            # never track an e-mail that declares MailHeaders::redact() values
+        max_html_bytes: 2097152        # larger HTML bodies go out untracked
+        links:
+            allowed_hosts: []          # exact, '*.example.com' or '*'; [] = no link is rewritten
+            allowed_path_prefixes: []  # [] = any path of an allowed host
+            credential_query_parameters: []   # added to the built-in list (never rewritten)
+            credential_path_segments: []      # added to the built-in list (never rewritten)
+            essential_patterns: [unsubscribe, preferences, privacy, legal, terms]  # TrackedLink::$essential
+            max_links: 100
+        machine_opens:
+            user_agents: [bot, crawler, spider, preview, 'curl/', wget, python-requests, go-http-client, barracuda, mimecast, proofpoint, messagelabs, symantec, trendmicro, linkscanner, safelinks]
+            ip_ranges: [17.0.0.0/8]    # Apple (Mail Privacy Protection)
     doctrine:
         table_prefix: ''               # 'app_' => app_mail_kit_sent_mail
         entity_manager: null           # ORM entity manager name (null = default)
@@ -148,7 +177,7 @@ nowo_mail_kit:
         allow_unauthenticated: false   # DEV / DEMO only; refused unless kernel.debug is true
 ```
 
-Unknown keys are rejected. Switches (`mailer.decorate`, `dsn.allow_private_hosts`, `dsn.allow_insecure_tls`, `resend.enabled`, `log.enabled`, `log.map_entities`, `log.store_bodies`, `personal_data.enabled`, `graph.enabled`, `graph.inbound.enabled`, `graph.inbound.allow_remote_images`, `web_ui.enabled`, `web_ui.export.enabled`, `web_ui.export.include_bodies`, `security.allow_unauthenticated`) must be literal booleans: `%env(bool:…)%` placeholders are refused because they would read as `true` while the container is built.
+Unknown keys are rejected. Switches (`mailer.decorate`, `dsn.allow_private_hosts`, `dsn.allow_insecure_tls`, `resend.enabled`, `log.enabled`, `log.map_entities`, `log.store_bodies`, `personal_data.enabled`, `graph.enabled`, `graph.inbound.enabled`, `graph.inbound.allow_remote_images`, `tracking.enabled`, `tracking.skip_redacted`, `web_ui.enabled`, `web_ui.export.enabled`, `web_ui.export.include_bodies`, `security.allow_unauthenticated`) must be literal booleans: `%env(bool:…)%` placeholders are refused because they would read as `true` while the container is built.
 
 ## mailer
 
@@ -300,6 +329,36 @@ Since 1.9 (Beacon spec 229 block B). Opt-in; needs `graph.enabled`, symfony/mess
 | `limits.max_html_bytes` | `1048576` | HTML passed to the sanitizer (longer: cut). |
 | `limits.allowed_types` | PDF, PNG, JPEG, GIF, WebP, plain text, CSV, Word / Excel / PowerPoint (legacy and OOXML), OpenDocument | Content types accepted **as detected from the bytes** (finfo), `fnmatch` patterns, lower-cased; any other type is rejected (`type`). `application/zip` is **not** in the default (owner decision 2026-11-12): add it explicitly; archives and legacy Office files are not scanned inside. Independently, dangerous extensions (`InboundFileTypes::DANGEROUS_EXTENSIONS`: `html`, `svg`, `js`, `php*`, `exe`, `bat`, `ps1`, `lnk`, macro-enabled Office…) are always rejected (`extension`). |
 
+## tracking
+
+Since 1.10 (Beacon spec 230 block B). Opt-in: with `enabled: false` (default) no service, route, table, command or
+handler is added and every e-mail goes out exactly as in 1.9. Needs doctrine/doctrine-bundle (DBAL). Usage:
+[USAGE — Open and click tracking](USAGE.md#open-and-click-tracking); privacy notes: [SECURITY](SECURITY.md#e-mail-open-and-click-tracking-110).
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `enabled` | `false` | Needs `mailer.decorate: true` (refused otherwise: mail through the undecorated framework transports would bypass the policy). Registers the tracker (called by the runtime transport right before delivery), the DBAL store and its schema listener, the pixel controller and its route loader, the commands, the read / GDPR port aliases. Literal boolean. |
+| `policy` | — | Service id implementing `Tracking\EmailTrackingPolicyInterface`: decides per template id and recipient (never the security templates, never an opted-out recipient) and returns the recipient id / tenant stored. Required when enabled. |
+| `link_rewriter` | `null` | Service id implementing `Tracking\EmailLinkRewriterInterface` (e.g. short links of kind `email`). `null`: `NullEmailLinkRewriter`, links are kept and only the pixel is added. |
+| `link_filter` | `null` | Service id implementing `Tracking\TrackableLinkFilterInterface`; `null`: the `links.allowed_hosts` / `allowed_path_prefixes` allow-list. Credential-bearing links are refused before either is asked. |
+| `recipient_resolver` | `null` | Service id implementing `Tracking\TrackingRecipientResolverInterface` (recipient ids of a UserKit user for the `email_tracking` eraser / export section, registered with `personal_data.enabled`); `null`: `getId()`. |
+| `public_base_url` | — | Absolute URL the pixel is served from (`https://app.example.com`, no query / fragment / user info). Required when enabled: Messenger workers have no request to build it from. |
+| `path_prefix` | `/e/o` | Pixel path: `<prefix>/{token}.gif`. Import the loader (`type: nowo_mail_kit_tracking`) and make the prefix public (ideally a `security: false` firewall). |
+| `secret` / `previous_secrets` | `null` / `[]` | HMAC secret of the pixel tokens (at least 32 bytes; use `%env()%`, never commit it). A literal shorter than 32 bytes fails the container build; an `%env()%` value is checked when the signer is first built — lazily, so a bad value leaves mail **untracked** (logged as critical) and the pixel still answers, never "no mail". `null`: a domain-separated HMAC of `kernel.secret`; `previous_secrets` are then previous kernel secrets, derived the same way. Previous secrets keep older tokens valid during a rotation. |
+| `retention` | `P90D` | ISO 8601 duration in days (`P1D` … `P3650D`): `nowo:mail-kit:tracking:purge` deletes older sends; older tokens are refused. |
+| `purge_batch_size` | `1000` | Rows deleted per statement by the purge. |
+| `connection` | `null` | DBAL connection of `<prefix>mail_kit_tracking_send`. |
+| `bus` | `null` | Messenger bus id: the pixel dispatches `Tracking\Message\RecordMailOpen` (route it to an async transport) instead of the synchronous UPDATE. |
+| `extra_never_track_templates` | `[]` | Extra `fnmatch` patterns (case-insensitive) of template ids (`X-Mail-Kit-Template`, else the tag) never tracked, checked before the policy. The built-in security patterns (`EmailTracker::SECURITY_TEMPLATES`: password, reset, magic, login, sign-in, one-time, OTP, code, verify, confirm, security, new device, e-mail change, invitation, invite, 2FA, MFA, token) **always** apply and cannot be removed. |
+| `max_opens_per_send` | `1000` | Opens (human + machine) counted per send at most; later fetches still answer the GIF and change nothing (no event). |
+| `skip_redacted` | `true` | An e-mail that declares `MailHeaders::redact()` values (one-time links and codes) is never tracked. With `false`, links containing those values are still never rewritten. Literal boolean. |
+| `max_html_bytes` | `2097152` | Larger HTML bodies are sent untracked. |
+| `links.allowed_hosts` / `allowed_path_prefixes` | `[]` / `[]` | Allow-list of the default link filter: exact host, `*.example.com` (sub-domains) or `*`; path prefix (`/issues` matches `/issues/…`, not `/issues-old`). No host = nothing is rewritten. Recommended: your own host only and the route prefixes of ordinary content (`/issues`, `/projects`), never `/` or `*` — token-bearing routes outside the list stay direct links. |
+| `links.credential_query_parameters` / `credential_path_segments` | `[]` / `[]` | Added to the built-in credential rules (`Tracking\CredentialLinkDetector`), which cannot be turned off. |
+| `links.essential_patterns` | `unsubscribe`, `preferences`, `privacy`, `legal`, `terms` | URL / label substrings flagged `TrackedLink::$essential`: tracked, but the rewriter must never block, expire or rate-limit them. |
+| `links.max_links` | `100` | Links rewritten per e-mail at most. |
+| `machine_opens.user_agents` / `ip_ranges` | scanners and proxies / `17.0.0.0/8` | Opens counted apart as machine opens (an empty user agent always is). Ranges are validated at compile time; behind a reverse proxy set `framework.trusted_proxies` to your proxies only. |
+
 ## doctrine
 
 | Key | Default | Description |
@@ -402,7 +461,7 @@ REQ-CFG-001 does not apply to the mailer: the bundle has one configuration tree.
 
 Parameters: `nowo_mail_kit.doctrine.table_prefix`, `.web_ui.enabled`, `.web_ui.path_prefix`, `.log.enabled`, `.log.retention_days`, `.resend.enabled`, `.security.allow_unauthenticated`.
 
-Public services: `Nowo\MailKitBundle\Brand\BrandedEmailHelper` (1.4), `Nowo\MailKitBundle\Mailer\RuntimeTransport`, `Readiness\OutboundMailReadiness`, `Dsn\MailerDsnValidator`, `TestMail\TestMailSender`, `Log\SentMailRecorder` and `Log\SentMailRepository` (log on), `Resend\ResendApiChecker` (Resend on), `nowo_mail_kit.outbound_mail_ready_checker` (AuthKit installed), `Graph\Send\GraphMailSender` and the `Graph\GraphMailboxProviderInterface` alias (`graph.enabled`, 1.8). Interfaces: `Dsn\MailerDsnProviderInterface`, `Security\MailKitAccessCheckerInterface`, `Log\SentMailErasureInterface`, `Log\SentMailPersonalDataEraserInterface`, `Log\SentMailPersonalDataExporterInterface` and `Log\SentMailPersonalDataSubjectResolverInterface` (1.7). With UserKit: `Integration\UserKit\EmailsReceivedPersonalDataEraser` and `Integration\UserKit\EmailsReceivedPersonalDataExportProvider` (private, tagged).
+Public services: `Nowo\MailKitBundle\Brand\BrandedEmailHelper` (1.4), `Nowo\MailKitBundle\Mailer\RuntimeTransport`, `Readiness\OutboundMailReadiness`, `Dsn\MailerDsnValidator`, `TestMail\TestMailSender`, `Log\SentMailRecorder` and `Log\SentMailRepository` (log on), `Resend\ResendApiChecker` (Resend on), `nowo_mail_kit.outbound_mail_ready_checker` (AuthKit installed), `Graph\Send\GraphMailSender` and the `Graph\GraphMailboxProviderInterface` alias (`graph.enabled`, 1.8), `Tracking\EmailTracker` and the `Tracking\EmailTrackingReaderInterface` / `Tracking\EmailTrackingPersonalDataInterface` aliases (`tracking.enabled`, 1.10). Interfaces: `Dsn\MailerDsnProviderInterface`, `Security\MailKitAccessCheckerInterface`, `Log\SentMailErasureInterface`, `Log\SentMailPersonalDataEraserInterface`, `Log\SentMailPersonalDataExporterInterface` and `Log\SentMailPersonalDataSubjectResolverInterface` (1.7). With UserKit: `Integration\UserKit\EmailsReceivedPersonalDataEraser` and `Integration\UserKit\EmailsReceivedPersonalDataExportProvider` (private, tagged); with `tracking.enabled` also `Integration\UserKit\EmailTrackingPersonalDataEraser` / `EmailTrackingPersonalDataExportProvider` (`email_tracking`).
 
 ## Fail-closed checks
 
@@ -416,4 +475,5 @@ The container refuses to compile when:
 - a switch is an env placeholder, a prefix / path / interval / template id is invalid;
 - `graph.inbound.enabled` is true without `graph.enabled`, without `graph.inbound.handler`, without symfony/messenger, symfony/html-sanitizer, the fileinfo extension or DoctrineBundle, `retention_days` does not exceed `sweep.initial_window` by more than a day, or an inbound option is invalid (profile names, folder, webhook path, notification URL, sweep window);
 - `graph.enabled` is true without `graph.mailbox_provider` and without a profile named like `graph.default_profile`, or a profile name is invalid;
+- `tracking.enabled` is true without `tracking.policy`, without `tracking.public_base_url`, without DoctrineBundle or with `mailer.decorate: false`, a literal `tracking.secret` / `previous_secrets` value is shorter than 32 bytes, `tracking.bus` is set without symfony/messenger, or a tracking option is invalid (base URL, path prefix, retention, machine IP ranges);
 - `brand.name` is blank, too long or contains control / bidi characters, a `brand.colors` value is not `#rrggbb`, or `brand.max_image_bytes` exceeds `brand.max_total_bytes`.

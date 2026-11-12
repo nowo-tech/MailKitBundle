@@ -75,7 +75,7 @@ final class RuntimeTransportEventsTest extends TestCase
         $delivered = $this->store->sentVia('one')[0]->getOriginalMessage();
         self::assertInstanceOf(Email::class, $delivered);
         self::assertFalse($delivered->getHeaders()->has(MailHeaders::TAG), 'still stripped before delivery');
-        self::assertTrue($email->getHeaders()->has(MailHeaders::TAG), 'from the delivered copy only (1.9.1)');
+        self::assertTrue($email->getHeaders()->has(MailHeaders::TAG), 'from the delivered copy only (audit NU-H1)');
     }
 
     public function testFailedCarriesTheReference(): void

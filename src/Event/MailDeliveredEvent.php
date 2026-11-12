@@ -27,6 +27,8 @@ final readonly class MailDeliveredEvent
      * @param string|null $providerMessageId message id returned by the transport
      * @param int|null $size size of the sent message in bytes
      * @param DateTimeImmutable $occurredAt when the send completed
+     * @param string|null $trackingId opaque send id of the open / click tracking (1.10), null when the e-mail was not
+     *                                tracked
      */
     public function __construct(
         public ?string $logId,
@@ -35,6 +37,7 @@ final readonly class MailDeliveredEvent
         public ?string $providerMessageId,
         public ?int $size,
         public DateTimeImmutable $occurredAt,
+        public ?string $trackingId = null,
     ) {
     }
 }

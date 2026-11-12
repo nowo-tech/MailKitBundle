@@ -46,6 +46,14 @@
   - [The normalised message](#the-normalised-message)
   - [DDD / hexagonal host](#ddd--hexagonal-host)
   - [Worker mode and limits](#worker-mode-and-limits)
+- [Open and click tracking](#open-and-click-tracking)
+  - [What happens to a tracked e-mail](#what-happens-to-a-tracked-e-mail)
+  - [What is never tracked](#what-is-never-tracked)
+  - [Standard Symfony host](#standard-symfony-host-1)
+  - [Beacon example: policy and short-link rewriter](#beacon-example-policy-and-short-link-rewriter)
+  - [The pixel endpoint](#the-pixel-endpoint)
+  - [Reading the results](#reading-the-results)
+  - [Retention, GDPR and worker mode](#retention-gdpr-and-worker-mode)
 - [Admin UI](#admin-ui)
   - [Forms (FormKit)](#forms-formkit)
   - [Overriding templates (REQ-TWIG-001)](#overriding-templates-req-twig-001)
@@ -1044,6 +1052,238 @@ for two organizations in one kernel without the services resetter). Limits: `web
 `allowed_ips`; `limits.*` for the message and its attachments (`application/zip` must be added explicitly). Logs carry the profile, the decision
 and counts — never addresses, subjects, bodies or file names.
 
+## Open and click tracking
+
+Since 1.10 (Beacon spec 230 block B). **Off by default** (`nowo_mail_kit.tracking.enabled: false`): nothing is
+registered and every e-mail goes out exactly as in 1.9. Configuration: [CONFIGURATION — tracking](CONFIGURATION.md#tracking);
+privacy and security notes: [SECURITY](SECURITY.md#e-mail-open-and-click-tracking-110).
+
+### What happens to a tracked e-mail
+
+Right before delivery (in the Messenger worker for queued mail), the runtime transport asks `Tracking\EmailTracker` for
+a **tracked copy**; the original message is never changed (a Messenger retry re-delivers it untracked and gets a new send).
+
+1. Your `EmailTrackingPolicyInterface` decides per template id and recipient (`TrackingCandidate`: template id, the only
+   envelope recipient, the recipient id / tenant hints) and answers `TrackingDecision::none()` or
+   `TrackingDecision::track($recipientId, $tenant, pixel: true, links: true)`.
+2. A send row is stored (`<prefix>mail_kit_tracking_send`): an opaque **send id** (128 random bits), template id,
+   recipient id, tenant, log id. No address, subject or body.
+3. Every absolute `http(s)` link (`<a>`, `<area>`, Outlook VML `<v:roundrect>` buttons) that is not credential-bearing and
+   that your allow-list accepts goes through your `EmailLinkRewriterInterface` (`TrackedLink`: send id, URL, label,
+   1-based position, `essential` flag, template, recipient id, tenant). The text part gets the same tracking URLs.
+4. A 1×1 transparent GIF `<img src="https://app.example.com/e/o/{token}.gif">` is added before `</body>`. The token is
+   `base64url(send id . issued at . HMAC)`: it never contains the address.
+5. `MailDeliveredEvent::$trackingId` carries the send id (null when untracked); a failed delivery forgets the send.
+
+Tag the message so the policy knows what it is:
+
+```php
+use Nowo\MailKitBundle\Mailer\MailHeaders;
+
+MailHeaders::template($email, 'issue_alert');                  // template id (falls back to MailHeaders::tag())
+MailHeaders::trackingRecipient($email, $user->getId()->toRfc4122(), $organization->getSlug()); // hints for the policy
+MailHeaders::noTracking($resetEmail);                         // never track this one (security mail)
+```
+
+These headers are internal: they are removed from the copy that leaves the application (also with tracking off), never
+from your message object — a Messenger retry re-sends that object with its headers intact and is decided again.
+
+### What is never tracked
+
+No pixel, links untouched, **no row stored** when:
+
+- the message has `X-Mail-Kit-No-Track`, more than one envelope recipient (To + Cc + Bcc), no HTML body, an HTML body
+  larger than `max_html_bytes`, or already carries this application's pixel;
+- its template id matches the built-in security patterns (`EmailTracker::SECURITY_TEMPLATES`: password / reset / magic /
+  login / sign-in / one-time / OTP / code / verify / confirm / security / new device / e-mail change / invitation / 2FA /
+  MFA / token — always applied) or `tracking.extra_never_track_templates`;
+- it declares `MailHeaders::redact()` values (one-time links and codes) while `skip_redacted` is on (default);
+- the policy says `none()` (security templates, opted-out recipients) or throws, or the row cannot be stored.
+
+Inside a tracked e-mail a link is **never rewritten** when it is not absolute `http(s)` (`mailto:`, `tel:`, `#anchor`,
+relative, `cid:`), carries user info, a credential-like query / fragment parameter (`token`, `code`, `otp`, `signature`,
+`_hash`, `X-Amz-Signature`…), a credential-like path segment (`/reset-password`, `/login/…`, `/magic`, `/verify-email`,
+`/invitations/…/accept`, `/oauth`…), contains a redaction value, is marked `data-mail-kit-track="off"`, is not on the
+allow-list (`links.allowed_hosts` / `allowed_path_prefixes`, or your `TrackableLinkFilterInterface`), or when the rewriter
+returns null, something that is not an absolute `http(s)` URL, or throws. Path parameters (`;jsessionid=…`) count like query
+parameters.
+
+**Token-bearing unsubscribe / one-click links** (`/unsubscribe?token=…`, `List-Unsubscribe` targets) are never
+rewritten by the credential rule; if yours carry the token in the path without a credential word, mark them
+`data-mail-kit-track="off"` or keep their route outside `links.allowed_path_prefixes`. List route prefixes of ordinary
+content in the allow-list (`/issues`, `/projects`), never `/` or `*`. HTML comments (except Outlook conditional
+blocks), `<script>` and `<style>` are not touched, and malformed HTML is kept byte for byte around the rewritten `href`s.
+
+### Standard Symfony host
+
+```yaml
+# config/packages/nowo_mail_kit.yaml
+nowo_mail_kit:
+    tracking:
+        enabled: true
+        policy: App\Mail\MailTrackingPolicy
+        public_base_url: '%env(APP_PUBLIC_URL)%'      # https://app.example.com (needs mailer.decorate: true, the default)
+        secret: '%env(MAIL_KIT_TRACKING_SECRET)%'      # ≥ 32 bytes; or null to derive it from kernel.secret
+        links:
+            allowed_hosts: [app.example.com]           # nothing is rewritten until a host is listed
+```
+
+```yaml
+# config/routes/nowo_mail_kit.yaml
+nowo_mail_kit_tracking:
+    resource: .
+    type: nowo_mail_kit_tracking
+
+# config/packages/security.yaml — before the main firewall: no session, no user, no cookie
+security:
+    firewalls:
+        mail_kit_pixel:
+            pattern: ^/e/o/
+            security: false
+```
+
+Create the table with `doctrine:migrations:diff` (ORM hosts; schema listener) or `nowo:mail-kit:tracking:schema`
+(prints the SQL; `--force` runs it). Schedule `nowo:mail-kit:tracking:purge` daily.
+
+### Beacon example: policy and short-link rewriter
+
+```php
+namespace App\Mail;
+
+use Nowo\MailKitBundle\Tracking\EmailTrackingPolicyInterface;
+use Nowo\MailKitBundle\Tracking\TrackingCandidate;
+use Nowo\MailKitBundle\Tracking\TrackingDecision;
+
+final readonly class MailTrackingPolicy implements EmailTrackingPolicyInterface
+{
+    private const SECURITY = ['magic_link', 'password_reset', 'login_code', 'new_device', 'sign_in_alert', 'email_change', 'invitation_accept'];
+
+    public function __construct(private UserNotificationPreferences $preferences) {}
+
+    public function decide(TrackingCandidate $candidate): TrackingDecision
+    {
+        if ($candidate->templateId === null || in_array($candidate->templateId, self::SECURITY, true) || $candidate->recipientId === null) {
+            return TrackingDecision::none();
+        }
+        // Resolved on every call (worker mode): the user may have opted out a second ago.
+        if (!$this->preferences->tellSendersWhenIOpen($candidate->recipientId)) {
+            return TrackingDecision::none();
+        }
+
+        return TrackingDecision::track($candidate->recipientId, $candidate->tenant);
+    }
+}
+```
+
+```php
+namespace App\Mail;
+
+use Nowo\MailKitBundle\Tracking\EmailLinkRewriterInterface;
+use Nowo\MailKitBundle\Tracking\TrackedLink;
+
+final readonly class ShortLinkEmailRewriter implements EmailLinkRewriterInterface
+{
+    public function __construct(private ShortLinks $shortLinks) {}
+
+    public function rewrite(TrackedLink $link): ?string
+    {
+        // Kind "email": records send id, label and position on click, then 302s to $link->url.
+        // An essential link (unsubscribe, preferences, legal) must never be blocked, expired or rate-limited.
+        return $this->shortLinks->createForEmail(
+            target: $link->url,
+            tenant: $link->tenant,
+            sendId: $link->sendId,
+            label: $link->label,
+            position: $link->position,
+            neverBlock: $link->essential,
+        )->publicUrl();
+    }
+}
+```
+
+```yaml
+# Beacon: config/packages/nowo_mail_kit.yaml
+nowo_mail_kit:
+    tracking:
+        enabled: true
+        policy: App\Mail\MailTrackingPolicy
+        link_rewriter: App\Mail\ShortLinkEmailRewriter
+        recipient_resolver: App\Mail\TrackingRecipients    # GDPR bridge: the user's recipient ids
+        public_base_url: '%env(BEACON_PUBLIC_URL)%'
+        secret: '%env(MAIL_KIT_TRACKING_SECRET)%'
+        retention: P90D
+        bus: messenger.bus.default                       # optional: route RecordMailOpen to an async transport
+        links:
+            allowed_hosts: ['%env(BEACON_PUBLIC_HOST)%']
+            allowed_path_prefixes: [/issues, /projects, /account/notifications, /legal]
+    personal_data:
+        enabled: true                                    # email_tracking eraser + export section (UserKit)
+```
+
+```php
+// When sending (spec 133 templates):
+MailHeaders::template($email, $template->id());
+MailHeaders::trackingRecipient($email, $user->getId()->toRfc4122(), $organization->getSlug());
+```
+
+A DDD host wires exactly the same ports: they are plain PHP (interfaces and value objects, no Doctrine, Symfony or
+HTTP types); the store is bundle-owned (DBAL, its own table) and never touches the host's entity manager.
+
+### The pixel endpoint
+
+`GET|HEAD <path_prefix>/{token}.gif` (route `nowo_mail_kit_tracking_open`, `_stateless`) answers **the same 43-byte GIF**
+for valid, expired, forged and unknown tokens, with `Cache-Control: no-store`, `Referrer-Policy: no-referrer`,
+`X-Robots-Tag: noindex`; an internal failure is logged and still answers the GIF. For a valid token it counts one
+open with a single indexed `UPDATE … WHERE send_id = ?` (no session, no ORM, no read), or only dispatches
+`Tracking\Message\RecordMailOpen` with `tracking.bus`. `HEAD` never counts.
+
+An open is a **machine open** (Apple Mail Privacy Protection, image proxies, link scanners) when the user agent is empty
+or matches `machine_opens.user_agents`, or the client address is in `machine_opens.ip_ranges` (default Apple
+`17.0.0.0/8`); machine opens are counted apart and never count as "opened". Only the truncated address (IPv4 /24,
+IPv6 /48) and the user-agent family (`OpenClassifier::FAMILIES`) of the last open are stored.
+
+### Reading the results
+
+```php
+use Nowo\MailKitBundle\Event\MailDeliveredEvent;
+use Nowo\MailKitBundle\Event\MailOpenedEvent;
+use Nowo\MailKitBundle\Tracking\EmailTrackingReaderInterface;
+
+#[AsEventListener]
+public function onDelivered(MailDeliveredEvent $event): void
+{
+    // Link your e-mail log row to $event->trackingId (null when untracked).
+}
+
+$stats = $reader->find($sendId);           // OpenStats: opens, first / last, machineOpens, …, or null
+$many  = $reader->findMany($sendIds);      // keyed by send id (an e-mail log page)
+```
+
+`MailOpenedEvent` / `MailMachineOpenedEvent` (send id and time only) are dispatched after each counted open of a known
+send. Clicks are recorded by your link rewriter's redirect (e.g. the short-link bundle), not by MailKit. Each send counts at most
+`tracking.max_opens_per_send` opens (default 1000). `TrackedLink::$label` is the link's visible text as written by the
+e-mail's author (entities decoded, tags stripped, at most 100 characters): escape it wherever you display it, and keep it
+under the same retention as the click rows.
+
+### Retention, GDPR and worker mode
+
+- `nowo:mail-kit:tracking:purge` deletes sends older than `tracking.retention` (default `P90D`); tokens older than
+  that are refused anyway.
+- `EmailTrackingPersonalDataInterface::exportRecipient()` / `eraseRecipient()` export / erase every row of a recipient
+  id (exact, binary match, re-checked in PHP). With `personal_data.enabled` and UserKit, the `email_tracking` eraser and
+  export section call them with the ids of your `TrackingRecipientResolverInterface` (default: `getId()`). Sends tracked
+  without a recipient id cannot be attributed: only the purge removes them.
+- **Opt-out**: the policy stops new tracking at once; call `EmailTrackingPersonalDataInterface::eraseRecipient()` from
+  your opt-out handler too when turning tracking off must also remove what was already recorded (and delete the
+  recipient's click rows in your short-link store).
+- **Recipient id**: return one from the policy for every tracked send (recommended: refuse to track without one), so
+  export and erasure can find the rows.
+- **Client address**: set `framework.trusted_proxies` to your proxies only; the truncated address and the machine-open
+  ranges use `Request::getClientIp()`.
+- Every tracking service is immutable (FrankenPHP worker mode, kernel reset off): the policy, rewriter and filter are
+  asked on every send, the store resolves its connection per call, nothing is memoised. Tested with 1 000 pixel
+  requests for two tenants in one kept-alive kernel without the services resetter (flat memory, p95 < 20 ms).
+
 ## Admin UI
 
 The routes come only from the `nowo_mail_kit` loader (REQ-SF-004 rule 7):
@@ -1103,4 +1343,4 @@ php bin/console doctrine:migrations:diff
 php bin/console doctrine:migrations:migrate
 ```
 
-Tables: `<prefix>mail_kit_sent_mail` (indexes `<prefix>idx_mail_kit_sent_mail_queued`, `<prefix>idx_mail_kit_sent_mail_status`) and `<prefix>mail_kit_sent_mail_body`. The Instance Settings table holds the settings themselves.
+Tables: `<prefix>mail_kit_sent_mail` (indexes `<prefix>idx_mail_kit_sent_mail_queued`, `<prefix>idx_mail_kit_sent_mail_status`) and `<prefix>mail_kit_sent_mail_body`; with `tracking.enabled` (1.10) also `<prefix>mail_kit_tracking_send` (DBAL, added by a `postGenerateSchema` listener, or printed by `nowo:mail-kit:tracking:schema`). The Instance Settings table holds the settings themselves.

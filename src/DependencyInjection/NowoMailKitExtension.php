@@ -66,6 +66,8 @@ use Nowo\MailKitBundle\Graph\Transport\GraphTransportFactory;
 use Nowo\MailKitBundle\Integration\AuthKit\MailKitOutboundMailReadyChecker;
 use Nowo\MailKitBundle\Integration\UserKit\EmailsReceivedPersonalDataEraser;
 use Nowo\MailKitBundle\Integration\UserKit\EmailsReceivedPersonalDataExportProvider;
+use Nowo\MailKitBundle\Integration\UserKit\EmailTrackingPersonalDataEraser;
+use Nowo\MailKitBundle\Integration\UserKit\EmailTrackingPersonalDataExportProvider;
 use Nowo\MailKitBundle\Log\DefaultSentMailPersonalDataSubjectResolver;
 use Nowo\MailKitBundle\Log\NullSentMailErasure;
 use Nowo\MailKitBundle\Log\NullSentMailPersonalDataExporter;
@@ -94,6 +96,29 @@ use Nowo\MailKitBundle\Settings\MailerSettingsSection;
 use Nowo\MailKitBundle\Settings\MailSettings;
 use Nowo\MailKitBundle\TestMail\TestMailGuard;
 use Nowo\MailKitBundle\TestMail\TestMailSender;
+use Nowo\MailKitBundle\Tracking\Command\TrackingPurgeCommand;
+use Nowo\MailKitBundle\Tracking\Command\TrackingSchemaCommand;
+use Nowo\MailKitBundle\Tracking\ConfiguredTrackableLinkFilter;
+use Nowo\MailKitBundle\Tracking\CredentialLinkDetector;
+use Nowo\MailKitBundle\Tracking\DefaultTrackingRecipientResolver;
+use Nowo\MailKitBundle\Tracking\EmailLinkRewriterInterface;
+use Nowo\MailKitBundle\Tracking\EmailTracker;
+use Nowo\MailKitBundle\Tracking\EmailTrackingPersonalDataInterface;
+use Nowo\MailKitBundle\Tracking\EmailTrackingPolicyInterface;
+use Nowo\MailKitBundle\Tracking\EmailTrackingReaderInterface;
+use Nowo\MailKitBundle\Tracking\HtmlLinkTracker;
+use Nowo\MailKitBundle\Tracking\Http\TrackingPixelController;
+use Nowo\MailKitBundle\Tracking\Http\TrackingRouteLoader;
+use Nowo\MailKitBundle\Tracking\Message\RecordMailOpen;
+use Nowo\MailKitBundle\Tracking\Message\RecordMailOpenHandler;
+use Nowo\MailKitBundle\Tracking\NullEmailLinkRewriter;
+use Nowo\MailKitBundle\Tracking\OpenClassifier;
+use Nowo\MailKitBundle\Tracking\OpenRecorder;
+use Nowo\MailKitBundle\Tracking\Store\TrackingSchemaListener;
+use Nowo\MailKitBundle\Tracking\Store\TrackingStore;
+use Nowo\MailKitBundle\Tracking\TrackableLinkFilterInterface;
+use Nowo\MailKitBundle\Tracking\TrackingRecipientResolverInterface;
+use Nowo\MailKitBundle\Tracking\TrackingTokenSigner;
 use Nowo\MailKitBundle\Twig\MailKitBrandTwigExtension;
 use Nowo\MailKitBundle\Twig\MailKitTwigExtension;
 use Nowo\MailKitBundle\Ui\AdminPages;
@@ -127,6 +152,8 @@ use function is_array;
 use function is_bool;
 use function is_string;
 use function sprintf;
+use function str_contains;
+use function strlen;
 
 /**
  * Loads `nowo_mail_kit`: the Instance Settings sections, DSN / sender validation, the runtime transport and mailer
@@ -257,7 +284,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $config = $this->processConfiguration(new Configuration(), $configs);
         $this->assertLiteralBooleans($config);
 
-        /** @var array{mailer: array{decorate: bool, dsn_provider: string|null, sender_provider: string|null, fallback_counts_as_ready: bool}, dsn: array{allowed_schemes: list<string>, allowed_hosts: list<string>, allow_private_hosts: bool, allow_insecure_tls: bool, resolve_dns: bool, dns_timeout: float}, sender: array{default_from: string|null, default_from_name: string|null, require_public_domain: bool}, resend: array{enabled: bool, api_timeout: float}, bootstrap: array{mailer_dsn: string|null, resend_api_key: string|null}, test_email: array{rate_limit: int, rate_interval: string}, log: array{enabled: bool, map_entities: bool, store_bodies: bool, retention_days: int, purge_batch_size: int}, personal_data: array{enabled: bool, subject_resolver: string|null}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>, page_size: int, export: array{enabled: bool, max_rows: int, access_roles: list<string>, include_bodies: bool, body_batch_bytes: int}}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}, brand: array{mode: string, name: string|null, colors: array<string, string>, max_image_bytes: int, max_total_bytes: int, max_image_side: int}, graph: array{enabled: bool, mailbox_provider: string|null, default_profile: string, profiles: array<string, array{tenant_id: string, client_id: string, client_secret: string, mailbox: string}>, http_client: string, token_cache: string, timeout: float, draft_cleanup: array{bus: string|null, delay_ms: int}, upload_hosts: list<string>, limits: array{max_attachments: int, max_attachment_bytes: int, max_message_bytes: int}, inbound: array{enabled: bool, webhook: array{path: string}}}} $config */
+        /** @var array{mailer: array{decorate: bool, dsn_provider: string|null, sender_provider: string|null, fallback_counts_as_ready: bool}, dsn: array{allowed_schemes: list<string>, allowed_hosts: list<string>, allow_private_hosts: bool, allow_insecure_tls: bool, resolve_dns: bool, dns_timeout: float}, sender: array{default_from: string|null, default_from_name: string|null, require_public_domain: bool}, resend: array{enabled: bool, api_timeout: float}, bootstrap: array{mailer_dsn: string|null, resend_api_key: string|null}, test_email: array{rate_limit: int, rate_interval: string}, log: array{enabled: bool, map_entities: bool, store_bodies: bool, retention_days: int, purge_batch_size: int}, personal_data: array{enabled: bool, subject_resolver: string|null}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>, page_size: int, export: array{enabled: bool, max_rows: int, access_roles: list<string>, include_bodies: bool, body_batch_bytes: int}}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}, brand: array{mode: string, name: string|null, colors: array<string, string>, max_image_bytes: int, max_total_bytes: int, max_image_side: int}, graph: array{enabled: bool, mailbox_provider: string|null, default_profile: string, profiles: array<string, array{tenant_id: string, client_id: string, client_secret: string, mailbox: string}>, http_client: string, token_cache: string, timeout: float, draft_cleanup: array{bus: string|null, delay_ms: int}, upload_hosts: list<string>, limits: array{max_attachments: int, max_attachment_bytes: int, max_message_bytes: int}, inbound: array{enabled: bool, webhook: array{path: string}}}, tracking: array<string, mixed>} $config */
         $webUi = $config['web_ui'];
 
         $settings = $this->hasBundle($container, 'NowoInstanceSettingsBundle') || $container->hasExtension('nowo_instance_settings');
@@ -289,6 +316,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $this->registerWebUi($container, $config, $settings);
         $this->registerBrand($container, $config['brand']);
         $this->registerGraph($container, $config['graph'], $config['doctrine']);
+        $this->registerTracking($container, $config['tracking'], $config['doctrine'], $config['personal_data']['enabled'], $hasDoctrine);
         $container->setParameter('nowo_mail_kit.graph.webhook_path', $config['graph']['inbound']['webhook']['path']);
         $container->setDefinition(GraphWebhookRouteLoader::class, (new Definition(GraphWebhookRouteLoader::class, [
             $config['graph']['inbound']['enabled'],
@@ -467,6 +495,135 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             ->addTag('console.command', ['command' => GraphSweepCommand::NAME]));
         $container->setDefinition(GraphSchemaCommand::class, (new Definition(GraphSchemaCommand::class, [new Reference(GraphInboundStore::class)]))
             ->addTag('console.command', ['command' => GraphSchemaCommand::NAME]));
+    }
+
+    /**
+     * 1.10 (Beacon spec 230 block B): open pixel and link rewriting, only with `tracking.enabled: true` (nothing is
+     * registered otherwise). The store, signer, classifier, tracker and pixel controller are immutable; the host
+     * provides the policy (and optionally the link rewriter, link filter and recipient resolver).
+     *
+     * @param array<string, mixed> $tracking
+     * @param array{table_prefix: string, entity_manager: string|null} $doctrine
+     * @param bool $personalData `personal_data.enabled`
+     * @param bool $hasDoctrine DoctrineBundle registered
+     */
+    private function registerTracking(ContainerBuilder $container, array $tracking, array $doctrine, bool $personalData, bool $hasDoctrine): void
+    {
+        /** @var array{enabled: bool, policy: string, link_rewriter: string|null, link_filter: string|null, recipient_resolver: string|null, public_base_url: string, path_prefix: string, secret: string|null, previous_secrets: list<string>, retention: string, purge_batch_size: int, connection: string|null, bus: string|null, extra_never_track_templates: list<string>, max_opens_per_send: int, skip_redacted: bool, max_html_bytes: int, links: array{allowed_hosts: list<string>, allowed_path_prefixes: list<string>, credential_query_parameters: list<string>, credential_path_segments: list<string>, essential_patterns: list<string>, max_links: int}, machine_opens: array{user_agents: list<string>, ip_ranges: list<string>}} $tracking */
+        if (!$tracking['enabled']) {
+            return;
+        }
+        if (!$hasDoctrine) {
+            throw new LogicException('NowoMailKitBundle: nowo_mail_kit.tracking requires doctrine/doctrine-bundle (DBAL connection of the tracking table).');
+        }
+        $bus = is_string($tracking['bus']) && $tracking['bus'] !== '' ? $tracking['bus'] : null;
+        if ($bus !== null) {
+            self::requireInterface(MessageBusInterface::class, 'NowoMailKitBundle: nowo_mail_kit.tracking.bus requires symfony/messenger.');
+        }
+        $logger    = new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE);
+        $clock     = new Reference('clock', ContainerInterface::NULL_ON_INVALID_REFERENCE);
+        $retention = Configuration::daysSeconds($tracking['retention']);
+
+        $container->setDefinition(TrackingStore::class, new Definition(TrackingStore::class, [new Reference('doctrine'), $tracking['connection'], $doctrine['table_prefix'], $clock, $logger, $tracking['max_opens_per_send']]));
+        $container->setAlias(EmailTrackingReaderInterface::class, TrackingStore::class)->setPublic(true);
+        $container->setAlias(EmailTrackingPersonalDataInterface::class, TrackingStore::class)->setPublic(true);
+        $container->setDefinition(TrackingSchemaListener::class, (new Definition(TrackingSchemaListener::class, [new Reference(TrackingStore::class), new Reference('doctrine'), $doctrine['entity_manager']]))
+            ->addTag('doctrine.event_listener', ['event' => 'postGenerateSchema']));
+
+        // Literal secrets are checked now (audit NU-M1); %env()% values when the signer is first built — lazily, so a
+        // bad secret leaves mail untracked (logged as critical) instead of breaking every send.
+        // With `secret: null` the previous secrets are previous kernel secrets (derived like the current one, any length).
+        foreach (is_string($tracking['secret']) && $tracking['secret'] !== '' ? [$tracking['secret'], ...$tracking['previous_secrets']] : [] as $secret) {
+            if (is_string($secret) && !str_contains($secret, '%env(') && $container->resolveEnvPlaceholders($secret, true) === $secret && strlen($secret) < 32) {
+                throw new InvalidConfigurationException('nowo_mail_kit.tracking.secret and tracking.previous_secrets must be at least 32 bytes long (use a random value from %env()%).');
+            }
+        }
+        $signer = is_string($tracking['secret']) && $tracking['secret'] !== ''
+            ? new Definition(TrackingTokenSigner::class, [$tracking['secret'], $tracking['previous_secrets'], $retention, $clock])
+            : (new Definition(TrackingTokenSigner::class, ['%kernel.secret%', $tracking['previous_secrets'], $retention, $clock]))->setFactory([TrackingTokenSigner::class, 'fromKernelSecret']);
+        $container->setDefinition(TrackingTokenSigner::class, $signer);
+
+        $container->setAlias(EmailTrackingPolicyInterface::class, $tracking['policy']);
+        $rewriter = $tracking['link_rewriter'];
+        if (is_string($rewriter) && $rewriter !== '') {
+            $container->setAlias(EmailLinkRewriterInterface::class, $rewriter);
+        } else {
+            $container->setDefinition(NullEmailLinkRewriter::class, new Definition(NullEmailLinkRewriter::class));
+            $container->setAlias(EmailLinkRewriterInterface::class, NullEmailLinkRewriter::class);
+        }
+        $filter = $tracking['link_filter'];
+        if (is_string($filter) && $filter !== '') {
+            $container->setAlias(TrackableLinkFilterInterface::class, $filter);
+        } else {
+            $container->setDefinition(ConfiguredTrackableLinkFilter::class, new Definition(ConfiguredTrackableLinkFilter::class, [$tracking['links']['allowed_hosts'], $tracking['links']['allowed_path_prefixes']]));
+            $container->setAlias(TrackableLinkFilterInterface::class, ConfiguredTrackableLinkFilter::class);
+        }
+
+        $container->setDefinition(EmailTracker::class, (new Definition(EmailTracker::class, [
+            new Reference(EmailTrackingPolicyInterface::class),
+            new Reference(EmailLinkRewriterInterface::class),
+            new Reference(TrackableLinkFilterInterface::class),
+            new Definition(CredentialLinkDetector::class, [$tracking['links']['credential_query_parameters'], $tracking['links']['credential_path_segments']]),
+            new ServiceClosureArgument(new Reference(TrackingTokenSigner::class)),
+            new Reference(TrackingStore::class),
+            new Definition(HtmlLinkTracker::class, [$tracking['links']['max_links']]),
+            $tracking['public_base_url'] . $tracking['path_prefix'],
+            $tracking['extra_never_track_templates'],
+            $tracking['skip_redacted'],
+            $tracking['links']['essential_patterns'],
+            $tracking['max_html_bytes'],
+            new Reference('twig.mime_body_renderer', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            $logger,
+        ]))->setPublic(true));
+
+        $container->setDefinition(OpenClassifier::class, new Definition(OpenClassifier::class, [$tracking['machine_opens']['user_agents'], $tracking['machine_opens']['ip_ranges']]));
+        $container->setDefinition(OpenRecorder::class, new Definition(OpenRecorder::class, [
+            new Reference(TrackingStore::class),
+            new Reference('event_dispatcher', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            $logger,
+        ]));
+        if ($bus !== null) {
+            $container->setDefinition(RecordMailOpenHandler::class, (new Definition(RecordMailOpenHandler::class, [new Reference(OpenRecorder::class)]))
+                ->addTag('messenger.message_handler', ['handles' => RecordMailOpen::class]));
+        }
+        $container->setDefinition(TrackingPixelController::class, (new Definition(TrackingPixelController::class, [
+            new ServiceClosureArgument(new Reference(TrackingTokenSigner::class)),
+            new Reference(OpenClassifier::class),
+            new Reference(OpenRecorder::class),
+            $bus !== null ? new Reference($bus) : null,
+            $clock,
+            $logger,
+        ]))->setPublic(true)->addTag('controller.service_arguments'));
+        $container->setDefinition(TrackingRouteLoader::class, (new Definition(TrackingRouteLoader::class, [$tracking['path_prefix']]))->addTag('routing.loader'));
+
+        $container->setDefinition(TrackingPurgeCommand::class, (new Definition(TrackingPurgeCommand::class, [
+            new Reference(TrackingStore::class),
+            $retention,
+            $tracking['purge_batch_size'],
+            new Reference('clock'),
+            $logger,
+        ]))->addTag('console.command', ['command' => TrackingPurgeCommand::NAME]));
+        $container->setDefinition(TrackingSchemaCommand::class, (new Definition(TrackingSchemaCommand::class, [new Reference(TrackingStore::class)]))
+            ->addTag('console.command', ['command' => TrackingSchemaCommand::NAME]));
+
+        if (!$personalData || !interface_exists(PersonalDataEraserInterface::class)) {
+            return;
+        }
+        $resolver = $tracking['recipient_resolver'];
+        if (is_string($resolver) && $resolver !== '') {
+            $container->setAlias(TrackingRecipientResolverInterface::class, $resolver);
+        } else {
+            $container->setDefinition(DefaultTrackingRecipientResolver::class, new Definition(DefaultTrackingRecipientResolver::class));
+            $container->setAlias(TrackingRecipientResolverInterface::class, DefaultTrackingRecipientResolver::class);
+        }
+        $container->setDefinition(EmailTrackingPersonalDataEraser::class, (new Definition(EmailTrackingPersonalDataEraser::class, [
+            new Reference(EmailTrackingPersonalDataInterface::class),
+            new Reference(TrackingRecipientResolverInterface::class),
+        ]))->addTag('nowo_user_kit.personal_data.eraser', ['priority' => EmailTrackingPersonalDataEraser::PRIORITY]));
+        $container->setDefinition(EmailTrackingPersonalDataExportProvider::class, (new Definition(EmailTrackingPersonalDataExportProvider::class, [
+            new Reference(EmailTrackingPersonalDataInterface::class),
+            new Reference(TrackingRecipientResolverInterface::class),
+        ]))->addTag('nowo_user_kit.personal_data.export_provider', ['priority' => EmailTrackingPersonalDataExportProvider::PRIORITY]));
     }
 
     /**
@@ -710,7 +867,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
      */
     private function registerMailer(ContainerBuilder $container, array $config, bool $settings): void
     {
-        /** @var array{mailer: array{decorate: bool, dsn_provider: string|null, sender_provider: string|null, fallback_counts_as_ready: bool}, log: array{enabled: bool}} $config */
+        /** @var array{mailer: array{decorate: bool, dsn_provider: string|null, sender_provider: string|null, fallback_counts_as_ready: bool}, log: array{enabled: bool}, tracking: array{enabled: bool}} $config */
         $mailer   = $config['mailer'];
         $recorder = $config['log']['enabled'] ? new Reference(SentMailRecorder::class) : null;
 
@@ -734,6 +891,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE),
             new Reference('event_dispatcher', ContainerInterface::NULL_ON_INVALID_REFERENCE),
             new Reference('clock', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            $config['tracking']['enabled'] ? new Reference(EmailTracker::class) : null,
         ]))->setPublic(true)->addTag('kernel.reset', ['method' => 'reset']);
         if ($mailer['decorate']) {
             $transport->setDecoratedService('mailer.transports');
@@ -966,6 +1124,8 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             'graph.enabled'                     => $config['graph']['enabled'] ?? null,
             'graph.inbound.enabled'             => $config['graph']['inbound']['enabled'] ?? null,
             'graph.inbound.allow_remote_images' => $config['graph']['inbound']['allow_remote_images'] ?? null,
+            'tracking.enabled'                  => $config['tracking']['enabled'] ?? null,
+            'tracking.skip_redacted'            => $config['tracking']['skip_redacted'] ?? null,
             'web_ui.enabled'                    => $config['web_ui']['enabled'] ?? null,
             'web_ui.export.enabled'             => $config['web_ui']['export']['enabled'] ?? null,
             'web_ui.export.include_bodies'      => $config['web_ui']['export']['include_bodies'] ?? null,

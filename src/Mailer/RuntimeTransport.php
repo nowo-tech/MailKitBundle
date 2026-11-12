@@ -43,7 +43,8 @@ use function strlen;
  * dropped by {@see reset()} (`kernel.reset` between requests / Messenger messages in worker mode, and on
  * `SettingsChangedEvent` for the mail sections).
  *
- * The internal {@see MailHeaders} are removed before delivery; the outcome is written to the sent-mail log when it
+ * The internal {@see MailHeaders} are removed from the copy that is delivered (never from the caller's message, which a
+ * Messenger retry sends again, 1.9.1); the outcome is written to the sent-mail log when it
  * is enabled. A failure is rethrown as {@see DeliveryFailedException}: scrubbed message and reference, never the
  * provider response body (so it is safe in flashes, the log and the Messenger failure transport).
  *
@@ -159,13 +160,17 @@ final class RuntimeTransport implements TransportInterface, ResetInterface
         $snapshot = $message instanceof Message ? clone $message : $message;
         $id       = $message instanceof Message ? MailHeaders::value($message, MailHeaders::LOG_ID) : null;
         $tag      = $message instanceof Message ? MailHeaders::value($message, MailHeaders::TAG) : null;
-        if ($message instanceof Message) {
-            MailHeaders::strip($message);
+        // The caller's message is never changed (1.9.1): a Messenger retry re-sends that very object, which must still
+        // carry the log row id, the tag and the redaction values. Only the copy that leaves the application loses the
+        // internal headers.
+        $outgoing = $message instanceof Message ? clone $message : $message;
+        if ($outgoing instanceof Message) {
+            MailHeaders::strip($outgoing);
         }
         $label = $dsn instanceof RuntimeDsn ? MailerDsnAudit::scheme($dsn->dsn) : self::FALLBACK_LABEL;
 
         try {
-            $sent = ($dsn instanceof RuntimeDsn ? $this->transportFor($dsn) : $this->fallback)->send($message, $envelope);
+            $sent = ($dsn instanceof RuntimeDsn ? $this->transportFor($dsn) : $this->fallback)->send($outgoing, $envelope);
         } catch (Throwable $exception) {
             // Scrubbed message + reference only: no provider body, no credential, no `previous` (CA M1 / L3 / I3).
             $failure = DeliveryFailedException::from($exception, ...$this->credentials($dsn));

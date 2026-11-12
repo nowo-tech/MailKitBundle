@@ -6,19 +6,21 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+  - [Fixed](#fixed)
+  - [Security](#security)
 - [[1.9.0] - 2026-11-12](#190---2026-11-12)
   - [Added](#added)
   - [Changed](#changed)
   - [Audit NQ (before the 1.9.0 tag)](#audit-nq-before-the-190-tag)
   - [Audit NQ-v (verification, before the 1.9.0 tag)](#audit-nq-v-verification-before-the-190-tag)
-  - [Security](#security)
+  - [Security](#security-1)
   - [Tests](#tests)
 - [[1.8.0] - 2026-11-12](#180---2026-11-12)
   - [Added](#added-1)
-  - [Security](#security-1)
+  - [Security](#security-2)
   - [Tests](#tests-1)
 - [[1.7.1] - 2026-11-11](#171---2026-11-11)
-  - [Fixed](#fixed)
+  - [Fixed](#fixed-1)
   - [Tests](#tests-2)
   - [Documentation](#documentation)
 - [[1.7.0] - 2026-11-11](#170---2026-11-11)
@@ -32,19 +34,19 @@ All notable changes to this project are documented here. The format follows
   - [Changed](#changed-3)
 - [[1.4.0] - 2026-11-09](#140---2026-11-09)
   - [Added](#added-5)
-  - [Security](#security-2)
+  - [Security](#security-3)
 - [[1.3.0] - 2026-11-02](#130---2026-11-02)
   - [Added](#added-6)
   - [Changed](#changed-4)
-  - [Security](#security-3)
+  - [Security](#security-4)
 - [[1.2.0] - 2026-11-02](#120---2026-11-02)
   - [Added](#added-7)
   - [Changed](#changed-5)
-  - [Fixed](#fixed-1)
-- [[1.1.1] - 2026-11-01](#111---2026-11-01)
-  - [Security](#security-4)
-  - [Changed](#changed-6)
   - [Fixed](#fixed-2)
+- [[1.1.1] - 2026-11-01](#111---2026-11-01)
+  - [Security](#security-5)
+  - [Changed](#changed-6)
+  - [Fixed](#fixed-3)
 - [[1.1.0] - 2026-11-01](#110---2026-11-01)
   - [Added](#added-8)
   - [Changed](#changed-7)
@@ -54,6 +56,23 @@ All notable changes to this project are documented here. The format follows
   - [Security (re-verification follow-ups)](#security-re-verification-follow-ups)
 
 ## [Unreleased]
+
+Next patch: 1.9.1.
+
+### Fixed
+
+- **Messenger retries lost MailKit's internal headers.** `RuntimeTransport` removed `X-Mail-Kit-Log-Id`,
+  `X-Mail-Kit-Tag` and `X-Mail-Kit-Redact` from the caller's message object before delivery. Messenger re-sends that
+  very object on a retry (serialized again by the retry or failure transport), so a retried message lost its queued
+  sent-mail log row (a second row was written while the first stayed `failed`), its tag and its redaction values. The
+  headers are now removed from the delivered copy only; the caller's message is never changed.
+
+### Security
+
+- With `log.store_bodies: true`, asynchronous mail (Messenger) whose first delivery attempt failed and was retried,
+  and a message that declared values with `MailHeaders::redact()` (one-time links, codes), the retry's log row stored
+  the HTML / text bodies **without** masking those values (1.0.0 – 1.9.0). The first attempt's row was masked. Fixed by
+  the change above. Rows written before the upgrade are not rewritten: see UPGRADING "To 1.9.1".
 
 ## [1.9.0] - 2026-11-12
 

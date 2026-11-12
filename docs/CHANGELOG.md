@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[1.8.0] - 2026-11-12](#180---2026-11-12)
   - [Added](#added)
   - [Security](#security)
   - [Tests](#tests)
@@ -46,6 +47,8 @@ All notable changes to this project are documented here. The format follows
   - [Security (re-verification follow-ups)](#security-re-verification-follow-ups)
 
 ## [Unreleased]
+
+## [1.8.0] - 2026-11-12
 
 Next minor: 1.8.0 (Beacon spec 229, D-20261112-09: client e-mail threads; the inbound Graph pipeline follows in 1.9.0).
 

@@ -35,6 +35,9 @@ final class GraphException extends RuntimeException
     /** The message breaks a configured limit or the MIME / attachment rules. */
     public const REASON_INVALID_MESSAGE = 'invalid_message';
 
+    /** An answer, a message or an attachment exceeds a configured size limit (1.9). */
+    public const REASON_TOO_LARGE = 'too_large';
+
     /** Graph returned a link outside the allowed hosts (SSRF guard). */
     public const REASON_UNTRUSTED_URL = 'untrusted_url';
 

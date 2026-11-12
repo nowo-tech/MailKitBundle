@@ -22,7 +22,7 @@ use function parse_url;
 use function preg_match;
 use function rawurldecode;
 use function rawurlencode;
-use function str_starts_with;
+use function str_contains;
 use function strtolower;
 
 use const PHP_URL_PATH;
@@ -69,13 +69,14 @@ final class GraphDeltaSweeper
         $link       = $this->store->deltaLink($profile);
         $pages      = 0;
         $dispatched = 0;
+        $noticed    = false;
 
         try {
             if ($link === null) {
                 $since = ($this->clock ?? new NativeClock())->now()->sub(new DateInterval($this->initialWindow))->format('Y-m-d\TH:i:s\Z');
                 $data  = $this->api->call($mailbox, 'GET', GraphApiClient::userPath($mailbox) . '/mailFolders/' . rawurlencode($this->folder) . '/messages/delta?changeType=created&$select=id&$filter=' . rawurlencode('receivedDateTime ge ' . $since), $options, [200], 'delta sweep');
             } else {
-                $this->assertMailboxLink($mailbox, $link);
+                $this->assertMailboxLink($mailbox, $link, $noticed);
                 $data = $this->api->callUrl($mailbox, 'GET', $link, $options, [200], 'delta sweep');
             }
 
@@ -90,7 +91,7 @@ final class GraphDeltaSweeper
                 $delta = $data['@odata.deltaLink'] ?? null;
                 $next  = $data['@odata.nextLink'] ?? null;
                 if (is_string($delta)) {
-                    $this->assertMailboxLink($mailbox, $delta);
+                    $this->assertMailboxLink($mailbox, $delta, $noticed);
                     $this->store->saveDeltaLink($profile, $delta);
 
                     return $this->done($profile, $pages, $dispatched, true);
@@ -98,7 +99,7 @@ final class GraphDeltaSweeper
                 if (!is_string($next)) {
                     return $this->done($profile, $pages, $dispatched, false);
                 }
-                $this->assertMailboxLink($mailbox, $next);
+                $this->assertMailboxLink($mailbox, $next, $noticed);
                 $this->store->saveDeltaLink($profile, $next);
                 if ($pages >= $maxPages) {
                     return $this->done($profile, $pages, $dispatched, false);
@@ -119,17 +120,27 @@ final class GraphDeltaSweeper
     }
 
     /**
-     * A link is followed only on Graph v1.0 **and** under this profile's mailbox (`/v1.0/users/{mailbox}/`, audit
-     * NQ-I3), so a tampered stored link or a confused answer cannot read another mailbox with this token.
+     * A link is followed only on `https://graph.microsoft.com/v1.0/` (SSRF guard, {@see GraphApiClient::assertGraphUrl()})
+     * and only when it is a mail-folder message delta of a user: path `users/{id}/…` or `users('{id}')/…`
+     * (case-insensitive) containing `mailFolders` and `messages/delta` (audit NQ-I3). Graph often names the mailbox by
+     * its object id (GUID) instead of the SMTP address, so an identifier that is not the profile's address is logged
+     * once per run and followed (defence in depth only; the token is the profile's own).
      *
      * @throws GraphException
      */
-    private function assertMailboxLink(GraphMailbox $mailbox, string $url): void
+    private function assertMailboxLink(GraphMailbox $mailbox, string $url, bool &$noticed): void
     {
         $this->api->assertGraphUrl($url, 'delta sweep');
         $path = strtolower(rawurldecode((string) parse_url($url, PHP_URL_PATH)));
-        if (!str_starts_with($path, '/v1.0/users/' . $mailbox->address . '/')) {
+        if (preg_match("#^/v1\\.0/users(?:/([^/(]+)|\\('([^']+)'\\))/#", $path, $match) !== 1
+            || !str_contains($path, '/mailfolders') || !str_contains($path, '/messages/delta')
+        ) {
             throw GraphException::untrustedUrl('delta sweep');
+        }
+        $identifier = $match[1] !== '' ? $match[1] : ($match[2] ?? '');
+        if ($identifier !== $mailbox->address && !$noticed) {
+            $noticed = true;
+            $this->logger?->notice('Microsoft Graph delta link names the mailbox by another identifier (object id); followed.', ['bundle' => 'NowoMailKitBundle', 'profile' => $mailbox->profile]);
         }
     }
 

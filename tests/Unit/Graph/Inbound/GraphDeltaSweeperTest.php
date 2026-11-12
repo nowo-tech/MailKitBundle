@@ -89,6 +89,34 @@ final class GraphDeltaSweeperTest extends TestCase
         self::assertTrue($this->logger->has('delta sweep finished'));
     }
 
+    /**
+     * Graph names the mailbox by address or object id, in path or key form, in any case: all followed; another
+     * identifier is logged once per run.
+     */
+    public function testMailboxIdentifierForms(): void
+    {
+        $guid  = '00000000-0000-4000-8000-0000000000f1';
+        $links = [
+            'https://graph.microsoft.com/v1.0/users/' . $guid . "/mailFolders('inbox')/messages/delta?\$skiptoken=1",
+            "https://graph.microsoft.com/v1.0/users('" . $guid . "')/mailFolders('AAMkInbox')/messages/delta?\$skiptoken=2",
+            "https://graph.microsoft.com/v1.0/users('projects%40example.com')/mailFolders/inbox/messages/delta?\$skiptoken=3",
+            'https://GRAPH.microsoft.com/v1.0/Users/PROJECTS@EXAMPLE.COM/MailFolders/Inbox/Messages/Delta?$deltatoken=4',
+        ];
+        $this->pages([
+            'changeType=created' => ['value' => [['id' => 'm1']], '@odata.nextLink' => $links[0]],
+            'skiptoken=1'        => ['value' => [['id' => 'm2']], '@odata.nextLink' => $links[1]],
+            'skiptoken=2'        => ['value' => [['id' => 'm3']], '@odata.nextLink' => $links[2]],
+            'skiptoken=3'        => ['value' => [['id' => 'm4']], '@odata.deltaLink' => $links[3]],
+        ]);
+        self::assertSame(['pages' => 4, 'dispatched' => 4, 'complete' => true], $this->sweeper()->sweep('acme'));
+        self::assertSame($links[3], $this->store->deltaLink('acme'));
+        $notices = 0;
+        foreach ($this->logger->records as $record) {
+            $notices += str_contains($record['message'], 'another identifier') ? 1 : 0;
+        }
+        self::assertSame(1, $notices, 'Logged once per run.');
+    }
+
     public function testPageLimitResumesAndNoLinkStops(): void
     {
         $this->pages(['changeType=created' => ['value' => [['id' => 'm1']], '@odata.nextLink' => self::BASE . '?$skiptoken=p2']]);
@@ -104,20 +132,20 @@ final class GraphDeltaSweeperTest extends TestCase
         foreach ([
             ['@odata.nextLink', 'https://evil.example/v1.0/steal'],
             ['@odata.deltaLink', 'https://graph.microsoft.com.evil.example/v1.0/x'],
-            ['@odata.nextLink', 'https://graph.microsoft.com/v1.0/users/support%40example.org/mailFolders/inbox/messages/delta?$skiptoken=x'],
-            ['@odata.deltaLink', 'https://graph.microsoft.com/v1.0/users/projects%40example.com.evil/messages/delta'],
+            ['@odata.nextLink', 'https://graph.microsoft.com/v1.0/me/messages'],
+            ['@odata.deltaLink', 'https://graph.microsoft.com/v1.0/users/x/events/delta'],
+            ['@odata.nextLink', 'https://graph.microsoft.com/v1.0/groups/x/mailFolders/inbox/messages/delta'],
         ] as [$key, $link]) {
             $this->store->deleteDeltaLink('acme');
             $this->pages(['changeType=created' => ['value' => [], $key => $link]]);
             try {
                 $this->sweeper()->sweep('acme');
-                self::fail('Untrusted link followed.');
+                self::fail('Untrusted link followed: ' . $link);
             } catch (GraphException $e) {
                 self::assertSame(GraphException::REASON_UNTRUSTED_URL, $e->reason);
             }
             self::assertNull($this->store->deltaLink('acme'));
             self::assertCount(0, $this->mock->matching('evil.example'));
-            self::assertCount(0, $this->mock->matching('support%40example.org'));
         }
 
         // A stored link that is not Graph (tampered table) is refused too.

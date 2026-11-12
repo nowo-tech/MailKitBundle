@@ -27,6 +27,18 @@
 
 ## Unreleased
 
+`nowo_mail_kit.tracking.public_base_url` accepts `'%env(DEFAULT_URI)%'`. Hosts can drop any custom compiler pass whose only
+job was to set that value after the build; set it through config instead:
+
+```yaml
+nowo_mail_kit:
+    tracking:
+        public_base_url: '%env(DEFAULT_URI)%'
+```
+
+An env value is checked when the tracker first uses it; an invalid one (`javascript:x`, `http://user@host`, a query or
+fragment) disables tracking for every e-mail (critical log) instead of emitting a bad pixel or link. No other change.
+
 ## To 1.10.0
 
 From **1.9.1**:

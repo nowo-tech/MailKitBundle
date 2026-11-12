@@ -62,6 +62,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`tracking.public_base_url` accepts an env placeholder** (Symfony Beacon request). `'%env(DEFAULT_URI)%'` used to fail the
+  container build because the value is still a placeholder then. A placeholder is now accepted at build time and
+  checked with the same rules when the tracker first uses it (absolute http(s) URL with a host, no user info, query or
+  fragment); an invalid value fails closed: critical log `Mail tracking disabled: ...`, the e-mail goes out untracked,
+  no pixel and no link is generated. A literal value is still validated when the container is built. The check is stateless
+  (worker-safe: nothing is cached on the service). `EmailTracker` gets a trailing `$pathPrefix`
+  argument; `$pixelBase` is now the base alone (BC: a base that already includes the prefix still works with `''`).
+
 ## [1.10.0] - 2026-11-12
 
 Next minor: 1.10.0 (Beacon spec 230 block B, D-20261112-16: e-mail open and click tracking).

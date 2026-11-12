@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\MailKitBundle\Tests\Unit\Tracking;
 
+use InvalidArgumentException;
 use Nowo\MailKitBundle\DependencyInjection\Configuration;
 use Nowo\MailKitBundle\Mailer\MailHeaders;
 use Nowo\MailKitBundle\Tests\Support\HostTrackingPolicy;
@@ -20,6 +21,7 @@ use Nowo\MailKitBundle\Tracking\Store\TrackingStore;
 use Nowo\MailKitBundle\Tracking\TrackableLinkFilterInterface;
 use Nowo\MailKitBundle\Tracking\TrackedEmail;
 use Nowo\MailKitBundle\Tracking\TrackedLink;
+use Nowo\MailKitBundle\Tracking\TrackingBaseUrl;
 use Nowo\MailKitBundle\Tracking\TrackingCandidate;
 use Nowo\MailKitBundle\Tracking\TrackingTokenSigner;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -294,6 +296,66 @@ final class EmailTrackerTest extends TestCase
 
         $lazy = new EmailTracker(new HostTrackingPolicy(), $this->rewriter, new ConfiguredTrackableLinkFilter(['app.example.com']), new CredentialLinkDetector(), fn (): TrackingTokenSigner => $this->signer, $this->store, new HtmlLinkTracker(), self::BASE);
         self::assertNotNull($lazy->track($this->email()));
+    }
+
+    public function testTheBaseFromAnEnvValueIsCheckedWhenFirstUsed(): void
+    {
+        $tracker = $this->trackerWithBase('https://app.example.com/');
+        $tracked = $tracker->track($this->email());
+        self::assertNotNull($tracked);
+        self::assertStringContainsString('<img src="https://app.example.com/e/o/', (string) $tracked->email->getHtmlBody());
+        self::assertNotNull($tracker->track($this->email()), 'The validated base is reused.');
+    }
+
+    #[DataProvider('invalidBases')]
+    public function testAnInvalidBaseFromAnEnvValueFailsClosed(string $base): void
+    {
+        $tracker = $this->trackerWithBase($base);
+        self::assertNull($tracker->track($this->email()), 'No pixel and no link: the e-mail is sent untracked.');
+        self::assertTrue($this->logger->has('Mail tracking disabled: nowo_mail_kit.tracking.public_base_url must be an absolute http(s) URL'));
+        self::assertSame(0, $this->rows(), 'Nothing was stored.');
+
+        $this->expectException(InvalidArgumentException::class);
+        TrackingBaseUrl::normalize($base);
+    }
+
+    /**
+     * @return iterable<string, array{0: string}>
+     */
+    public static function invalidBases(): iterable
+    {
+        yield 'javascript' => ['javascript:x'];
+        yield 'user info' => ['http://user@host'];
+        yield 'query' => ['https://app.example.com/?x=1'];
+        yield 'fragment' => ['https://app.example.com/#x'];
+        yield 'relative' => ['/app'];
+        yield 'empty' => [''];
+    }
+
+    public function testAnUnexpectedFailureLeavesTheMailUntracked(): void
+    {
+        $renderer = new class implements BodyRendererInterface {
+            public function render(Message $message): void
+            {
+                throw new RuntimeException('render failed');
+            }
+        };
+        self::assertNull($this->tracker(renderer: $renderer)->track($this->email()));
+        self::assertTrue($this->logger->has('Mail tracking skipped: the e-mail is sent untracked.'));
+    }
+
+    public function testBaseUrlRules(): void
+    {
+        self::assertFalse(TrackingBaseUrl::isPlaceholder(null));
+        self::assertFalse(TrackingBaseUrl::isPlaceholder('https://app.example.com'));
+        self::assertFalse(TrackingBaseUrl::isValid(42));
+        self::assertTrue(TrackingBaseUrl::isValid('https://app.example.com/sub'));
+        self::assertSame('http://localhost:8080/sub', TrackingBaseUrl::normalize('http://localhost:8080/sub/'));
+    }
+
+    private function trackerWithBase(string $base): EmailTracker
+    {
+        return new EmailTracker(new HostTrackingPolicy(), $this->rewriter, new ConfiguredTrackableLinkFilter(['app.example.com']), new CredentialLinkDetector(), $this->signer, $this->store, new HtmlLinkTracker(), $base, logger: $this->logger, pathPrefix: '/e/o');
     }
 
     public function testStoreWritesJoinTheHostTransactionThroughASavepoint(): void

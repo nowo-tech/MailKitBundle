@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\MailKitBundle\Tracking;
 
 use Closure;
+use InvalidArgumentException;
 use Nowo\MailKitBundle\Mailer\MailHeaders;
 use Nowo\MailKitBundle\Tracking\Store\TrackingStore;
 use Psr\Log\LoggerInterface;
@@ -67,7 +68,8 @@ final readonly class EmailTracker
     public const SECURITY_TEMPLATES = ['*password*', '*reset*', '*magic*', '*login*', '*sign_in*', '*signin*', '*one_time*', '*otp*', '*code*', '*verif*', '*confirm*', '*security*', '*new_device*', '*email_change*', '*invitation*', '*invite*', '*2fa*', '*mfa*', '*token*'];
 
     /**
-     * @param string $pixelBase absolute URL prefix of the pixel (`tracking.public_base_url` + `tracking.path_prefix`)
+     * @param string $pixelBase absolute URL prefix of the pixel: `tracking.public_base_url` (checked when first used, so
+     *                          it may come from an env variable) followed by `$pathPrefix`
      * @param Closure(): TrackingTokenSigner|TrackingTokenSigner $signer the signer, or a factory of it (built lazily so
      *                                                                   a bad secret leaves mail untracked, not undelivered)
      * @param list<string> $neverTrackTemplates extra `fnmatch` patterns (case-insensitive) of template ids never
@@ -76,6 +78,7 @@ final readonly class EmailTracker
      * @param list<string> $essentialPatterns case-insensitive substrings of the URL or label of essential links
      * @param int $maxHtmlBytes larger HTML bodies are sent untracked
      * @param BodyRendererInterface|null $renderer renders a templated e-mail before it is tracked (`twig.mime_body_renderer`)
+     * @param string $pathPrefix `tracking.path_prefix`, appended to the validated base
      */
     public function __construct(
         private EmailTrackingPolicyInterface $policy,
@@ -92,6 +95,7 @@ final readonly class EmailTracker
         private int $maxHtmlBytes = 2_097_152,
         private ?BodyRendererInterface $renderer = null,
         private ?LoggerInterface $logger = null,
+        private string $pathPrefix = '',
     ) {
     }
 
@@ -104,6 +108,11 @@ final readonly class EmailTracker
     {
         try {
             return $this->prepare($message, $envelope, $logId);
+        } catch (InvalidArgumentException $exception) {
+            // Fail closed: a bad tracking.public_base_url never yields a pixel or a link; the mail goes out untracked.
+            $this->logger?->critical('Mail tracking disabled: ' . $exception->getMessage(), ['bundle' => 'NowoMailKitBundle']);
+
+            return null;
         } catch (Throwable $exception) {
             $this->logger?->warning('Mail tracking skipped: the e-mail is sent untracked.', ['bundle' => 'NowoMailKitBundle', 'error' => $exception::class]);
 
@@ -141,9 +150,10 @@ final readonly class EmailTracker
         if (count($recipients) !== 1) {
             return null;
         }
+        $base = $this->resolvedBase();
         $this->renderer?->render($message);
         $html = $this->read($message->getHtmlBody());
-        if (!is_string($html) || $html === '' || strlen($html) > $this->maxHtmlBytes || str_contains(strtolower($html), strtolower($this->pixelBase))) {
+        if (!is_string($html) || $html === '' || strlen($html) > $this->maxHtmlBytes || str_contains(strtolower($html), strtolower($base))) {
             return null;
         }
 
@@ -187,7 +197,7 @@ final readonly class EmailTracker
             }
         }
         if ($decision->pixel) {
-            $html = $this->html->injectPixel($html, $this->pixelBase . '/' . $signer->issue($sendId) . '.gif');
+            $html = $this->html->injectPixel($html, $base . '/' . $signer->issue($sendId) . '.gif');
         }
         $copy->html($html, $message->getHtmlCharset() ?? 'utf-8');
 
@@ -201,7 +211,7 @@ final readonly class EmailTracker
      */
     private function rewrite(TrackedLink $link, array $secrets): ?string
     {
-        if (str_starts_with(strtolower($link->url), strtolower($this->pixelBase)) || preg_match('/[\x00-\x20\x7F]/', $link->url) === 1 || $this->credentials->isCredential($link->url, $secrets)) {
+        if (str_starts_with(strtolower($link->url), strtolower($this->resolvedBase())) || preg_match('/[\x00-\x20\x7F]/', $link->url) === 1 || $this->credentials->isCredential($link->url, $secrets)) {
             return null;
         }
         try {
@@ -220,9 +230,15 @@ final readonly class EmailTracker
 
     /**
      * A body as a string (a stream is read from its start).
-     *
-     * @param resource|string|null $body
      */
+    /**
+     * @throws InvalidArgumentException when the configured base URL is not a valid absolute http(s) URL
+     */
+    private function resolvedBase(): string
+    {
+        return TrackingBaseUrl::normalize($this->pixelBase) . $this->pathPrefix;
+    }
+
     private function read(mixed $body): string|false|null
     {
         if (!is_resource($body)) {

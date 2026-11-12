@@ -567,13 +567,14 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             new ServiceClosureArgument(new Reference(TrackingTokenSigner::class)),
             new Reference(TrackingStore::class),
             new Definition(HtmlLinkTracker::class, [$tracking['links']['max_links']]),
-            $tracking['public_base_url'] . $tracking['path_prefix'],
+            $tracking['public_base_url'],
             $tracking['extra_never_track_templates'],
             $tracking['skip_redacted'],
             $tracking['links']['essential_patterns'],
             $tracking['max_html_bytes'],
             new Reference('twig.mime_body_renderer', ContainerInterface::NULL_ON_INVALID_REFERENCE),
             $logger,
+            $tracking['path_prefix'],
         ]))->setPublic(true));
 
         $container->setDefinition(OpenClassifier::class, new Definition(OpenClassifier::class, [$tracking['machine_opens']['user_agents'], $tracking['machine_opens']['ip_ranges']]));

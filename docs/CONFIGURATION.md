@@ -134,7 +134,7 @@ nowo_mail_kit:
         link_rewriter: null            # service id implementing Tracking\EmailLinkRewriterInterface; null = links kept
         link_filter: null              # service id implementing Tracking\TrackableLinkFilterInterface; null = links.* allow-list
         recipient_resolver: null       # service id implementing Tracking\TrackingRecipientResolverInterface (UserKit bridge); null = getId()
-        public_base_url: null          # e.g. https://app.example.com (required when enabled)
+        public_base_url: null          # e.g. https://app.example.com or '%env(DEFAULT_URI)%' (required when enabled)
         path_prefix: /e/o              # pixel route <prefix>/{token}.gif (loader type nowo_mail_kit_tracking)
         secret: null                   # ≥ 32 bytes, e.g. '%env(MAIL_KIT_TRACKING_SECRET)%'; null = derived from kernel.secret
         previous_secrets: []           # still verified while rotating
@@ -342,7 +342,7 @@ handler is added and every e-mail goes out exactly as in 1.9. Needs doctrine/doc
 | `link_rewriter` | `null` | Service id implementing `Tracking\EmailLinkRewriterInterface` (e.g. short links of kind `email`). `null`: `NullEmailLinkRewriter`, links are kept and only the pixel is added. |
 | `link_filter` | `null` | Service id implementing `Tracking\TrackableLinkFilterInterface`; `null`: the `links.allowed_hosts` / `allowed_path_prefixes` allow-list. Credential-bearing links are refused before either is asked. |
 | `recipient_resolver` | `null` | Service id implementing `Tracking\TrackingRecipientResolverInterface` (recipient ids of a UserKit user for the `email_tracking` eraser / export section, registered with `personal_data.enabled`); `null`: `getId()`. |
-| `public_base_url` | — | Absolute URL the pixel is served from (`https://app.example.com`, no query / fragment / user info). Required when enabled: Messenger workers have no request to build it from. |
+| `public_base_url` | — | Absolute URL the pixel is served from (`https://app.example.com`, no query / fragment / user info). An env placeholder such as `'%env(DEFAULT_URI)%'` is accepted when the container is built and checked with the same rules when first used; an invalid value disables tracking (critical log, nothing emitted). Required when enabled: Messenger workers have no request to build it from. |
 | `path_prefix` | `/e/o` | Pixel path: `<prefix>/{token}.gif`. Import the loader (`type: nowo_mail_kit_tracking`) and make the prefix public (ideally a `security: false` firewall). |
 | `secret` / `previous_secrets` | `null` / `[]` | HMAC secret of the pixel tokens (at least 32 bytes; use `%env()%`, never commit it). A literal shorter than 32 bytes fails the container build; an `%env()%` value is checked when the signer is first built — lazily, so a bad value leaves mail **untracked** (logged as critical) and the pixel still answers, never "no mail". `null`: a domain-separated HMAC of `kernel.secret`; `previous_secrets` are then previous kernel secrets, derived the same way. Previous secrets keep older tokens valid during a rotation. |
 | `retention` | `P90D` | ISO 8601 duration in days (`P1D` … `P3650D`): `nowo:mail-kit:tracking:purge` deletes older sends; older tokens are refused. |

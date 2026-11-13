@@ -8,10 +8,10 @@ use DateTimeImmutable;
 use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\ParameterType;
-use Doctrine\DBAL\Platforms\AbstractMySQLPlatform;
 use Doctrine\DBAL\Platforms\AbstractPlatform;
 use Doctrine\DBAL\Schema\Schema;
 use Doctrine\Persistence\ManagerRegistry;
+use Nowo\MailKitBundle\Doctrine\ExactCollation;
 use Nowo\MailKitBundle\Tracking\EmailTrackingPersonalDataInterface;
 use Nowo\MailKitBundle\Tracking\EmailTrackingReaderInterface;
 use Nowo\MailKitBundle\Tracking\OpenStats;
@@ -238,15 +238,20 @@ final class TrackingStore implements EmailTrackingReaderInterface, EmailTracking
     }
 
     /**
-     * Adds the table to a schema (ORM `postGenerateSchema`, migrations, the schema command). Identifier columns get a
-     * binary collation on MySQL / MariaDB (exact comparison; PostgreSQL and SQLite compare exactly by default).
+     * Adds the table to a schema (ORM `postGenerateSchema`, migrations, the schema command). The identifier columns
+     * (`send_id`, `recipient_id`, `tenant`) get a binary **NO PAD** collation on MySQL / MariaDB — `utf8mb4_0900_bin`
+     * on MySQL 8.0.17+, `utf8mb4_nopad_bin` on MariaDB, `utf8mb4_bin` plus a logged warning on older MySQL (REQ-SEC-006,
+     * 1.11.0). PostgreSQL and SQLite compare exactly by default and get nothing.
+     *
+     * @param AbstractPlatform|Connection|null $source the connection the schema is built for (the server version is read
+     *                                                 from it), its platform alone, or null for the store's connection
      */
-    public function defineSchema(Schema $schema, ?AbstractPlatform $platform = null): void
+    public function defineSchema(Schema $schema, AbstractPlatform|Connection|null $source = null): void
     {
         if ($schema->hasTable($this->table())) {
             return;
         }
-        $exact = ($platform ?? $this->connection()->getDatabasePlatform()) instanceof AbstractMySQLPlatform ? ['platformOptions' => ['collation' => 'utf8mb4_bin']] : [];
+        $exact = ExactCollation::columnOptions($source ?? $this->connection(), $this->logger);
         $table = $schema->createTable($this->table());
         $table->addColumn('send_id', 'string', ['length' => 32] + $exact);
         $table->addColumn('log_id', 'string', ['length' => 64, 'notnull' => false]);
@@ -280,7 +285,7 @@ final class TrackingStore implements EmailTrackingReaderInterface, EmailTracking
             return [];
         }
         $schema = new Schema();
-        $this->defineSchema($schema, $connection->getDatabasePlatform());
+        $this->defineSchema($schema, $connection);
 
         return array_values($connection->getDatabasePlatform()->getCreateTableSQL($schema->getTable($this->table())));
     }

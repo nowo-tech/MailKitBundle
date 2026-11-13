@@ -31,6 +31,6 @@ final class GraphInboundSchemaListener
         if ($args->getEntityManager() !== $this->doctrine->getManager($this->entityManager)) {
             return;
         }
-        $this->store->defineSchema($args->getSchema());
+        $this->store->defineSchema($args->getSchema(), $args->getEntityManager()->getConnection());
     }
 }

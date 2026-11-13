@@ -6,10 +6,13 @@ namespace Nowo\MailKitBundle\Graph\Inbound\Store;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
+use Doctrine\DBAL\Platforms\AbstractPlatform;
 use Doctrine\DBAL\Schema\Schema;
 use Doctrine\Persistence\ManagerRegistry;
+use Nowo\MailKitBundle\Doctrine\ExactCollation;
 use Nowo\MailKitBundle\Graph\Inbound\InboundAction;
 use Psr\Clock\ClockInterface;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\Clock\NativeClock;
 use Throwable;
 
@@ -48,6 +51,7 @@ final class GraphInboundStore
         private readonly ?string $connectionName = null,
         private readonly string $tablePrefix = '',
         private readonly ?ClockInterface $clock = null,
+        private readonly ?LoggerInterface $logger = null,
     ) {
     }
 
@@ -241,14 +245,22 @@ final class GraphInboundStore
     }
 
     /**
-     * Adds the three tables to a schema (ORM `postGenerateSchema`, migrations, the schema command).
+     * Adds the three tables to a schema (ORM `postGenerateSchema`, migrations, the schema command). The key columns
+     * (`subscription_id`, `profile`, `message_key`, `status`) get a binary **NO PAD** collation on MySQL / MariaDB
+     * instead of the host's default one, which folds case and accents and ignores trailing spaces on primary keys
+     * (REQ-SEC-006, 1.11.0); `client_state_hash` is never compared in SQL (it is read back and checked with
+     * `hash_equals()`), so it keeps the table collation. PostgreSQL and SQLite compare exactly by default.
+     *
+     * @param AbstractPlatform|Connection|null $source the connection the schema is built for (the server version is read
+     *                                                 from it), its platform alone, or null for the store's connection
      */
-    public function defineSchema(Schema $schema): void
+    public function defineSchema(Schema $schema, AbstractPlatform|Connection|null $source = null): void
     {
+        $exact = ExactCollation::columnOptions($source ?? $this->connection(), $this->logger);
         if (!$schema->hasTable($this->subscriptionTable())) {
             $table = $schema->createTable($this->subscriptionTable());
-            $table->addColumn('subscription_id', 'string', ['length' => 128]);
-            $table->addColumn('profile', 'string', ['length' => 64]);
+            $table->addColumn('subscription_id', 'string', ['length' => 128] + $exact);
+            $table->addColumn('profile', 'string', ['length' => 64] + $exact);
             $table->addColumn('client_state_hash', 'string', ['length' => 64]);
             $table->addColumn('expires_at', 'bigint');
             $table->addColumn('created_at', 'bigint');
@@ -257,16 +269,16 @@ final class GraphInboundStore
         }
         if (!$schema->hasTable($this->deltaTable())) {
             $table = $schema->createTable($this->deltaTable());
-            $table->addColumn('profile', 'string', ['length' => 64]);
+            $table->addColumn('profile', 'string', ['length' => 64] + $exact);
             $table->addColumn('delta_link', 'text');
             $table->addColumn('updated_at', 'bigint');
             $table->setPrimaryKey(['profile']);
         }
         if (!$schema->hasTable($this->inboundTable())) {
             $table = $schema->createTable($this->inboundTable());
-            $table->addColumn('message_key', 'string', ['length' => 64]);
-            $table->addColumn('profile', 'string', ['length' => 64]);
-            $table->addColumn('status', 'string', ['length' => 16]);
+            $table->addColumn('message_key', 'string', ['length' => 64] + $exact);
+            $table->addColumn('profile', 'string', ['length' => 64] + $exact);
+            $table->addColumn('status', 'string', ['length' => 16] + $exact);
             $table->addColumn('claimed_at', 'bigint');
             $table->addColumn('completed_at', 'bigint', ['notnull' => false]);
             $table->setPrimaryKey(['message_key']);
@@ -284,7 +296,7 @@ final class GraphInboundStore
         $connection = $this->connection();
         $manager    = $connection->createSchemaManager();
         $schema     = new Schema();
-        $this->defineSchema($schema);
+        $this->defineSchema($schema, $connection);
         $sql = [];
         foreach ([$this->subscriptionTable(), $this->deltaTable(), $this->inboundTable()] as $name) {
             if (!$manager->tablesExist([$name])) {

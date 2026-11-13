@@ -407,7 +407,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $bus    = new Reference($inbound['bus']);
         $limits = $inbound['limits'];
 
-        $container->setDefinition(GraphInboundStore::class, new Definition(GraphInboundStore::class, [new Reference('doctrine'), $inbound['connection'], $doctrine['table_prefix'], $clock]));
+        $container->setDefinition(GraphInboundStore::class, new Definition(GraphInboundStore::class, [new Reference('doctrine'), $inbound['connection'], $doctrine['table_prefix'], $clock, $logger]));
         $container->setDefinition(GraphInboundSchemaListener::class, (new Definition(GraphInboundSchemaListener::class, [new Reference(GraphInboundStore::class), new Reference('doctrine'), $doctrine['entity_manager']]))
             ->addTag('doctrine.event_listener', ['event' => 'postGenerateSchema']));
 

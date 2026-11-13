@@ -968,7 +968,10 @@ Offboarding a mailbox: drop its profile from `inboundProfiles()` (its notificati
 
 Tables: `doctrine:migrations:diff` picks up `mail_kit_graph_subscription`, `mail_kit_graph_delta` and
 `mail_kit_graph_inbound` (with `doctrine.table_prefix`) through a `postGenerateSchema` listener; without migrations,
-`nowo:mail-kit:graph:schema` prints the SQL (`--force` runs it). Schedule `nowo:mail-kit:graph:subscriptions`
+`nowo:mail-kit:graph:schema` prints the SQL (`--force` runs it). Since 1.11.0 the key columns (`subscription_id`,
+`profile`, `message_key`, `status`) get a binary NO PAD collation on MySQL / MariaDB instead of the host default, so
+they compare byte for byte (REQ-SEC-006); tables created before 1.11.0 need the `ALTER` in
+[`UPGRADING.md`](UPGRADING.md#to-1110). Schedule `nowo:mail-kit:graph:subscriptions`
 hourly and `nowo:mail-kit:graph:sweep` every 5 minutes (cron, or Symfony Scheduler with
 `RecurringMessage::every('1 hour', new RenewGraphSubscriptions())` and `RecurringMessage::every('5 minutes', new SweepGraphMailbox())`).
 
@@ -1067,7 +1070,12 @@ a **tracked copy**; the original message is never changed (a Messenger retry re-
    envelope recipient, the recipient id / tenant hints) and answers `TrackingDecision::none()` or
    `TrackingDecision::track($recipientId, $tenant, pixel: true, links: true)`.
 2. A send row is stored (`<prefix>mail_kit_tracking_send`): an opaque **send id** (128 random bits), template id,
-   recipient id, tenant, log id. No address, subject or body.
+   recipient id, tenant, log id. No address, subject or body. `send_id`, `recipient_id` and `tenant` compare byte for
+   byte: `TrackingIds` refuses an identifier with surrounding white space, control characters or invalid UTF-8, and
+   since 1.11.0 the columns themselves carry a binary **NO PAD** collation on MySQL / MariaDB (`utf8mb4_0900_bin` on
+   MySQL 8.0.17+, `utf8mb4_nopad_bin` on MariaDB), so `'bob'` never matches `'bob '`, `'Bob'` or `'bób'` even for rows
+   written around the bundle. Tables created before 1.11.0 need the `ALTER` in
+   [`UPGRADING.md`](UPGRADING.md#to-1110).
 3. Every absolute `http(s)` link (`<a>`, `<area>`, Outlook VML `<v:roundrect>` buttons) that is not credential-bearing and
    that your allow-list accepts goes through your `EmailLinkRewriterInterface` (`TrackedLink`: send id, URL, label,
    1-based position, `essential` flag, template, recipient id, tenant). The text part gets the same tracking URLs.

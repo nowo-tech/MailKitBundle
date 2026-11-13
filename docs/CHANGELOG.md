@@ -6,65 +6,118 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[1.11.0] - 2026-11-13](#1110---2026-11-13)
+  - [Changed](#changed)
+  - [Tests](#tests)
+  - [Documentation](#documentation)
 - [[1.10.2] - 2026-11-12](#1102---2026-11-12)
   - [Fixed](#fixed)
 - [[1.10.1] - 2026-11-12](#1101---2026-11-12)
   - [Fixed](#fixed-1)
 - [[1.10.0] - 2026-11-12](#1100---2026-11-12)
   - [Added](#added)
-  - [Changed](#changed)
-  - [Tests](#tests)
+  - [Changed](#changed-1)
+  - [Tests](#tests-1)
 - [[1.9.1] - 2026-11-12](#191---2026-11-12)
   - [Fixed](#fixed-2)
   - [Security](#security)
 - [[1.9.0] - 2026-11-12](#190---2026-11-12)
   - [Added](#added-1)
-  - [Changed](#changed-1)
+  - [Changed](#changed-2)
   - [Audit NQ (before the 1.9.0 tag)](#audit-nq-before-the-190-tag)
   - [Audit NQ-v (verification, before the 1.9.0 tag)](#audit-nq-v-verification-before-the-190-tag)
   - [Security](#security-1)
-  - [Tests](#tests-1)
+  - [Tests](#tests-2)
 - [[1.8.0] - 2026-11-12](#180---2026-11-12)
   - [Added](#added-2)
   - [Security](#security-2)
-  - [Tests](#tests-2)
+  - [Tests](#tests-3)
 - [[1.7.1] - 2026-11-11](#171---2026-11-11)
   - [Fixed](#fixed-3)
-  - [Tests](#tests-3)
-  - [Documentation](#documentation)
+  - [Tests](#tests-4)
+  - [Documentation](#documentation-1)
 - [[1.7.0] - 2026-11-11](#170---2026-11-11)
   - [Added](#added-3)
-  - [Changed](#changed-2)
+  - [Changed](#changed-3)
 - [[1.6.0] - 2026-11-11](#160---2026-11-11)
   - [Added](#added-4)
-  - [Changed](#changed-3)
+  - [Changed](#changed-4)
 - [[1.5.0] - 2026-11-10](#150---2026-11-10)
   - [Added](#added-5)
-  - [Changed](#changed-4)
+  - [Changed](#changed-5)
 - [[1.4.0] - 2026-11-09](#140---2026-11-09)
   - [Added](#added-6)
   - [Security](#security-3)
 - [[1.3.0] - 2026-11-02](#130---2026-11-02)
   - [Added](#added-7)
-  - [Changed](#changed-5)
+  - [Changed](#changed-6)
   - [Security](#security-4)
 - [[1.2.0] - 2026-11-02](#120---2026-11-02)
   - [Added](#added-8)
-  - [Changed](#changed-6)
+  - [Changed](#changed-7)
   - [Fixed](#fixed-4)
 - [[1.1.1] - 2026-11-01](#111---2026-11-01)
   - [Security](#security-5)
-  - [Changed](#changed-7)
+  - [Changed](#changed-8)
   - [Fixed](#fixed-5)
 - [[1.1.0] - 2026-11-01](#110---2026-11-01)
   - [Added](#added-9)
-  - [Changed](#changed-8)
+  - [Changed](#changed-9)
 - [[1.0.0] - 2026-10-31](#100---2026-10-31)
   - [Added](#added-10)
   - [Security (independent audit, Appendix CA)](#security-independent-audit-appendix-ca)
   - [Security (re-verification follow-ups)](#security-re-verification-follow-ups)
 
+
 ## [Unreleased]
+
+## [1.11.0] - 2026-11-13
+
+### Changed
+
+- **Binary NO PAD collation on the identifier and key columns (REQ-SEC-006).** `utf8mb4_bin`, which
+  `<prefix>mail_kit_tracking_send` has put on `send_id`, `recipient_id` and `tenant` since 1.10, is a *binary*
+  collation but a **PAD SPACE** one on MySQL 8 and MariaDB: `'bob' = 'bob   '` compares equal. The new
+  `Doctrine\ExactCollation` chooser (ported from `nowo-tech/http-log-bundle` 1.20.1, `@internal`) picks a binary
+  **NO PAD** collation from the connection's platform and server version instead — `utf8mb4_0900_bin` on MySQL 8.0.17
+  and newer (9.x included), `utf8mb4_nopad_bin` on MariaDB — and keeps `utf8mb4_bin` only as the MySQL 5.7 fallback,
+  logging a warning when it has to. PostgreSQL and SQLite compare exactly already and are left alone. No configuration:
+  the choice follows the database.
+- **The Graph inbound tables get the same collation.** `<prefix>mail_kit_graph_subscription.subscription_id` and
+  `.profile`, `<prefix>mail_kit_graph_delta.profile`, and `<prefix>mail_kit_graph_inbound.message_key`, `.profile` and
+  `.status` carried **no** collation at all, so they took the database default — `utf8mb4_0900_ai_ci` on a stock
+  MySQL 8 or 9, `utf8mb4_uca1400_ai_ci` on MariaDB 11.4, both case- and accent-insensitive *and* PAD SPACE, on three
+  primary keys. `client_state_hash` keeps
+  the table collation on purpose: it is never compared in SQL, only read back and checked with `hash_equals()`.
+- Hardening, not a fix for a reachable bug: every identifier that reaches these tables through the bundle already goes
+  through `TrackingIds::check()`, which rejects `trim($value) !== $value` on the write path and on both read paths, and
+  the Graph key columns only ever hold Graph-generated ids, configured profile names and a SHA-256 digest. The column
+  collation makes the guarantee a property of the database instead of of one PHP guard, so it also holds for rows
+  written by a host import, a data migration or hand-written SQL.
+- `TrackingStore::defineSchema()` and `GraphInboundStore::defineSchema()` take an `AbstractPlatform|Connection|null`
+  second argument (widened; the old `?AbstractPlatform` call still works). Passing the `Connection` lets the chooser
+  read the server version. `GraphInboundStore` takes an optional PSR-3 logger as its fifth constructor argument, for
+  the MySQL 5.7 fallback warning.
+
+### Tests
+
+- `Tests\Unit\Doctrine\ExactCollationTest`: the collation chosen per platform and server version (MySQL 5.7, 8.0
+  with and without a patch number, 8.4, 9.7, MariaDB 11.4, PostgreSQL, SQLite, a primary/replica connection and an
+  unreadable version), the fallback warning, and the generated `CREATE TABLE` of both stores on each of them —
+  including that `template_id`, `last_open_ua` and `client_state_hash` keep the table collation.
+- `Tests\Integration\Log\ExactCollationTest`: a trailing-space recipient id or tenant is refused on the **write**
+  path (`TrackingDecision::track()`) and on **both read** paths (`TrackingStore::eraseRecipient()` and
+  `exportRecipient()` each re-validate), so a refactor that drops the read-side check fails CI; and, on the real
+  databases of the CI matrix (MySQL 8.4, MariaDB 11.4), that a row inserted around `TrackingIds` is not matched by
+  `'UserA '`, `'usera'`, `'acme '`, `'ACME'` or `'acmé'`, while the old `utf8mb4_bin` would have matched the padded
+  value. Skipped on PostgreSQL and SQLite, which compare exactly by default.
+
+### Documentation
+
+- `docs/UPGRADING.md` — *To 1.11.0*: the per-platform `ALTER` for all four tables, a detection query for columns
+  already created the wrong way, which connection / entity manager to run them on (these are DBAL tables, so
+  `doctrine:migrations:diff` may show nothing), and why the change can only separate values that previously compared
+  equal and never merge them.
 
 ## [1.10.2] - 2026-11-12
 

@@ -31,6 +31,6 @@ final class TrackingSchemaListener
         if ($args->getEntityManager() !== $this->doctrine->getManager($this->entityManager)) {
             return;
         }
-        $this->store->defineSchema($args->getSchema(), $args->getEntityManager()->getConnection()->getDatabasePlatform());
+        $this->store->defineSchema($args->getSchema(), $args->getEntityManager()->getConnection());
     }
 }

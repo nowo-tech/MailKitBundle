@@ -3,6 +3,13 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.11.0](#to-1110)
+  - [What changed and why](#what-changed-and-why)
+  - [These tables are DBAL, not ORM](#these-tables-are-dbal-not-orm)
+  - [Find the columns that still have the wrong collation](#find-the-columns-that-still-have-the-wrong-collation)
+  - [MySQL 8.0.17 and newer (8.x and 9.x)](#mysql-8017-and-newer-8x-and-9x)
+  - [MariaDB](#mariadb)
+  - [Is the ALTER safe?](#is-the-alter-safe)
 - [To 1.10.2](#to-1102)
   - [To 1.10.2](#to-1102-1)
 - [To 1.10.1](#to-1101)
@@ -28,7 +35,147 @@
   - [Template contract](#template-contract)
   - [Breaking changes](#breaking-changes)
 
+
 ## Unreleased
+
+## To 1.11.0
+
+From **1.10.2**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
+
+Nothing to configure. New installations get the right collation by themselves; **existing** MySQL / MariaDB
+installations need one `ALTER` per table, below.
+
+### What changed and why
+
+`utf8mb4_bin` — the collation the tracking table put on `send_id`, `recipient_id` and `tenant` since 1.10 — is a
+*binary* collation, but on MySQL 8 and MariaDB it is also a **PAD SPACE** one: it ignores trailing spaces, so
+`'bob' = 'bob   '` is true. REQ-SEC-006 asks for a binary **NO PAD** collation on identifier and key columns, which
+1.11.0 now picks per server:
+
+| Server | Collation |
+| --- | --- |
+| MySQL >= 8.0.17 (8.x, 9.x) | `utf8mb4_0900_bin` |
+| MariaDB (all supported) | `utf8mb4_nopad_bin` |
+| MySQL 5.7 | `utf8mb4_bin` (fallback; a warning is logged) |
+| PostgreSQL, SQLite | none — they compare exactly already |
+
+The Graph inbound tables had **no** collation at all, so their key columns took the database default — on a stock
+MySQL 8 or 9 that is `utf8mb4_0900_ai_ci`, on MariaDB 11.4 `utf8mb4_uca1400_ai_ci`; both fold case **and** accents
+**and** pad, on three primary keys. They get the same treatment. `client_state_hash` deliberately keeps the table collation: it is never compared in SQL, only
+read back and checked with `hash_equals()`.
+
+Columns affected:
+
+| Table (`<prefix>` = `doctrine.table_prefix`) | Columns |
+| --- | --- |
+| `<prefix>mail_kit_tracking_send` | `send_id`, `recipient_id`, `tenant` |
+| `<prefix>mail_kit_graph_subscription` | `subscription_id`, `profile` |
+| `<prefix>mail_kit_graph_delta` | `profile` |
+| `<prefix>mail_kit_graph_inbound` | `message_key`, `profile`, `status` |
+
+### These tables are DBAL, not ORM
+
+They are bundle-owned tables written through DBAL on the connection configured in `tracking.connection` and
+`graph.inbound.connection` (`null` = the default connection). They are **not** entities, so:
+
+- `doctrine:migrations:diff` only proposes these `ALTER`s if that connection's entity manager is the one configured in
+  `nowo_mail_kit.doctrine.entity_manager` — the schema listeners add the tables to *that* manager's schema and to no
+  other. A host with several managers, or with the tracking / inbound connection pointing somewhere else, will see
+  **nothing** in the diff and must run the SQL by hand.
+- Run the statements on the connection that actually holds the tables:
+  `php bin/console dbal:run-sql --connection=<the one in tracking.connection / graph.inbound.connection> "<statement>"`,
+  or `--em=<nowo_mail_kit.doctrine.entity_manager>` for the migration route. With the default configuration both are
+  the default connection / `default` entity manager.
+- `php bin/console nowo:mail-kit:tracking:schema` and `nowo:mail-kit:graph:schema` only **create** missing tables; they
+  never alter an existing one.
+
+### Find the columns that still have the wrong collation
+
+Run on the connection that holds the tables (MySQL / MariaDB only), with `<prefix>` substituted:
+
+```sql
+SELECT TABLE_NAME, COLUMN_NAME, COLLATION_NAME
+FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME IN ('mail_kit_tracking_send', 'mail_kit_graph_subscription', 'mail_kit_graph_delta', 'mail_kit_graph_inbound')
+  AND COLUMN_NAME IN ('send_id', 'recipient_id', 'tenant', 'subscription_id', 'profile', 'message_key', 'status')
+  AND COLLATION_NAME NOT IN ('utf8mb4_0900_bin', 'utf8mb4_nopad_bin')
+ORDER BY TABLE_NAME, COLUMN_NAME;
+```
+
+Every row it returns needs the `ALTER` below. An empty result means there is nothing to do.
+
+### MySQL 8.0.17 and newer (8.x and 9.x)
+
+```sql
+ALTER TABLE mail_kit_tracking_send
+  MODIFY send_id      VARCHAR(32)  CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,
+  MODIFY recipient_id VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NULL,
+  MODIFY tenant       VARCHAR(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NULL;
+
+ALTER TABLE mail_kit_graph_subscription
+  MODIFY subscription_id VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,
+  MODIFY profile         VARCHAR(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL;
+
+ALTER TABLE mail_kit_graph_delta
+  MODIFY profile VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL;
+
+ALTER TABLE mail_kit_graph_inbound
+  MODIFY message_key VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,
+  MODIFY profile     VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,
+  MODIFY status      VARCHAR(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL;
+```
+
+### MariaDB
+
+The same statements with `utf8mb4_nopad_bin` (MariaDB has no `utf8mb4_0900_bin`):
+
+```sql
+ALTER TABLE mail_kit_tracking_send
+  MODIFY send_id      VARCHAR(32)  CHARACTER SET utf8mb4 COLLATE utf8mb4_nopad_bin NOT NULL,
+  MODIFY recipient_id VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_nopad_bin NULL,
+  MODIFY tenant       VARCHAR(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_nopad_bin NULL;
+
+ALTER TABLE mail_kit_graph_subscription
+  MODIFY subscription_id VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_nopad_bin NOT NULL,
+  MODIFY profile         VARCHAR(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_nopad_bin NOT NULL;
+
+ALTER TABLE mail_kit_graph_delta
+  MODIFY profile VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_nopad_bin NOT NULL;
+
+ALTER TABLE mail_kit_graph_inbound
+  MODIFY message_key VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_nopad_bin NOT NULL,
+  MODIFY profile     VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_nopad_bin NOT NULL,
+  MODIFY status      VARCHAR(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_nopad_bin NOT NULL;
+```
+
+MySQL 5.7 has no binary NO PAD utf8mb4 collation; keep `utf8mb4_bin` there and upgrade the server when you can.
+PostgreSQL and SQLite need no change.
+
+### Is the ALTER safe?
+
+Yes, and it is one-way safe by construction. Moving from a PAD SPACE or case/accent-insensitive collation to a binary
+NO PAD one can only make the comparison **stricter**: values that used to compare equal may now compare different, and
+no pair of values that compared different can start comparing equal. So:
+
+- it can never collapse two rows into one, and never creates a duplicate-key conflict on a column that is a primary key
+  or has a unique index — the `ALTER` cannot fail for that reason;
+- it never deletes or rewrites data; only the comparison rules of the column change;
+- the stored bytes are unchanged (the columns are already `utf8mb4`), so this is a metadata-and-rebuild `ALTER`, not a
+  character-set conversion.
+
+It does rebuild the table and its indexes (MySQL runs it `ALGORITHM=COPY`, MariaDB similarly), so schedule it like any
+other table rebuild on a large `mail_kit_tracking_send`. The tracking table is append-mostly and purgeable
+(`nowo:mail-kit:tracking:purge`); purging first shortens the rebuild.
+
+Practical effect afterwards: a GDPR export or erasure for recipient id `bob` no longer matches a row stored as
+`'bob '`, `'Bob'` or `'bób'`. Identifiers written through the bundle were already rejected if they had surrounding white
+space, so in practice nothing changes for them; rows written around the bundle (an import, a data migration,
+hand-written SQL) are the ones this protects.
 
 ## To 1.10.2
 

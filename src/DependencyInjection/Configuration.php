@@ -99,7 +99,7 @@ final class Configuration implements ConfigurationInterface
                             ->defaultNull()
                         ->end()
                         ->scalarNode('sender_provider')
-                            ->info('Service id implementing Sender\\SenderProviderInterface (default From / Reply-To); null = the Instance Settings mailer section. Since 1.5.')
+                            ->info('Service id implementing Sender\\SenderIdentityProviderInterface (since 1.12) or the deprecated Sender\\SenderProviderInterface (default From / Reply-To); null = the Instance Settings mailer section. Since 1.5.')
                             ->defaultNull()
                         ->end()
                         ->booleanNode('fallback_counts_as_ready')

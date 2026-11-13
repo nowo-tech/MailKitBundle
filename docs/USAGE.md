@@ -632,7 +632,8 @@ final readonly class SymfonyInvitationNotifier implements InvitationNotifier
 | Interface | Purpose | Config |
 | --- | --- | --- |
 | `Nowo\MailKitBundle\Dsn\MailerDsnProviderInterface` | Where the DSN comes from (vault, per-tenant table…); `getDsn(): ?RuntimeDsn`, null = framework transport | `nowo_mail_kit.mailer.dsn_provider` |
-| `Nowo\MailKitBundle\Sender\SenderProviderInterface` (1.5) | Default `From` / `Reply-To` of messages without one (tenant, brand, your config); `from(): ?Address`, `replyTo(): ?Address` | `nowo_mail_kit.mailer.sender_provider` |
+| `Nowo\MailKitBundle\Sender\SenderIdentityProviderInterface` (1.12) | Default `From` / `Reply-To` of messages without one (tenant, brand, your config), framework-free; `defaultFrom(): ?MailAddress`, `defaultReplyTo(): ?MailAddress` | `nowo_mail_kit.mailer.sender_provider` |
+| `Nowo\MailKitBundle\Sender\SenderProviderInterface` (1.5, **deprecated** since 1.12, removed in 2.0) | The same, with the Symfony Mime `Address`; `from(): ?Address`, `replyTo(): ?Address` | `nowo_mail_kit.mailer.sender_provider` |
 | `Nowo\MailKitBundle\Security\MailKitAccessCheckerInterface` | Who opens the admin UI; `canAccess(?object $user): bool` | `nowo_mail_kit.security.access_checker` |
 | `Nowo\Brand\Contract\BrandProviderInterface` / `BrandAssetReaderInterface` (optional) | Brand of the branded layout | `nowo_mail_kit.brand: auto` |
 
@@ -647,9 +648,36 @@ ports and leave Instance Settings (and, with the log off, Doctrine) out of the k
 nowo_mail_kit:
     mailer:
         dsn_provider: App\Infrastructure\Mail\VaultMailerDsnProvider       # MailerDsnProviderInterface
-        sender_provider: App\Infrastructure\Mail\TenantSenderProvider      # SenderProviderInterface
+        sender_provider: App\Infrastructure\Mail\TenantSenderProvider      # SenderIdentityProviderInterface
     log:
         enabled: false   # no DoctrineBundle needed; keep it true to have the sent-mail log (needs the ORM)
+```
+
+The sender port is framework-free since 1.12: `SenderIdentityProviderInterface` takes and returns the bundle value
+object `Sender\MailAddress`, so the host domain needs no Symfony Mime type. `nowo_mail_kit.mailer.sender_provider`
+also still accepts a service implementing the deprecated `Sender\SenderProviderInterface` (Mime `Address`); MailKit
+wraps whichever it gets.
+
+```php
+use Nowo\MailKitBundle\Sender\MailAddress;
+use Nowo\MailKitBundle\Sender\SenderIdentityProviderInterface;
+
+final readonly class TenantSenderProvider implements SenderIdentityProviderInterface
+{
+    public function __construct(private TenantContext $tenants)
+    {
+    }
+
+    public function defaultFrom(): ?MailAddress
+    {
+        return new MailAddress($this->tenants->current()->mailFrom(), $this->tenants->current()->name());
+    }
+
+    public function defaultReplyTo(): ?MailAddress
+    {
+        return null;   // or MailAddress::fromString('Acme support <help@acme.example>')
+    }
+}
 ```
 
 Both providers are read on every send, so per-tenant or per-request values work in a kept-alive worker (keep no

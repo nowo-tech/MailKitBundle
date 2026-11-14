@@ -6,9 +6,11 @@ namespace Nowo\MailKitBundle\DependencyInjection\Compiler;
 
 use LogicException;
 use Nowo\MailKitBundle\Sender\SenderIdentityProviderInterface;
+use Nowo\MailKitBundle\Sender\SenderPolicy;
 use Nowo\MailKitBundle\Sender\SenderProviderGate;
 use Nowo\MailKitBundle\Sender\SenderProviderInterface;
 use Nowo\MailKitBundle\Settings\MailSettings;
+use Nowo\MailKitBundle\TestMail\TestMailSender;
 use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -16,6 +18,7 @@ use Symfony\Component\DependencyInjection\Reference;
 
 use function array_pop;
 use function class_exists;
+use function in_array;
 use function is_a;
 use function is_string;
 use function sprintf;
@@ -49,7 +52,11 @@ use function sprintf;
  * Host decorators (1.12.1): when the deprecated port id or the configured service is decorated, the new port follows
  * the decorated service — straight when every decorator implements the new port, through a gate otherwise — so it
  * never skips a decorator nor fails with a `TypeError` on a decorator that implements only the deprecated port.
- * MailKit's own path is unchanged: it reads the deprecated id, through the gate where the new port wins.
+ * Since 1.12.2 (D-L1, D-I1) MailKit's own consumers of the deprecated port ({@see SenderPolicy} and
+ * {@see TestMailSender}) then read the decorated service through a gate too, so the new port wins on real mail as
+ * well: a decorator that implements both ports is asked `defaultFrom()` / `defaultReplyTo()`, and one that implements
+ * only the new port no longer fails real mail with a `TypeError`. Host services that inject the deprecated id keep
+ * the decorator they asked for. Without any decorator nothing of this applies and the wiring is that of 1.12.1.
  *
  * Runs before optimization, so the decorators of the aliased id are resolved afterwards.
  *
@@ -60,7 +67,10 @@ final class SenderPortPass implements CompilerPassInterface
     /** Service id of the gate this pass registers when one of the two ports has to be adapted. */
     public const GATE_ID = 'nowo_mail_kit.sender.provider_gate';
 
-    /** Service id of the gate that serves the new port from a host-decorated deprecated port id (1.12.1). */
+    /**
+     * Service id of the gate over a host-decorated deprecated port id: it serves the new port when a decorator
+     * implements only the deprecated one (1.12.1) and MailKit's own mail path (1.12.2).
+     */
     public const IDENTITY_GATE_ID = 'nowo_mail_kit.sender.identity_gate';
 
     /**
@@ -116,17 +126,18 @@ final class SenderPortPass implements CompilerPassInterface
      * Decorator ordering (priorities) is left to the container: the outermost decorator is one of the decorators, so
      * the straight alias is used only when all of them implement the new port, and the gate (which adapts whichever
      * port the object implements, per call) otherwise.
+     *
+     * In both cases MailKit's own mail path reads the decorated sender through that gate (1.12.2), whichever port the
+     * decorators implement, so the new port wins there too.
      */
     private function decoratedIdentity(ContainerBuilder $container, string $configured, string $target): ?string
     {
         $port = $this->decoratorsImplementNewPort($container, [SenderProviderInterface::class]);
         if ($port !== null) {
-            if ($port) {
-                return SenderProviderInterface::class;
-            }
             $this->registerGate($container, self::IDENTITY_GATE_ID, SenderProviderInterface::class);
+            $this->readMailThrough($container, self::IDENTITY_GATE_ID);
 
-            return self::IDENTITY_GATE_ID;
+            return $port ? SenderProviderInterface::class : self::IDENTITY_GATE_ID;
         }
 
         $chain = [$configured];
@@ -137,14 +148,31 @@ final class SenderPortPass implements CompilerPassInterface
         if ($port === null) {
             return null;
         }
-        if ($port) {
-            return $configured;
-        }
         if (!$container->hasDefinition(self::GATE_ID)) {
             $this->registerGate($container, self::GATE_ID, $configured);
         }
+        $this->readMailThrough($container, self::GATE_ID);
 
-        return self::GATE_ID;
+        return $port ? $configured : self::GATE_ID;
+    }
+
+    /**
+     * Points MailKit's own consumers of the deprecated port ({@see SenderPolicy}, {@see TestMailSender}) at a gate over
+     * the decorated sender (1.12.2, D-L1 / D-I1), so real mail asks the new port first, like new-port consumers do.
+     * Only arguments that reference the deprecated port id change; any other service keeps what it injects.
+     */
+    private function readMailThrough(ContainerBuilder $container, string $gateId): void
+    {
+        foreach ($container->getDefinitions() as $definition) {
+            if (!in_array($definition->getClass(), [SenderPolicy::class, TestMailSender::class], true)) {
+                continue;
+            }
+            foreach ($definition->getArguments() as $key => $argument) {
+                if ($argument instanceof Reference && (string) $argument === SenderProviderInterface::class) {
+                    $definition->replaceArgument($key, new Reference($gateId, $argument->getInvalidBehavior()));
+                }
+            }
+        }
     }
 
     /**

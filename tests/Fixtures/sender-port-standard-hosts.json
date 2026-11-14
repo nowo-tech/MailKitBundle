@@ -1,0 +1,210 @@
+{
+    "settings": {
+        "definitions": {
+            "Nowo\\MailKitBundle\\Sender\\SenderPolicy": {
+                "class": "Nowo\\MailKitBundle\\Sender\\SenderPolicy",
+                "factory": null,
+                "arguments": [
+                    "@test.old#1"
+                ],
+                "public": true
+            },
+            "Nowo\\MailKitBundle\\TestMail\\TestMailSender": {
+                "class": "Nowo\\MailKitBundle\\TestMail\\TestMailSender",
+                "factory": null,
+                "arguments": [
+                    null,
+                    null,
+                    null,
+                    true,
+                    null,
+                    null
+                ],
+                "public": true
+            },
+            "test.old": {
+                "class": "Nowo\\MailKitBundle\\Settings\\MailSettings",
+                "factory": null,
+                "arguments": [],
+                "public": true
+            }
+        },
+        "aliases": {
+            "test.new": {
+                "target": "test.old",
+                "public": true
+            }
+        }
+    },
+    "deprecated": {
+        "definitions": {
+            "Nowo\\MailKitBundle\\Sender\\SenderPolicy": {
+                "class": "Nowo\\MailKitBundle\\Sender\\SenderPolicy",
+                "factory": null,
+                "arguments": [
+                    "@test.old#1"
+                ],
+                "public": true
+            },
+            "Nowo\\MailKitBundle\\TestMail\\TestMailSender": {
+                "class": "Nowo\\MailKitBundle\\TestMail\\TestMailSender",
+                "factory": null,
+                "arguments": [
+                    null,
+                    null,
+                    null,
+                    true,
+                    null,
+                    "@test.old#1"
+                ],
+                "public": true
+            },
+            "test.new": {
+                "class": "Nowo\\MailKitBundle\\Sender\\SenderProviderGate",
+                "factory": null,
+                "arguments": [
+                    "@test.old#1",
+                    null
+                ],
+                "public": true
+            },
+            "test.old": {
+                "class": "Nowo\\MailKitBundle\\Tests\\Support\\StaticSenderProvider",
+                "factory": null,
+                "arguments": [],
+                "public": true
+            }
+        },
+        "aliases": []
+    },
+    "identity": {
+        "definitions": {
+            "Nowo\\MailKitBundle\\Sender\\SenderPolicy": {
+                "class": "Nowo\\MailKitBundle\\Sender\\SenderPolicy",
+                "factory": null,
+                "arguments": [
+                    "@test.old#1"
+                ],
+                "public": true
+            },
+            "Nowo\\MailKitBundle\\TestMail\\TestMailSender": {
+                "class": "Nowo\\MailKitBundle\\TestMail\\TestMailSender",
+                "factory": null,
+                "arguments": [
+                    null,
+                    null,
+                    null,
+                    true,
+                    null,
+                    "@test.old#1"
+                ],
+                "public": true
+            },
+            "test.new": {
+                "class": "Nowo\\MailKitBundle\\Tests\\Support\\StaticSenderIdentityProvider",
+                "factory": null,
+                "arguments": [],
+                "public": true
+            },
+            "test.old": {
+                "class": "Nowo\\MailKitBundle\\Sender\\SenderProviderGate",
+                "factory": null,
+                "arguments": [
+                    "@test.new#1",
+                    null
+                ],
+                "public": true
+            }
+        },
+        "aliases": []
+    },
+    "dual": {
+        "definitions": {
+            "Nowo\\MailKitBundle\\Sender\\SenderPolicy": {
+                "class": "Nowo\\MailKitBundle\\Sender\\SenderPolicy",
+                "factory": null,
+                "arguments": [
+                    "@test.old#1"
+                ],
+                "public": true
+            },
+            "Nowo\\MailKitBundle\\TestMail\\TestMailSender": {
+                "class": "Nowo\\MailKitBundle\\TestMail\\TestMailSender",
+                "factory": null,
+                "arguments": [
+                    null,
+                    null,
+                    null,
+                    true,
+                    null,
+                    "@test.old#1"
+                ],
+                "public": true
+            },
+            "test.new": {
+                "class": "Nowo\\MailKitBundle\\Tests\\Support\\DualSenderProvider",
+                "factory": null,
+                "arguments": [],
+                "public": true
+            },
+            "test.old": {
+                "class": "Nowo\\MailKitBundle\\Sender\\SenderProviderGate",
+                "factory": null,
+                "arguments": [
+                    "@test.new#1",
+                    null
+                ],
+                "public": true
+            }
+        },
+        "aliases": []
+    },
+    "unknowable": {
+        "definitions": {
+            "Nowo\\MailKitBundle\\Sender\\SenderPolicy": {
+                "class": "Nowo\\MailKitBundle\\Sender\\SenderPolicy",
+                "factory": null,
+                "arguments": [
+                    "@test.old#1"
+                ],
+                "public": true
+            },
+            "Nowo\\MailKitBundle\\TestMail\\TestMailSender": {
+                "class": "Nowo\\MailKitBundle\\TestMail\\TestMailSender",
+                "factory": null,
+                "arguments": [
+                    null,
+                    null,
+                    null,
+                    true,
+                    null,
+                    "@test.old#1"
+                ],
+                "public": true
+            },
+            "test.old": {
+                "class": "Nowo\\MailKitBundle\\Sender\\SenderProviderGate",
+                "factory": null,
+                "arguments": [
+                    {
+                        "class": "stdClass",
+                        "factory": [
+                            "Nowo\\MailKitBundle\\Tests\\Support\\StaticSenderProvider",
+                            "create"
+                        ],
+                        "arguments": [],
+                        "public": false
+                    },
+                    null
+                ],
+                "public": true
+            }
+        },
+        "aliases": {
+            "test.new": {
+                "target": "test.old",
+                "public": true
+            }
+        }
+    }
+}

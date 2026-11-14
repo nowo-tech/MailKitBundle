@@ -656,7 +656,7 @@ nowo_mail_kit:
 The sender port is framework-free since 1.12: `SenderIdentityProviderInterface` takes and returns the bundle value
 object `Sender\MailAddress`, so the host domain needs no Symfony Mime type. `nowo_mail_kit.mailer.sender_provider`
 also still accepts a service implementing the deprecated `Sender\SenderProviderInterface` (Mime `Address`); MailKit
-wraps whichever it gets.
+wraps whichever it gets, and `SenderIdentityProviderInterface` can be autowired in your own services either way.
 
 ```php
 use Nowo\MailKitBundle\Sender\MailAddress;
@@ -679,6 +679,18 @@ final readonly class TenantSenderProvider implements SenderIdentityProviderInter
     }
 }
 ```
+
+| 1.12 port (implement) | Replaces (deprecated, removed in 2.0) | Wiring |
+|---|---|---|
+| `Sender\SenderIdentityProviderInterface` | `Sender\SenderProviderInterface` | `mailer.sender_provider` |
+
+`mailer.sender_provider` stays the single source of the provider (no autoconfiguration). Both interfaces are always
+aliased to it, so either can be autowired: a service implementing only the deprecated interface is asked through it
+exactly as in 1.11 (the new port reaches it through an internal gate); one implementing the 1.12 port is asked through
+that port — also when it implements both, where `defaultFrom()` / `defaultReplyTo()` win and `from()` / `replyTo()`
+are never called. The default `MailSettings` implements both with the same values. The build fails when the service
+implements neither interface. The suite boots such a host end to end:
+`tests/Integration/Ddd/SenderIdentityPortKernelTest.php`.
 
 Both providers are read on every send, so per-tenant or per-request values work in a kept-alive worker (keep no
 state in them). Without either provider the build fails and names the missing option; `resend.enabled` needs

@@ -84,13 +84,19 @@ All notable changes to this project are documented here. The format follows
   (`no-reply@example.com` or `Acme <no-reply@example.com>`), `toString()` / `__toString()`.
 - `MailSettings` (the `mailer` Instance Settings section) implements both ports, so the default sender exposes the
   value-object form too.
+- `SenderIdentityProviderInterface` is always aliased to the configured sender provider, so the new port can be
+  autowired: straight to the service when it implements the new port (or is `MailSettings`), through the internal gate
+  when it implements only the deprecated one. `mailer.sender_provider` stays the single source of the provider; no
+  autoconfiguration.
 
 ### Changed
 
 - `Sender\SenderProviderInterface` is **deprecated** (removed in 2.0): implement
   `Sender\SenderIdentityProviderInterface`. Nothing else changes — the interface, its signatures and the built-in
-  settings sender stay as they are, and a host service implementing it is still asked through it.
-- A `mailer.sender_provider` service that implements only the new port is wrapped in an internal gate
+  settings sender stay as they are, and a host service implementing only it is still asked through it.
+- **Precedence: the new port wins.** A `mailer.sender_provider` class that implements both ports is asked through
+  `defaultFrom()` / `defaultReplyTo()`; its deprecated `from()` / `replyTo()` are no longer called (see UPGRADING).
+- A `mailer.sender_provider` service that implements the new port is wrapped in an internal gate
   (`Sender\SenderProviderGate`, service id `nowo_mail_kit.sender.provider_gate`) behind `SenderProviderInterface`, so
   the sender policy, the test e-mail and every decorator of that id keep working. A service implementing the
   deprecated port keeps today's wiring exactly. A service that implements neither now fails the container build with a
@@ -98,8 +104,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Tests
 
-- The value object, the mapper, the gate (both ports), the new compiler pass (`SenderPortPass`, every wiring case) and
-  a kernel test that sends real mail through a host identity provider.
+- The value object, the mapper, the gate (both ports, both directions, new-port precedence), the new compiler pass
+  (`SenderPortPass`, every wiring case including both aliases) and kernel tests that send real mail through a host
+  identity provider, a dual provider returning different values from each port, a deprecated-only provider (new port
+  still autowired) and the standard host (`MailSettings` on both ports, no gate).
 
 ## [1.11.0] - 2026-11-13
 

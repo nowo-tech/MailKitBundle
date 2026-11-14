@@ -12,7 +12,9 @@ use Nowo\MailKitBundle\Sender\SenderPolicy;
 use Nowo\MailKitBundle\Sender\SenderProviderGate;
 use Nowo\MailKitBundle\Sender\SenderProviderInterface;
 use Nowo\MailKitBundle\Settings\MailSettings;
+use Nowo\MailKitBundle\Tests\Support\DualSenderProvider;
 use Nowo\MailKitBundle\Tests\Support\FakeSettings;
+use Nowo\MailKitBundle\Tests\Support\StaticSenderProvider;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Mime\Address;
@@ -113,6 +115,54 @@ final class SenderIdentityTest extends TestCase
 
         self::assertSame('legacy@example.com', $gate->from()?->getAddress());
         self::assertSame('legacy-help@example.com', $gate->replyTo()?->getAddress());
+    }
+
+    public function testTheNewPortWinsWhenAClassImplementsBoth(): void
+    {
+        $gate = new SenderProviderGate(new DualSenderProvider());
+
+        self::assertSame('"Identity" <identity@example.com>', $gate->from()?->toString());
+        self::assertSame('identity-help@example.com', $gate->replyTo()?->getAddress());
+
+        $from = $gate->defaultFrom();
+        self::assertInstanceOf(MailAddress::class, $from);
+        self::assertSame(['identity@example.com', 'Identity'], [$from->email, $from->name]);
+        self::assertSame('identity-help@example.com', $gate->defaultReplyTo()?->email);
+    }
+
+    public function testTheGateServesTheNewPortFromADeprecatedPortImplementation(): void
+    {
+        $gate = new SenderProviderGate(new StaticSenderProvider());
+
+        $from = $gate->defaultFrom();
+        self::assertInstanceOf(MailAddress::class, $from);
+        self::assertSame(['tenant@example.com', 'Tenant'], [$from->email, $from->name]);
+        $replyTo = $gate->defaultReplyTo();
+        self::assertInstanceOf(MailAddress::class, $replyTo);
+        self::assertSame(['tenant-help@example.com', null], [$replyTo->email, $replyTo->name]);
+    }
+
+    public function testTheGateServesTheNewPortFromANewPortImplementationUnchanged(): void
+    {
+        $address = new MailAddress('tenant@example.com', 'Tenant');
+        $gate    = new SenderProviderGate(new class($address) implements SenderIdentityProviderInterface {
+            public function __construct(private readonly MailAddress $address)
+            {
+            }
+
+            public function defaultFrom(): MailAddress
+            {
+                return $this->address;
+            }
+
+            public function defaultReplyTo(): ?MailAddress
+            {
+                return null;
+            }
+        });
+
+        self::assertSame($address, $gate->defaultFrom());
+        self::assertNull($gate->defaultReplyTo());
     }
 
     public function testTheSettingsServeBothPorts(): void

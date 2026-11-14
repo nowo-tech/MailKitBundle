@@ -50,7 +50,8 @@ type in a public port (REQ-ARCH-001 rule 3). It is now **deprecated** and gains 
 
 **Nothing to do now.** The deprecated interface, its signatures and its wiring are unchanged, the built-in
 `MailSettings` sender keeps implementing it (it implements both), and `nowo_mail_kit.mailer.sender_provider` takes
-either interface. A host service that implements the deprecated port is still asked through it, exactly as before.
+either interface. A host service that implements only the deprecated port is still asked through it, exactly as
+before.
 
 **When you move a host sender provider over**, return the bundle value object `Sender\MailAddress` and keep the
 service id in `nowo_mail_kit.mailer.sender_provider`:
@@ -97,8 +98,15 @@ Two things to know:
 
 1. **Implement one of the two, not neither.** A `mailer.sender_provider` service that implements neither interface now
    fails the container build with a message naming both, instead of a `TypeError` on the first send.
-2. **A class may implement both** (like `MailSettings`); the method names differ, so there is no conflict. It is then
-   asked through the deprecated interface until 2.0.
+2. **A class may implement both** (like `MailSettings`); the method names differ, so there is no conflict. The
+   **new port wins**: MailKit reads `defaultFrom()` / `defaultReplyTo()` and never calls `from()` / `replyTo()` on
+   that class. If your two implementations return different addresses, the `MailAddress` ones are what is sent from
+   1.12 on — make them agree, or drop the deprecated methods. Nothing changes for the built-in `MailSettings`: both of
+   its ports return the same values (and it keeps today's direct wiring).
+3. **Both interfaces can be autowired.** `SenderIdentityProviderInterface` is aliased to the configured provider
+   (through the internal gate when that provider implements only the deprecated interface), so your own services can
+   type-hint the new port today. `mailer.sender_provider` stays the single source of which provider is used: an alias
+   of `SenderIdentityProviderInterface` you register yourself is replaced by MailKit's.
 
 ## To 1.11.0
 

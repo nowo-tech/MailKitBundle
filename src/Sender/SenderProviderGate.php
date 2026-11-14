@@ -8,19 +8,23 @@ use Nowo\MailKitBundle\DependencyInjection\Compiler\SenderPortPass;
 use Symfony\Component\Mime\Address;
 
 /**
- * Asks the host sender service for the default `From` / `Reply-To`, whichever of the two ports it implements (1.12):
- * the framework-free {@see SenderIdentityProviderInterface} or the deprecated {@see SenderProviderInterface}.
+ * Serves both sender ports from the host sender service, whichever of the two it implements (1.12): the
+ * framework-free {@see SenderIdentityProviderInterface} or the deprecated {@see SenderProviderInterface}.
  *
  * {@see SenderPortPass} puts this gate behind `SenderProviderInterface` when the service configured in
- * `nowo_mail_kit.mailer.sender_provider` implements only the new port (or when its class cannot be known before the
- * container is compiled), so {@see SenderPolicy}, the test mail and every decorator of the deprecated id keep working
- * unchanged. A service that implements the deprecated port is asked directly, without this gate, until 2.0.
+ * `nowo_mail_kit.mailer.sender_provider` implements the new port (alone or next to the deprecated one) or when its
+ * class cannot be known before the container is compiled, so {@see SenderPolicy}, the test mail and every decorator of
+ * the deprecated id keep working unchanged; and behind `SenderIdentityProviderInterface` when the service implements
+ * only the deprecated port, so the new port can always be autowired.
+ *
+ * Precedence: when the service implements both ports, the new one wins — every method here reads `defaultFrom()` /
+ * `defaultReplyTo()` and the deprecated `from()` / `replyTo()` of that service are never asked.
  *
  * Stateless: the port is read on every call (REQ-RUNTIME-002).
  *
  * @internal
  */
-final readonly class SenderProviderGate implements SenderProviderInterface
+final readonly class SenderProviderGate implements SenderIdentityProviderInterface, SenderProviderInterface
 {
     /**
      * @param SenderIdentityProviderInterface|SenderProviderInterface $provider the host sender service
@@ -35,9 +39,9 @@ final readonly class SenderProviderGate implements SenderProviderInterface
      */
     public function from(): ?Address
     {
-        return $this->provider instanceof SenderProviderInterface
-            ? $this->provider->from()
-            : MimeAddressMapper::toMimeAddress($this->provider->defaultFrom());
+        return $this->provider instanceof SenderIdentityProviderInterface
+            ? MimeAddressMapper::toMimeAddress($this->provider->defaultFrom())
+            : $this->provider->from();
     }
 
     /**
@@ -45,8 +49,28 @@ final readonly class SenderProviderGate implements SenderProviderInterface
      */
     public function replyTo(): ?Address
     {
-        return $this->provider instanceof SenderProviderInterface
-            ? $this->provider->replyTo()
-            : MimeAddressMapper::toMimeAddress($this->provider->defaultReplyTo());
+        return $this->provider instanceof SenderIdentityProviderInterface
+            ? MimeAddressMapper::toMimeAddress($this->provider->defaultReplyTo())
+            : $this->provider->replyTo();
+    }
+
+    /**
+     * Default `From` as the framework-free value object, or null for none.
+     */
+    public function defaultFrom(): ?MailAddress
+    {
+        return $this->provider instanceof SenderIdentityProviderInterface
+            ? $this->provider->defaultFrom()
+            : MimeAddressMapper::toValueObject($this->provider->from());
+    }
+
+    /**
+     * Default `Reply-To` as the framework-free value object, or null for none.
+     */
+    public function defaultReplyTo(): ?MailAddress
+    {
+        return $this->provider instanceof SenderIdentityProviderInterface
+            ? $this->provider->defaultReplyTo()
+            : MimeAddressMapper::toValueObject($this->provider->replyTo());
     }
 }

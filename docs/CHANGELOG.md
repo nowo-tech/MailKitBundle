@@ -94,6 +94,13 @@ Target 1.12.1 (audit PI, Low).
   an address that Symfony Mime rejects, the gate still leaves the header out (unchanged, same leniency as the settings
   sender) and now logs a constant warning with the provider class and the field (`from` / `replyTo`), never the
   address.
+- **Behaviour change (D-I2): a decorator of `SenderProviderInterface` that injects `SenderIdentityProviderInterface`
+  no longer compiles.** It worked in 1.12.0. In 1.12.1, when the decorator implements only the deprecated port, the
+  new port is served by `nowo_mail_kit.sender.identity_gate` over the decorated id, so the container build fails
+  with a `ServiceCircularReferenceException`. To fix it, decorators take the decorated service through `.inner` (or
+  `#[AutowireDecorated]`) and do not inject the identity port. In exchange, the decorated `From` now reaches
+  new-port consumers. A decorator that implements both ports should return the same values from `from()` and
+  `defaultFrom()`, and from `replyTo()` and `defaultReplyTo()` (D-L1). See UPGRADING.
 
 ## [1.12.0] - 2026-11-14
 

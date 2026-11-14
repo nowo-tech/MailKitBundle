@@ -103,6 +103,12 @@ final class MailerSettingsSection extends AbstractSettingsSection implements Set
         return $this->resendEnabled ? 'settings.mailer.intro_providers' : 'settings.mailer.intro';
     }
 
+    /** `tabler:mail-forward`. */
+    public function getIcon(): ?string
+    {
+        return 'tabler:mail-forward';
+    }
+
     /**
      * Provider choice and Resend fields (with the Resend provider), DSN, from, from name, reply-to, test recipient.
      */

@@ -24,7 +24,7 @@ final class SectionsTest extends TestCase
         self::assertSame('settings.mailer.label', $section->getLabel());
         self::assertSame('NowoMailKitBundle', $section->getTranslationDomain());
         self::assertSame('settings.mailer.intro', $section->getIntro());
-        self::assertNull($section->getIcon());
+        self::assertSame('tabler:mail-forward', $section->getIcon());
 
         $fields = $this->fields($section->getFields());
         self::assertSame(['dsn', 'from', 'from_name', 'reply_to', 'test_recipient'], array_keys($fields));

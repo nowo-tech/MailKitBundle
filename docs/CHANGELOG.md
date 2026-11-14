@@ -71,6 +71,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The InstanceSettings tab of the mailer section now has an icon (`tabler:mail-forward`).
+
 ## [1.11.0] - 2026-11-13
 
 ### Changed

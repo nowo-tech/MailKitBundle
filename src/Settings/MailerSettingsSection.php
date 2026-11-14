@@ -104,7 +104,7 @@ final class MailerSettingsSection extends AbstractSettingsSection implements Set
     }
 
     /** `tabler:mail-forward`. */
-    public function getIcon(): ?string
+    public function getIcon(): string
     {
         return 'tabler:mail-forward';
     }

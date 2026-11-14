@@ -6,9 +6,10 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+  - [Fixed](#fixed)
 - [[1.12.1] - 2026-11-14](#1121---2026-11-14)
   - [Added](#added)
-  - [Fixed](#fixed)
+  - [Fixed](#fixed-1)
 - [[1.12.0] - 2026-11-14](#1120---2026-11-14)
   - [Added](#added-1)
   - [Changed](#changed)
@@ -18,15 +19,15 @@ All notable changes to this project are documented here. The format follows
   - [Tests](#tests-1)
   - [Documentation](#documentation)
 - [[1.10.2] - 2026-11-12](#1102---2026-11-12)
-  - [Fixed](#fixed-1)
-- [[1.10.1] - 2026-11-12](#1101---2026-11-12)
   - [Fixed](#fixed-2)
+- [[1.10.1] - 2026-11-12](#1101---2026-11-12)
+  - [Fixed](#fixed-3)
 - [[1.10.0] - 2026-11-12](#1100---2026-11-12)
   - [Added](#added-2)
   - [Changed](#changed-2)
   - [Tests](#tests-2)
 - [[1.9.1] - 2026-11-12](#191---2026-11-12)
-  - [Fixed](#fixed-3)
+  - [Fixed](#fixed-4)
   - [Security](#security)
 - [[1.9.0] - 2026-11-12](#190---2026-11-12)
   - [Added](#added-3)
@@ -40,7 +41,7 @@ All notable changes to this project are documented here. The format follows
   - [Security](#security-2)
   - [Tests](#tests-4)
 - [[1.7.1] - 2026-11-11](#171---2026-11-11)
-  - [Fixed](#fixed-4)
+  - [Fixed](#fixed-5)
   - [Tests](#tests-5)
   - [Documentation](#documentation-1)
 - [[1.7.0] - 2026-11-11](#170---2026-11-11)
@@ -62,11 +63,11 @@ All notable changes to this project are documented here. The format follows
 - [[1.2.0] - 2026-11-02](#120---2026-11-02)
   - [Added](#added-10)
   - [Changed](#changed-8)
-  - [Fixed](#fixed-5)
+  - [Fixed](#fixed-6)
 - [[1.1.1] - 2026-11-01](#111---2026-11-01)
   - [Security](#security-5)
   - [Changed](#changed-9)
-  - [Fixed](#fixed-6)
+  - [Fixed](#fixed-7)
 - [[1.1.0] - 2026-11-01](#110---2026-11-01)
   - [Added](#added-11)
   - [Changed](#changed-10)
@@ -76,6 +77,24 @@ All notable changes to this project are documented here. The format follows
   - [Security (re-verification follow-ups)](#security-re-verification-follow-ups)
 
 ## [Unreleased]
+
+### Fixed
+
+Target 1.12.2 (delta audit PI, Low).
+
+- **D-L1: "the new port wins" also holds on real mail for a decorated sender.** When the `SenderProviderInterface` id
+  or the `mailer.sender_provider` service is decorated, `SenderPolicy` and the test e-mail now read the decorated
+  sender through a gate (`nowo_mail_kit.sender.identity_gate` over the decorated `SenderProviderInterface` id, or
+  `nowo_mail_kit.sender.provider_gate` over the configured id), which asks `defaultFrom()` / `defaultReplyTo()` first.
+  Before, a decorator that implements both ports gave real mail its `from()` / `replyTo()` values and new-port
+  consumers its `defaultFrom()` / `defaultReplyTo()` values. Host services that inject `SenderProviderInterface` keep
+  the decorator itself.
+- **D-I1: a decorator that implements only `SenderIdentityProviderInterface` no longer breaks real mail.** On the
+  `SenderProviderInterface` id, or on a provider that implements only the deprecated port, it made every send fail
+  with a `TypeError`. It is now served through the same gate.
+- A host that decorates neither sender port compiles to the same container as in 1.12.1; a test compares the
+  compiled wiring of each kind of provider with a record taken from 1.12.1. The circular-reference rule of 1.12.1
+  (D-I2) is unchanged and the gate adds no new cycle. See UPGRADING.
 
 ## [1.12.1] - 2026-11-14
 

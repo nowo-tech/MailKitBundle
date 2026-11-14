@@ -684,6 +684,19 @@ final readonly class TenantSenderProvider implements SenderIdentityProviderInter
 |---|---|---|
 | `Sender\SenderIdentityProviderInterface` | `Sender\SenderProviderInterface` | `mailer.sender_provider` |
 
+When you decorate the sender (the `SenderProviderInterface` id or the `mailer.sender_provider` service), both ports
+and real mail see the decorated sender, and the new port wins everywhere (1.12.2):
+
+| Decorator implements | New port (`SenderIdentityProviderInterface`) | Real mail and the test e-mail |
+|---|---|---|
+| only `SenderProviderInterface` | the decorator, through an internal gate (`from()` / `replyTo()`) | the decorator, through the gate (`from()` / `replyTo()`) |
+| both interfaces | the decorator (`defaultFrom()` / `defaultReplyTo()`) | the decorator, through the gate (`defaultFrom()` / `defaultReplyTo()`) |
+| only `SenderIdentityProviderInterface` | the decorator (`defaultFrom()` / `defaultReplyTo()`) | the decorator, through the gate (`defaultFrom()` / `defaultReplyTo()`) |
+
+Your own services that inject `SenderProviderInterface` keep getting the decorator itself. A decorator takes the
+decorated sender through `.inner` (or `#[AutowireDecorated]`); injecting either sender port into it is a circular
+reference. Without a decorator the wiring is unchanged.
+
 `mailer.sender_provider` stays the single source of the provider (no autoconfiguration). Both interfaces are always
 aliased to it, so either can be autowired: a service implementing only the deprecated interface is asked through it
 exactly as in 1.11 (the new port reaches it through an internal gate); one implementing the 1.12 port is asked through

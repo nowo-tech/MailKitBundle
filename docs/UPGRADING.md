@@ -40,6 +40,25 @@
 
 ## Unreleased
 
+Target 1.12.2. No action is needed unless you decorate the sender port with a class that implements
+`SenderIdentityProviderInterface`. Without a decorator, the compiled container is the same as in 1.12.1.
+
+- **Real mail now uses the new port of a decorator too (D-L1).** When the `SenderProviderInterface` id or the
+  `mailer.sender_provider` service is decorated, MailKit's own sending path (the sender policy of real mail and the
+  test e-mail) reads the decorated sender through an internal gate (`nowo_mail_kit.sender.identity_gate` or
+  `nowo_mail_kit.sender.provider_gate`). The gate asks `defaultFrom()` / `defaultReplyTo()` first. So a decorator
+  that implements both interfaces now gives real mail its `defaultFrom()` / `defaultReplyTo()` values, the same ones
+  new-port consumers get. In 1.12.1 real mail called its `from()` / `replyTo()`. If your decorator returns the same
+  addresses from both pairs of methods (the 1.12.1 advice), nothing changes for you.
+- **A decorator that implements only `SenderIdentityProviderInterface` works on the mail path (D-I1).** In 1.12.1 it
+  made every send fail with a `TypeError` when it decorated the `SenderProviderInterface` id or a provider that
+  implements only the deprecated interface. It is now asked through the gate.
+- **Unchanged.** Your own services that inject `SenderProviderInterface` still get the decorator itself. A decorator
+  that implements only the deprecated interface is still asked `from()` / `replyTo()`. The circular-reference rule of
+  1.12.1 (D-I2) still holds and the gate adds no new cycle: a decorator of the sender (either port id or the
+  `mailer.sender_provider` service), whatever interface it implements, takes the decorated service through `.inner`
+  (or `#[AutowireDecorated]`) and must not inject `SenderIdentityProviderInterface`.
+
 ## To 1.12.1
 
 From **1.12.0**:
@@ -78,7 +97,8 @@ Target 1.12.1. No action is needed unless you decorate the sender port (see the 
 
   In exchange, services that autowire `SenderIdentityProviderInterface` now see the decorated `From` / `Reply-To`.
   These are the same addresses real mail uses.
-- **A decorator that implements both interfaces must return the same values from both (D-L1).** If every decorator
+- **A decorator that implements both interfaces must return the same values from both (D-L1; fixed in 1.12.2, where
+  real mail reads the new port of the decorator too).** If every decorator
   implements `SenderIdentityProviderInterface`, the new port points straight at the decorated id. Its consumers
   then call `defaultFrom()` / `defaultReplyTo()`, while MailKit's sending path calls `from()` / `replyTo()` on the
   same decorator. Return the same addresses from `from()` and `defaultFrom()` (and from `replyTo()` and

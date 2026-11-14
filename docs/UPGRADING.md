@@ -39,6 +39,42 @@
 
 ## Unreleased
 
+Target 1.12.1. No action is needed unless you decorate the sender port (see the circular-reference note below):
+
+- **Decorators of the sender provider reach the new port.** When you decorate the `SenderProviderInterface` id or the
+  service in `mailer.sender_provider`, services that autowire `SenderIdentityProviderInterface` now get the decorated
+  sender — the same one real mail uses — instead of the undecorated provider (or a `TypeError` when the decorator
+  implements only the deprecated interface). Where a decorator implements only the deprecated interface, the new port
+  is served through an internal gate (`nowo_mail_kit.sender.provider_gate` or `nowo_mail_kit.sender.identity_gate`).
+  MailKit's own sending path and its precedence (the new port wins) are unchanged.
+- **A refused sender address is logged.** When your `SenderIdentityProviderInterface` provider returns an address the
+  mailer refuses, the header is still left out (unchanged), and MailKit now logs a warning with the provider class and
+  the field (`from` / `replyTo`). The address itself is never logged.
+- **A decorator of `SenderProviderInterface` must not inject `SenderIdentityProviderInterface` (D-I2).** When a
+  decorator implements only the deprecated interface, `SenderIdentityProviderInterface` is now served through
+  `nowo_mail_kit.sender.identity_gate`, and that gate reads the decorated `SenderProviderInterface`. So a decorator
+  that also takes `SenderIdentityProviderInterface` in its constructor depends on itself. It compiled in 1.12.0,
+  where the new port pointed straight at the provider. In 1.12.1 the container build fails with a
+  `ServiceCircularReferenceException`. To fix it, inject the decorated service through `.inner` (or
+  `#[AutowireDecorated]`), and do not inject either sender port in the decorator:
+
+  ```php
+  #[AsDecorator(SenderProviderInterface::class)]
+  final readonly class AuditedSender implements SenderProviderInterface
+  {
+      public function __construct(#[AutowireDecorated] private SenderProviderInterface $inner) {}
+      // from() / replyTo() delegate to $this->inner
+  }
+  ```
+
+  In exchange, services that autowire `SenderIdentityProviderInterface` now see the decorated `From` / `Reply-To`.
+  These are the same addresses real mail uses.
+- **A decorator that implements both interfaces must return the same values from both (D-L1).** If every decorator
+  implements `SenderIdentityProviderInterface`, the new port points straight at the decorated id. Its consumers
+  then call `defaultFrom()` / `defaultReplyTo()`, while MailKit's sending path calls `from()` / `replyTo()` on the
+  same decorator. Return the same addresses from `from()` and `defaultFrom()` (and from `replyTo()` and
+  `defaultReplyTo()`). For example, build one from the other.
+
 ## To 1.12.0
 
 From **1.11.0**:

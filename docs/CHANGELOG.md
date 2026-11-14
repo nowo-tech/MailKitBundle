@@ -78,6 +78,30 @@ All notable changes to this project are documented here. The format follows
 
 - The InstanceSettings tab of the mailer section now has an icon (`tabler:mail-forward`).
 
+### Fixed
+
+Target 1.12.1 (audit PI, Low).
+
+- **PI-L2: the new sender port no longer bypasses host decorators.** When the `SenderProviderInterface` id or the
+  service in `mailer.sender_provider` is decorated, the `SenderIdentityProviderInterface` alias now follows the
+  decorated service: straight when every decorator implements the new port, otherwise through the gate
+  (`nowo_mail_kit.sender.provider_gate`, or the new `nowo_mail_kit.sender.identity_gate` over a decorated
+  `SenderProviderInterface` id). Before, a decorator implementing only the deprecated port caused a `TypeError` where
+  the new port was autowired, and a decorator of the `SenderProviderInterface` id was not seen by new-port consumers.
+  The gate now reads the configured id rather than the end of its alias chain, so a decorator of an alias on the way
+  is not skipped either. MailKit's own sending path keeps its precedence (the new port wins).
+- **PI-L1: a sender address the mailer refuses is logged.** When a `SenderIdentityProviderInterface` provider returns
+  an address that Symfony Mime rejects, the gate still leaves the header out (unchanged, same leniency as the settings
+  sender) and now logs a constant warning with the provider class and the field (`from` / `replyTo`), never the
+  address.
+- **Behaviour change (D-I2): a decorator of `SenderProviderInterface` that injects `SenderIdentityProviderInterface`
+  no longer compiles.** It worked in 1.12.0. In 1.12.1, when the decorator implements only the deprecated port, the
+  new port is served by `nowo_mail_kit.sender.identity_gate` over the decorated id, so the container build fails
+  with a `ServiceCircularReferenceException`. To fix it, decorators take the decorated service through `.inner` (or
+  `#[AutowireDecorated]`) and do not inject the identity port. In exchange, the decorated `From` now reaches
+  new-port consumers. A decorator that implements both ports should return the same values from `from()` and
+  `defaultFrom()`, and from `replyTo()` and `defaultReplyTo()` (D-L1). See UPGRADING.
+
 ## [1.12.0] - 2026-11-14
 
 ### Added

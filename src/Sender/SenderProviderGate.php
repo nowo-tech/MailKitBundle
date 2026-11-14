@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace Nowo\MailKitBundle\Sender;
 
 use Nowo\MailKitBundle\DependencyInjection\Compiler\SenderPortPass;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\Mime\Address;
+
+use function get_debug_type;
 
 /**
  * Serves both sender ports from the host sender service, whichever of the two it implements (1.12): the
@@ -20,17 +23,26 @@ use Symfony\Component\Mime\Address;
  * Precedence: when the service implements both ports, the new one wins — every method here reads `defaultFrom()` /
  * `defaultReplyTo()` and the deprecated `from()` / `replyTo()` of that service are never asked.
  *
+ * An address of the new port that the mailer refuses is left out of the message, the same leniency as the settings
+ * sender (1.12.1, PI-L1): the gate then logs {@see self::REFUSED_ADDRESS_MESSAGE} as a warning with the provider class
+ * and the field only — never the address, which may be personal data.
+ *
  * Stateless: the port is read on every call (REQ-RUNTIME-002).
  *
  * @internal
  */
 final readonly class SenderProviderGate implements SenderIdentityProviderInterface, SenderProviderInterface
 {
+    /** Constant warning logged when the mailer refuses an address of the new port; it never holds the address. */
+    public const REFUSED_ADDRESS_MESSAGE = 'MailKit: the sender provider returned an address the mailer refuses; the header is left out.';
+
     /**
      * @param SenderIdentityProviderInterface|SenderProviderInterface $provider the host sender service
+     * @param LoggerInterface|null $logger receives the refused-address warning
      */
     public function __construct(
         private SenderIdentityProviderInterface|SenderProviderInterface $provider,
+        private ?LoggerInterface $logger = null,
     ) {
     }
 
@@ -40,7 +52,7 @@ final readonly class SenderProviderGate implements SenderIdentityProviderInterfa
     public function from(): ?Address
     {
         return $this->provider instanceof SenderIdentityProviderInterface
-            ? MimeAddressMapper::toMimeAddress($this->provider->defaultFrom())
+            ? $this->toMime($this->provider->defaultFrom(), 'from')
             : $this->provider->from();
     }
 
@@ -50,7 +62,7 @@ final readonly class SenderProviderGate implements SenderIdentityProviderInterfa
     public function replyTo(): ?Address
     {
         return $this->provider instanceof SenderIdentityProviderInterface
-            ? MimeAddressMapper::toMimeAddress($this->provider->defaultReplyTo())
+            ? $this->toMime($this->provider->defaultReplyTo(), 'replyTo')
             : $this->provider->replyTo();
     }
 
@@ -72,5 +84,20 @@ final readonly class SenderProviderGate implements SenderIdentityProviderInterfa
         return $this->provider instanceof SenderIdentityProviderInterface
             ? $this->provider->defaultReplyTo()
             : MimeAddressMapper::toValueObject($this->provider->replyTo());
+    }
+
+    /**
+     * The Mime address of a new-port value, with a warning (no address in it) when the mailer refuses a non-null one.
+     *
+     * @param 'from'|'replyTo' $field
+     */
+    private function toMime(?MailAddress $address, string $field): ?Address
+    {
+        $mime = MimeAddressMapper::toMimeAddress($address);
+        if ($address instanceof MailAddress && !$mime instanceof Address) {
+            $this->logger?->warning(self::REFUSED_ADDRESS_MESSAGE, ['provider' => get_debug_type($this->provider), 'field' => $field]);
+        }
+
+        return $mime;
     }
 }

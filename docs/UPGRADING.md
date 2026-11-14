@@ -39,6 +39,18 @@
 
 ## Unreleased
 
+Target 1.12.1, no action needed:
+
+- **Decorators of the sender provider reach the new port.** When you decorate the `SenderProviderInterface` id or the
+  service in `mailer.sender_provider`, services that autowire `SenderIdentityProviderInterface` now get the decorated
+  sender — the same one real mail uses — instead of the undecorated provider (or a `TypeError` when the decorator
+  implements only the deprecated interface). Where a decorator implements only the deprecated interface, the new port
+  is served through an internal gate (`nowo_mail_kit.sender.provider_gate` or `nowo_mail_kit.sender.identity_gate`).
+  MailKit's own sending path and its precedence (the new port wins) are unchanged.
+- **A refused sender address is logged.** When your `SenderIdentityProviderInterface` provider returns an address the
+  mailer refuses, the header is still left out (unchanged), and MailKit now logs a warning with the provider class and
+  the field (`from` / `replyTo`). The address itself is never logged.
+
 ## To 1.12.0
 
 From **1.11.0**:

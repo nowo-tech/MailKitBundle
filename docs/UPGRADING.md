@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.12.2](#to-1122)
 - [To 1.12.1](#to-1121)
 - [To 1.12.0](#to-1120)
   - [Sender identity without Symfony Mime (`SenderIdentityProviderInterface`)](#sender-identity-without-symfony-mime-senderidentityproviderinterface)
@@ -39,6 +40,14 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+## To 1.12.2
+
+From **1.12.1**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
 
 Target 1.12.2. No action is needed unless you decorate the sender port with a class that implements
 `SenderIdentityProviderInterface`. Without a decorator, the compiled container is the same as in 1.12.1.

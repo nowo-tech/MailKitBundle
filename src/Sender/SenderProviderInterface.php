@@ -15,6 +15,10 @@ use Symfony\Component\Mime\Address;
  * section). A host whose sender identity lives elsewhere (tenant, brand, its own configuration) implements this
  * interface and sets `nowo_mail_kit.mailer.sender_provider` to its service id. Read on every send: implementations
  * must not memoize across requests (worker mode).
+ *
+ * @deprecated since 1.12, implement {@see SenderIdentityProviderInterface} instead: it returns the bundle value
+ *             object {@see MailAddress} and keeps the Symfony Mime component out of the port (REQ-ARCH-001 rule 3).
+ *             `nowo_mail_kit.mailer.sender_provider` takes either interface. Removed in 2.0.
  */
 interface SenderProviderInterface
 {

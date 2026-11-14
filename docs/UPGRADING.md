@@ -3,6 +3,8 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.12.0](#to-1120)
+  - [Sender identity without Symfony Mime (`SenderIdentityProviderInterface`)](#sender-identity-without-symfony-mime-senderidentityproviderinterface)
 - [To 1.11.0](#to-1110)
   - [What changed and why](#what-changed-and-why)
   - [These tables are DBAL, not ORM](#these-tables-are-dbal-not-orm)
@@ -35,8 +37,85 @@
   - [Template contract](#template-contract)
   - [Breaking changes](#breaking-changes)
 
-
 ## Unreleased
+
+## To 1.12.0
+
+From **1.11.0**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
+
+### Sender identity without Symfony Mime (`SenderIdentityProviderInterface`)
+
+`Nowo\MailKitBundle\Sender\SenderProviderInterface` returns the Symfony Mime `Address`, a Symfony **component**
+type in a public port (REQ-ARCH-001 rule 3). It is now **deprecated** and gains a framework-free twin:
+
+| Deprecated (removed in 2.0) | Implement instead |
+| --- | --- |
+| `Sender\SenderProviderInterface::from(): ?Symfony\Component\Mime\Address` | `Sender\SenderIdentityProviderInterface::defaultFrom(): ?Sender\MailAddress` |
+| `Sender\SenderProviderInterface::replyTo(): ?Symfony\Component\Mime\Address` | `Sender\SenderIdentityProviderInterface::defaultReplyTo(): ?Sender\MailAddress` |
+
+**Nothing to do now.** The deprecated interface, its signatures and its wiring are unchanged, the built-in
+`MailSettings` sender keeps implementing it (it implements both), and `nowo_mail_kit.mailer.sender_provider` takes
+either interface. A host service that implements only the deprecated port is still asked through it, exactly as
+before.
+
+**When you move a host sender provider over**, return the bundle value object `Sender\MailAddress` and keep the
+service id in `nowo_mail_kit.mailer.sender_provider`:
+
+```php
+use Nowo\MailKitBundle\Sender\MailAddress;
+use Nowo\MailKitBundle\Sender\SenderIdentityProviderInterface;
+
+final readonly class TenantSenderProvider implements SenderIdentityProviderInterface
+{
+    public function __construct(private TenantContext $tenants)
+    {
+    }
+
+    public function defaultFrom(): ?MailAddress
+    {
+        $tenant = $this->tenants->current();
+
+        return $tenant === null ? null : new MailAddress($tenant->mailFrom(), $tenant->name());
+        // or MailAddress::fromString('Acme <no-reply@acme.example>')
+    }
+
+    public function defaultReplyTo(): ?MailAddress
+    {
+        return null;
+    }
+}
+```
+
+```yaml
+# config/packages/nowo_mail_kit.yaml — unchanged
+nowo_mail_kit:
+    mailer:
+        sender_provider: App\Infrastructure\Mail\TenantSenderProvider
+```
+
+MailKit then wraps your service in an internal gate (`nowo_mail_kit.sender.provider_gate`) behind
+`SenderProviderInterface`, so the sender policy, the test e-mail (`nowo:mail-kit:send-test` and the admin action) and
+any decorator of that id keep working unchanged. `MailAddress` is lenient — it only requires a non-blank address — and
+an address the mailer refuses is dropped (the message goes out without that header), the same behaviour as the
+settings sender.
+
+Two things to know:
+
+1. **Implement one of the two, not neither.** A `mailer.sender_provider` service that implements neither interface now
+   fails the container build with a message naming both, instead of a `TypeError` on the first send.
+2. **A class may implement both** (like `MailSettings`); the method names differ, so there is no conflict. The
+   **new port wins**: MailKit reads `defaultFrom()` / `defaultReplyTo()` and never calls `from()` / `replyTo()` on
+   that class. If your two implementations return different addresses, the `MailAddress` ones are what is sent from
+   1.12 on — make them agree, or drop the deprecated methods. Nothing changes for the built-in `MailSettings`: both of
+   its ports return the same values (and it keeps today's direct wiring).
+3. **Both interfaces can be autowired.** `SenderIdentityProviderInterface` is aliased to the configured provider
+   (through the internal gate when that provider implements only the deprecated interface), so your own services can
+   type-hint the new port today. `mailer.sender_provider` stays the single source of which provider is used: an alias
+   of `SenderIdentityProviderInterface` you register yourself is replaced by MailKit's.
 
 ## To 1.11.0
 

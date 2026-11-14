@@ -8,6 +8,7 @@ use LogicException;
 use Nowo\MailKitBundle\Controller\MailKitController;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\CsrfProtectionPass;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\MailerIntegrationPass;
+use Nowo\MailKitBundle\DependencyInjection\Compiler\SenderPortPass;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\TwigPathsPass;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\UnauthenticatedAccessPass;
 use Nowo\MailKitBundle\DependencyInjection\NowoMailKitExtension;
@@ -54,7 +55,7 @@ final class CompilerPassesTest extends TestCase
         $bundle->build($container);
 
         $classes = array_map(static fn (object $pass): string => $pass::class, $container->getCompilerPassConfig()->getPasses());
-        foreach ([TwigPathsPass::class, CsrfProtectionPass::class, UnauthenticatedAccessPass::class, MailerIntegrationPass::class] as $pass) {
+        foreach ([TwigPathsPass::class, CsrfProtectionPass::class, UnauthenticatedAccessPass::class, MailerIntegrationPass::class, SenderPortPass::class] as $pass) {
             self::assertContains($pass, $classes);
         }
         $extension = $bundle->getContainerExtension();

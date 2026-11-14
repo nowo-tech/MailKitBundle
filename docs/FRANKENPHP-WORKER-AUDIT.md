@@ -59,6 +59,7 @@ A bundle safe under **B** is safe under **A**, classic mode and PHP-FPM.
 | `RuntimeTransport` | transport + its DSN, last checked DSN + error; reset by `kernel.reset` and `SettingsChangedEvent` | ✅ | ✅ (DSN compared on every send) |
 | `MailKitRouteLoader` | `loaded` flag (cache warm-up only) | ✅ | ✅ |
 | `MailKitMailer`, `SenderPolicy`, `MailSettings`, `SettingsMailerDsnProvider`, `MailerDsnValidator`, `DsnHostGuard`, `OutboundMailReadiness` | none (`readonly`; settings read per call) | ✅ | ✅ |
+| `SenderProviderGate` (1.12), `MimeAddressMapper` (static) | none (the host sender port is asked on every call) | ✅ | ✅ |
 | `SentMailRecorder`, `SentMailRepository`, `TablePrefixListener` | none (`readonly`) | ✅ | ✅ |
 | `TestMailSender`, `TestMailGuard` (limiter state lives in `cache.app`), `ResendApiChecker` | none | ✅ | ✅ |
 | `MailKitController`, `AdminPages`, `MailKitPages`, `SettingsActions`, form types, sections | none (forms and view models built per call) | ✅ | ✅ |

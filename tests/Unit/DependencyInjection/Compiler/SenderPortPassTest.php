@@ -7,12 +7,16 @@ namespace Nowo\MailKitBundle\Tests\Unit\DependencyInjection\Compiler;
 use LogicException;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\SenderPortPass;
 use Nowo\MailKitBundle\Sender\SenderIdentityProviderInterface;
+use Nowo\MailKitBundle\Sender\SenderPolicy;
 use Nowo\MailKitBundle\Sender\SenderProviderGate;
 use Nowo\MailKitBundle\Sender\SenderProviderInterface;
 use Nowo\MailKitBundle\Settings\MailSettings;
+use Nowo\MailKitBundle\TestMail\TestMailSender;
 use Nowo\MailKitBundle\Tests\Support\DualSenderProvider;
+use Nowo\MailKitBundle\Tests\Support\IdentityOnlySenderDecorator;
 use Nowo\MailKitBundle\Tests\Support\IdentitySenderDecorator;
 use Nowo\MailKitBundle\Tests\Support\LegacySenderDecorator;
+use Nowo\MailKitBundle\Tests\Support\SplitSenderDecorator;
 use Nowo\MailKitBundle\Tests\Support\StaticSenderIdentityProvider;
 use Nowo\MailKitBundle\Tests\Support\StaticSenderProvider;
 use PHPUnit\Framework\TestCase;
@@ -21,6 +25,7 @@ use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\DependencyInjection\Definition;
 use Symfony\Component\DependencyInjection\Reference;
+use Symfony\Component\Mime\Email;
 
 /**
  * 1.12: the pass puts the gate behind the deprecated sender port only where it is needed and always offers the
@@ -218,7 +223,8 @@ final class SenderPortPassTest extends TestCase
         (new SenderPortPass())->process($container);
 
         self::assertSame(SenderProviderInterface::class, (string) $container->getAlias(SenderIdentityProviderInterface::class));
-        self::assertFalse($container->hasDefinition(SenderPortPass::IDENTITY_GATE_ID));
+        // 1.12.2: the gate over the decorated id exists for MailKit's mail path; unused here, so it is removed at compile.
+        self::assertTrue($container->hasDefinition(SenderPortPass::IDENTITY_GATE_ID));
 
         [$old, $new] = $this->compiled($container);
         self::assertSame($old, $new);
@@ -283,6 +289,114 @@ final class SenderPortPassTest extends TestCase
     }
 
     /**
+     * D-L1 (1.12.2, case 12): a decorator of the deprecated port id that implements both ports with different values —
+     * real mail and the new port both get the new-port value (the new port wins), through the gate over that id.
+     */
+    public function testADualDecoratorOfTheDeprecatedPortIdSendsTheNewPortValue(): void
+    {
+        $container = $this->host(StaticSenderIdentityProvider::class);
+        $this->decorate($container, 'app.sender_port.decorator', SplitSenderDecorator::class, SenderProviderInterface::class);
+        $this->consumers($container);
+        (new SenderPortPass())->process($container);
+
+        self::assertSame(SenderProviderInterface::class, (string) $container->getAlias(SenderIdentityProviderInterface::class));
+        $this->assertMailReadsThrough($container, SenderPortPass::IDENTITY_GATE_ID);
+        self::assertSame(SenderProviderInterface::class, (string) $container->getDefinition(SenderPortPass::IDENTITY_GATE_ID)->getArgument(0));
+
+        [, $new, $email] = $this->compiledWithMail($container);
+        self::assertSame('split-new@example.com', $new->defaultFrom()?->email);
+        self::assertSame('split-new@example.com', $email->getFrom()[0]->getAddress());
+        self::assertSame('split-new-help@example.com', $email->getReplyTo()[0]->getAddress());
+    }
+
+    /**
+     * D-L1 (1.12.2, case 13): the same dual decorator on a deprecated-only provider.
+     */
+    public function testADualDecoratorOfADeprecatedOnlyProviderSendsTheNewPortValue(): void
+    {
+        $container = $this->host(StaticSenderProvider::class);
+        $this->decorate($container, 'app.sender.decorator', SplitSenderDecorator::class, 'app.sender');
+        $this->consumers($container);
+        (new SenderPortPass())->process($container);
+
+        // Host consumers of the deprecated id keep the decorator they asked for; MailKit reads through the gate.
+        self::assertSame('app.sender', (string) $container->getAlias(SenderProviderInterface::class));
+        self::assertSame('app.sender', (string) $container->getAlias(SenderIdentityProviderInterface::class));
+        $this->assertMailReadsThrough($container, SenderPortPass::GATE_ID);
+
+        [, $new, $email] = $this->compiledWithMail($container);
+        self::assertSame('split-new@example.com', $new->defaultFrom()?->email);
+        self::assertSame('split-new@example.com', $email->getFrom()[0]->getAddress());
+    }
+
+    /**
+     * D-I1 (1.12.2, case 6): a decorator of the deprecated port id that implements only the new port no longer fails
+     * real mail with a `TypeError`.
+     */
+    public function testANewOnlyDecoratorOfTheDeprecatedPortIdSends(): void
+    {
+        $container = $this->host(StaticSenderIdentityProvider::class);
+        $this->decorate($container, 'app.sender_port.decorator', IdentityOnlySenderDecorator::class, SenderProviderInterface::class);
+        $this->consumers($container);
+        (new SenderPortPass())->process($container);
+
+        [, $new, $email] = $this->compiledWithMail($container, deprecated: false);
+        self::assertSame('identity-only@example.com', $new->defaultFrom()?->email);
+        self::assertSame('identity-only@example.com', $email->getFrom()[0]->getAddress());
+        self::assertSame([], $email->getReplyTo());
+    }
+
+    /**
+     * D-I1 (1.12.2, case 8): a decorator that implements only the new port on a deprecated-only provider.
+     */
+    public function testANewOnlyDecoratorOfADeprecatedOnlyProviderSends(): void
+    {
+        $container = $this->host(StaticSenderProvider::class);
+        $this->decorate($container, 'app.sender.decorator', IdentityOnlySenderDecorator::class, 'app.sender');
+        $this->consumers($container);
+        (new SenderPortPass())->process($container);
+
+        [, $new, $email] = $this->compiledWithMail($container, deprecated: false);
+        self::assertSame('identity-only@example.com', $new->defaultFrom()?->email);
+        self::assertSame('identity-only@example.com', $email->getFrom()[0]->getAddress());
+    }
+
+    /**
+     * D-L1 (1.12.2): the settings default decorated on its own id reads through the gate on the mail path as well; the
+     * test e-mail, which reads the settings directly in that configuration, is left alone.
+     */
+    public function testTheSettingsDefaultDecoratedOnItsIdIsReadThroughTheGateByMail(): void
+    {
+        $container = new ContainerBuilder();
+        $container->setDefinition(MailSettings::class, new Definition(MailSettings::class));
+        $container->setAlias(SenderProviderInterface::class, MailSettings::class);
+        $this->decorate($container, 'app.settings.decorator', SplitSenderDecorator::class, MailSettings::class);
+        $this->consumers($container, testMail: false);
+        (new SenderPortPass())->process($container);
+
+        self::assertSame(MailSettings::class, (string) $container->getAlias(SenderProviderInterface::class));
+        self::assertSame(MailSettings::class, (string) $container->getAlias(SenderIdentityProviderInterface::class));
+        self::assertSame(MailSettings::class, (string) $container->getDefinition(SenderPortPass::GATE_ID)->getArgument(0));
+        self::assertEquals([new Reference(SenderPortPass::GATE_ID)], $container->getDefinition(SenderPolicy::class)->getArguments());
+        self::assertNull($container->getDefinition(TestMailSender::class)->getArgument(5));
+    }
+
+    /**
+     * Only MailKit's own consumers are rerouted: a host service of another class keeps the deprecated id.
+     */
+    public function testAHostConsumerOfTheDeprecatedPortIsLeftAlone(): void
+    {
+        $container = $this->host(StaticSenderProvider::class);
+        $this->decorate($container, 'app.sender.decorator', SplitSenderDecorator::class, 'app.sender');
+        $container->setDefinition('app.consumer', new Definition(stdClass::class, [new Reference(SenderProviderInterface::class), 'x']));
+        $container->setDefinition('app.policy', new Definition(SenderPolicy::class, ['x', new Reference(SenderProviderInterface::class)]));
+        (new SenderPortPass())->process($container);
+
+        self::assertEquals([new Reference(SenderProviderInterface::class), 'x'], $container->getDefinition('app.consumer')->getArguments());
+        self::assertEquals(['x', new Reference(SenderPortPass::GATE_ID)], $container->getDefinition('app.policy')->getArguments());
+    }
+
+    /**
      * A host whose `mailer.sender_provider` is the service `app.sender` of the given class.
      */
     private function host(string $class): ContainerBuilder
@@ -297,6 +411,52 @@ final class SenderPortPassTest extends TestCase
     private function decorate(ContainerBuilder $container, string $id, string $class, string $decorated): void
     {
         $container->setDefinition($id, (new Definition($class, [new Reference($id . '.inner')]))->setDecoratedService($decorated));
+    }
+
+    /**
+     * MailKit's two consumers of the deprecated port, wired as the extension wires them.
+     */
+    private function consumers(ContainerBuilder $container, bool $testMail = true): void
+    {
+        $container->setDefinition(SenderPolicy::class, (new Definition(SenderPolicy::class, [new Reference(SenderProviderInterface::class)]))->setPublic(true));
+        $container->setDefinition(TestMailSender::class, new Definition(TestMailSender::class, [
+            null,
+            null,
+            null,
+            true,
+            null,
+            $testMail ? new Reference(SenderProviderInterface::class) : null,
+        ]));
+    }
+
+    private function assertMailReadsThrough(ContainerBuilder $container, string $gate): void
+    {
+        self::assertEquals([new Reference($gate)], $container->getDefinition(SenderPolicy::class)->getArguments());
+        self::assertEquals(new Reference($gate), $container->getDefinition(TestMailSender::class)->getArgument(5));
+    }
+
+    /**
+     * Compiles the container and returns the new port, what the deprecated id serves (null when that is not a
+     * deprecated-port object) and a message the bundle's sender policy has filled.
+     *
+     * @return array{0: SenderProviderInterface|null, 1: SenderIdentityProviderInterface, 2: Email}
+     */
+    private function compiledWithMail(ContainerBuilder $container, bool $deprecated = true): array
+    {
+        $container->setAlias('test.old', SenderProviderInterface::class)->setPublic(true);
+        $container->setAlias('test.new', SenderIdentityProviderInterface::class)->setPublic(true);
+        $container->compile(true);
+
+        $old = $container->get('test.old');
+        $new = $container->get('test.new');
+        self::assertSame($deprecated, $old instanceof SenderProviderInterface);
+        self::assertInstanceOf(SenderIdentityProviderInterface::class, $new);
+        $policy = $container->get(SenderPolicy::class);
+        self::assertInstanceOf(SenderPolicy::class, $policy);
+        $email = (new Email())->to('to@example.com')->text('x');
+        $policy->apply($email);
+
+        return [$old instanceof SenderProviderInterface ? $old : null, $new, $email];
     }
 
     /**

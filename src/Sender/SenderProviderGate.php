@@ -18,7 +18,9 @@ use function get_debug_type;
  * `nowo_mail_kit.mailer.sender_provider` implements the new port (alone or next to the deprecated one) or when its
  * class cannot be known before the container is compiled, so {@see SenderPolicy}, the test mail and every decorator of
  * the deprecated id keep working unchanged; and behind `SenderIdentityProviderInterface` when the service implements
- * only the deprecated port, so the new port can always be autowired.
+ * only the deprecated port, so the new port can always be autowired. When the host decorates the sender, a gate over
+ * the decorated service also serves the new port where a decorator implements only the deprecated one (1.12.1) and
+ * MailKit's own mail path (1.12.2), so a decorator's `defaultFrom()` / `defaultReplyTo()` win there too.
  *
  * Precedence: when the service implements both ports, the new one wins — every method here reads `defaultFrom()` /
  * `defaultReplyTo()` and the deprecated `from()` / `replyTo()` of that service are never asked.

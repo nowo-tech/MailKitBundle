@@ -7,6 +7,9 @@ namespace Nowo\MailKitBundle\Settings;
 use Nowo\InstanceSettingsBundle\Settings\InstanceSettingsInterface;
 use Nowo\MailKitBundle\Dsn\DsnSource;
 use Nowo\MailKitBundle\Dsn\RuntimeDsn;
+use Nowo\MailKitBundle\Sender\MailAddress;
+use Nowo\MailKitBundle\Sender\MimeAddressMapper;
+use Nowo\MailKitBundle\Sender\SenderIdentityProviderInterface;
 use Nowo\MailKitBundle\Sender\SenderProviderInterface;
 use Symfony\Component\Mime\Address;
 use Throwable;
@@ -23,9 +26,10 @@ use function trim;
  * Until the 1.2 `resend` rows are migrated ({@see LegacyResendSettings}), an instance without a stored
  * `mailer.provider` keeps the 1.2 behaviour: `resend.enabled` selects Resend, `resend.api_key` / `resend.from` apply.
  *
- * Default {@see SenderProviderInterface} of the sender policy (1.5).
+ * Default sender of the sender policy (1.5): implements the framework-free {@see SenderIdentityProviderInterface}
+ * (1.12) and the deprecated {@see SenderProviderInterface}, so both ports resolve to the same stored values.
  */
-final readonly class MailSettings implements SenderProviderInterface
+final readonly class MailSettings implements SenderIdentityProviderInterface, SenderProviderInterface
 {
     /**
      * @param bool $resendEnabled `nowo_mail_kit.resend.enabled` (the `mailer` section offers the Resend provider)
@@ -164,6 +168,24 @@ final readonly class MailSettings implements SenderProviderInterface
         $replyTo = $this->settings->getString(MailerSettingsSection::NAME . '.reply_to');
 
         return $replyTo === null ? null : $this->address($replyTo);
+    }
+
+    /**
+     * Default `From` as the framework-free value object of {@see SenderIdentityProviderInterface} (1.12): the same
+     * address as {@see self::from()}.
+     */
+    public function defaultFrom(): ?MailAddress
+    {
+        return MimeAddressMapper::toValueObject($this->from());
+    }
+
+    /**
+     * Default `Reply-To` as the framework-free value object of {@see SenderIdentityProviderInterface} (1.12): the same
+     * address as {@see self::replyTo()}.
+     */
+    public function defaultReplyTo(): ?MailAddress
+    {
+        return MimeAddressMapper::toValueObject($this->replyTo());
     }
 
     /**

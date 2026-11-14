@@ -14,6 +14,7 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 | `src/DependencyInjection/Configuration.php` | Bundle and dependency injection | FR-CFG-001, FR-DBO-001 ([002](../002-db-only-seed/spec.md)) |
 | `src/DependencyInjection/NowoMailKitExtension.php` | Bundle and dependency injection | FR-CFG-002 |
 | `src/DependencyInjection/Compiler/MailerIntegrationPass.php` | Bundle and dependency injection | FR-CFG-003 |
+| `src/DependencyInjection/Compiler/SenderPortPass.php` | Bundle and dependency injection | FR-CFG-003, FR-SND-001 |
 | `src/DependencyInjection/Compiler/CsrfProtectionPass.php` | Bundle and dependency injection | FR-CFG-004 |
 | `src/DependencyInjection/Compiler/UnauthenticatedAccessPass.php` | Bundle and dependency injection | FR-CFG-004 |
 | `src/DependencyInjection/Compiler/TwigPathsPass.php` | Bundle and dependency injection | FR-TWIG-001 |
@@ -48,6 +49,11 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 | `src/Validator/ResendApiKeyAcceptedValidator.php` | DSN and sender | FR-PRV-003 ([003](../003-provider-fields/spec.md)) |
 | `src/Sender/SenderAddress.php` | DSN and sender | FR-SND-001 |
 | `src/Sender/SenderPolicy.php` | DSN and sender | FR-SND-001 |
+| `src/Sender/SenderProviderInterface.php` | DSN and sender | FR-SND-001 |
+| `src/Sender/SenderIdentityProviderInterface.php` | DSN and sender | FR-SND-001 |
+| `src/Sender/MailAddress.php` | DSN and sender | FR-SND-001 |
+| `src/Sender/MimeAddressMapper.php` | DSN and sender | FR-SND-001 |
+| `src/Sender/SenderProviderGate.php` | DSN and sender | FR-SND-001 |
 
 ## Delivery
 

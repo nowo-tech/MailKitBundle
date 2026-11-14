@@ -34,7 +34,7 @@ nowo_mail_kit:
     mailer:
         decorate: true                 # decorate mailer.mailer + mailer.transports (runtime DSN on every send)
         dsn_provider: null             # service id implementing MailerDsnProviderInterface (null = Instance Settings)
-        sender_provider: null          # service id implementing SenderProviderInterface (null = Instance Settings, 1.5)
+        sender_provider: null          # service id implementing SenderIdentityProviderInterface (1.12) or the deprecated SenderProviderInterface (null = Instance Settings, 1.5)
         fallback_counts_as_ready: false # MAILER_DSN counts for isOutboundMailReady() when nothing is stored
     dsn:
         allowed_schemes: [smtp, smtps, mailgun, mailgun+api, …, scaleway+smtp]   # sendmail / native / null refused
@@ -185,7 +185,7 @@ Unknown keys are rejected. Switches (`mailer.decorate`, `dsn.allow_private_hosts
 | --- | --- | --- |
 | `decorate` | `true` | Registers `nowo_mail_kit.mailer` (decorates `mailer.mailer`, the `MailerInterface`) and `RuntimeTransport` as decorator of `mailer.transports`, so the framework mailer **and** the Messenger `SendEmailMessage` handler use the runtime DSN. With `false`, the framework mailer is untouched; `RuntimeTransport` (fallback = `mailer.transports`), the test e-mail, readiness and the log still work for code that uses them directly. |
 | `dsn_provider` | `null` | Service id of a `MailerDsnProviderInterface`; the default reads the `mailer` settings. Since 1.6, with `sender_provider` also set, Instance Settings becomes optional ([USAGE](USAGE.md#using-it-from-a-ddd--hexagonal-application)). |
-| `sender_provider` | `null` | Since 1.5. Service id of a `Sender\SenderProviderInterface` (default `From` / `Reply-To` of messages without one); the default reads the `mailer` settings (`MailSettings`). |
+| `sender_provider` | `null` | Since 1.5. Service id of a `Sender\SenderIdentityProviderInterface` (since 1.12, framework-free: `defaultFrom()` / `defaultReplyTo()` return a `Sender\MailAddress`) or of the deprecated `Sender\SenderProviderInterface` (Symfony Mime `Address`, removed in 2.0) — the default `From` / `Reply-To` of messages without one. The default reads the `mailer` settings (`MailSettings`, which implements both). A service implementing neither fails the container build. |
 | `fallback_counts_as_ready` | `false` | `isOutboundMailReady()` is false while nothing is stored, because `MAILER_DSN` cannot be inspected through the framework transports. Set it to `true` when your `MAILER_DSN` is a real transport. |
 
 ## dsn

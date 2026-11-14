@@ -58,6 +58,7 @@ OutboundMailReadiness ──► Twig functions, AuthKit OutboundMailReadyChecker
 | `Dsn\MailerDsnValidator`, `DsnHostGuard`, `MailerDsnAudit` | Validation, SSRF guard, redaction |
 | `Validator\MailerDsn`, `DeliverableSender` (+ validators) | Field constraints |
 | `Sender\SenderAddress`, `SenderPolicy` | Sender rules and defaults |
+| `Sender\SenderIdentityProviderInterface`, `Sender\MailAddress` | Framework-free sender port and its value object (1.12); `Sender\MimeAddressMapper` and `Sender\SenderProviderGate` adapt it to the deprecated Mime-typed port |
 | `Mailer\RuntimeTransport`, `MailKitMailer`, `MailHeaders` | Runtime delivery and internal headers |
 | `Log\SentMailRecorder`, `SentMailRepository`, `SentMailFilters`, `SentMailStatus`, `ErrorScrubber`, `Entity\*` | Sent-mail log |
 | `TestMail\TestMailSender`, `TestMailGuard`, `TestMailResult`, `TestMailOutcome` | Test e-mail |

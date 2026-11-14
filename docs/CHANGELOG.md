@@ -6,70 +6,108 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
-- [[1.11.0] - 2026-11-13](#1110---2026-11-13)
+  - [Added](#added)
   - [Changed](#changed)
   - [Tests](#tests)
+- [[1.11.0] - 2026-11-13](#1110---2026-11-13)
+  - [Changed](#changed-1)
+  - [Tests](#tests-1)
   - [Documentation](#documentation)
 - [[1.10.2] - 2026-11-12](#1102---2026-11-12)
   - [Fixed](#fixed)
 - [[1.10.1] - 2026-11-12](#1101---2026-11-12)
   - [Fixed](#fixed-1)
 - [[1.10.0] - 2026-11-12](#1100---2026-11-12)
-  - [Added](#added)
-  - [Changed](#changed-1)
-  - [Tests](#tests-1)
+  - [Added](#added-1)
+  - [Changed](#changed-2)
+  - [Tests](#tests-2)
 - [[1.9.1] - 2026-11-12](#191---2026-11-12)
   - [Fixed](#fixed-2)
   - [Security](#security)
 - [[1.9.0] - 2026-11-12](#190---2026-11-12)
-  - [Added](#added-1)
-  - [Changed](#changed-2)
+  - [Added](#added-2)
+  - [Changed](#changed-3)
   - [Audit NQ (before the 1.9.0 tag)](#audit-nq-before-the-190-tag)
   - [Audit NQ-v (verification, before the 1.9.0 tag)](#audit-nq-v-verification-before-the-190-tag)
   - [Security](#security-1)
-  - [Tests](#tests-2)
-- [[1.8.0] - 2026-11-12](#180---2026-11-12)
-  - [Added](#added-2)
-  - [Security](#security-2)
   - [Tests](#tests-3)
+- [[1.8.0] - 2026-11-12](#180---2026-11-12)
+  - [Added](#added-3)
+  - [Security](#security-2)
+  - [Tests](#tests-4)
 - [[1.7.1] - 2026-11-11](#171---2026-11-11)
   - [Fixed](#fixed-3)
-  - [Tests](#tests-4)
+  - [Tests](#tests-5)
   - [Documentation](#documentation-1)
 - [[1.7.0] - 2026-11-11](#170---2026-11-11)
-  - [Added](#added-3)
-  - [Changed](#changed-3)
-- [[1.6.0] - 2026-11-11](#160---2026-11-11)
   - [Added](#added-4)
   - [Changed](#changed-4)
-- [[1.5.0] - 2026-11-10](#150---2026-11-10)
+- [[1.6.0] - 2026-11-11](#160---2026-11-11)
   - [Added](#added-5)
   - [Changed](#changed-5)
-- [[1.4.0] - 2026-11-09](#140---2026-11-09)
+- [[1.5.0] - 2026-11-10](#150---2026-11-10)
   - [Added](#added-6)
+  - [Changed](#changed-6)
+- [[1.4.0] - 2026-11-09](#140---2026-11-09)
+  - [Added](#added-7)
   - [Security](#security-3)
 - [[1.3.0] - 2026-11-02](#130---2026-11-02)
-  - [Added](#added-7)
-  - [Changed](#changed-6)
-  - [Security](#security-4)
-- [[1.2.0] - 2026-11-02](#120---2026-11-02)
   - [Added](#added-8)
   - [Changed](#changed-7)
+  - [Security](#security-4)
+- [[1.2.0] - 2026-11-02](#120---2026-11-02)
+  - [Added](#added-9)
+  - [Changed](#changed-8)
   - [Fixed](#fixed-4)
 - [[1.1.1] - 2026-11-01](#111---2026-11-01)
   - [Security](#security-5)
-  - [Changed](#changed-8)
+  - [Changed](#changed-9)
   - [Fixed](#fixed-5)
 - [[1.1.0] - 2026-11-01](#110---2026-11-01)
-  - [Added](#added-9)
-  - [Changed](#changed-9)
-- [[1.0.0] - 2026-10-31](#100---2026-10-31)
   - [Added](#added-10)
+  - [Changed](#changed-10)
+- [[1.0.0] - 2026-10-31](#100---2026-10-31)
+  - [Added](#added-11)
   - [Security (independent audit, Appendix CA)](#security-independent-audit-appendix-ca)
   - [Security (re-verification follow-ups)](#security-re-verification-follow-ups)
 
-
 ## [Unreleased]
+
+### Added
+
+- **Framework-free sender port (REQ-ARCH-001 rule 3).** `Sender\SenderIdentityProviderInterface`
+  (`defaultFrom()` / `defaultReplyTo()`) is the twin of `Sender\SenderProviderInterface` and returns the new bundle
+  value object `Sender\MailAddress` (address plus optional display name) instead of the Symfony Mime `Address`, so a
+  DDD / hexagonal host supplies the default `From` / `Reply-To` with no Symfony component in the port. Implement it
+  and set `nowo_mail_kit.mailer.sender_provider` to its service id as before: the option takes either interface.
+- `Sender\MailAddress`: `__construct(string $email, ?string $name = null)`, `MailAddress::fromString()`
+  (`no-reply@example.com` or `Acme <no-reply@example.com>`), `toString()` / `__toString()`.
+- `MailSettings` (the `mailer` Instance Settings section) implements both ports, so the default sender exposes the
+  value-object form too.
+- `SenderIdentityProviderInterface` is always aliased to the configured sender provider, so the new port can be
+  autowired: straight to the service when it implements the new port (or is `MailSettings`), through the internal gate
+  when it implements only the deprecated one. `mailer.sender_provider` stays the single source of the provider; no
+  autoconfiguration.
+
+### Changed
+
+- `Sender\SenderProviderInterface` is **deprecated** (removed in 2.0): implement
+  `Sender\SenderIdentityProviderInterface`. Nothing else changes — the interface, its signatures and the built-in
+  settings sender stay as they are, and a host service implementing only it is still asked through it.
+- **Precedence: the new port wins.** A `mailer.sender_provider` class that implements both ports is asked through
+  `defaultFrom()` / `defaultReplyTo()`; its deprecated `from()` / `replyTo()` are no longer called (see UPGRADING).
+- A `mailer.sender_provider` service that implements the new port is wrapped in an internal gate
+  (`Sender\SenderProviderGate`, service id `nowo_mail_kit.sender.provider_gate`) behind `SenderProviderInterface`, so
+  the sender policy, the test e-mail and every decorator of that id keep working. A service implementing the
+  deprecated port keeps today's wiring exactly. A service that implements neither now fails the container build with a
+  clear message instead of a `TypeError` at send time.
+
+### Tests
+
+- The value object, the mapper, the gate (both ports, both directions, new-port precedence), the new compiler pass
+  (`SenderPortPass`, every wiring case including both aliases) and kernel tests that send real mail through a host
+  identity provider, a dual provider returning different values from each port, a deprecated-only provider (new port
+  still autowired) and the standard host (`MailSettings` on both ports, no gate).
 
 ## [1.11.0] - 2026-11-13
 

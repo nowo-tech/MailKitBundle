@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.12.0](#to-1120)
   - [Sender identity without Symfony Mime (`SenderIdentityProviderInterface`)](#sender-identity-without-symfony-mime-senderidentityproviderinterface)
 - [To 1.11.0](#to-1110)
   - [What changed and why](#what-changed-and-why)
@@ -37,6 +38,14 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+## To 1.12.0
+
+From **1.11.0**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
 
 ### Sender identity without Symfony Mime (`SenderIdentityProviderInterface`)
 

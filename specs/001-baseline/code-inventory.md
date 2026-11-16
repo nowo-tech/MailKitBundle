@@ -2,9 +2,9 @@
 
 **Baseline spec**: [`spec.md`](spec.md)  
 **Package**: `nowo-tech/mail-kit-bundle`  
-**Last audited**: 2026-11-02
+**Last audited**: 2026-11-16
 
-Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **70**.
+Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **188** (1.12.2).
 
 ## Bundle and dependency injection
 
@@ -29,6 +29,7 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 | `src/Form/LegacyResendSettingsTypeExtension.php` | Settings | FR-PRV-004 ([003](../003-provider-fields/spec.md)) |
 | `src/Command/PurgeLegacyResendCommand.php` | Settings | FR-PRV-007 ([003](../003-provider-fields/spec.md)) |
 | `src/Settings/MailSettings.php` | Settings | FR-SET-003, FR-DBO-003 ([002](../002-db-only-seed/spec.md)), FR-PRV-002, FR-PRV-004 ([003](../003-provider-fields/spec.md)) |
+| `src/EventListener/LegacyResendSettingsResetListener.php` | Settings | FR-PRV-004 ([003](../003-provider-fields/spec.md)), FR-WRK-001 |
 
 ## DSN and sender
 
@@ -63,6 +64,7 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 | `src/Mailer/MailKitMailer.php` | Delivery | FR-MAIL-002 |
 | `src/Mailer/MailHeaders.php` | Delivery | FR-MAIL-003 |
 | `src/Mailer/DeliveryFailedException.php` | Delivery | FR-MAIL-004 |
+| `src/Mailer/UnrecoverableDeliveryFailedException.php` | Delivery | FR-MAIL-004 |
 
 ## Test e-mail and Resend
 
@@ -91,6 +93,8 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 | `src/Command/PurgeSentMailLogCommand.php` | Sent-mail log | FR-LOG-005 |
 | `src/Command/ForgetRecipientCommand.php` | Sent-mail log | FR-LOG-005 |
 | `src/Doctrine/TablePrefixListener.php` | Sent-mail log | FR-ORM-001 |
+| `src/Doctrine/ExactCollation.php` | Sent-mail log | FR-SEC-001 |
+| `src/Log/SentMailLogTableMissingException.php` | Sent-mail log | FR-LOG-002 |
 
 ## Readiness
 
@@ -101,6 +105,7 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 | `src/Twig/MailKitTwigExtension.php` | Readiness | FR-RDY-001 |
 | `src/Integration/AuthKit/MailKitOutboundMailReadyChecker.php` | Readiness | FR-RDY-001 |
 | `src/EventListener/SettingsChangedListener.php` | Readiness | FR-RDY-002 |
+| `src/Readiness/OutboundMailReadinessInterface.php` | Readiness | FR-RDY-001 |
 
 ## Admin UI
 
@@ -126,3 +131,155 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 | `src/Security/AllowAllMailKitAccessChecker.php` | Admin UI | FR-UI-004 |
 | `src/Security/AccessGuard.php` | Admin UI | FR-UI-004 |
 | `src/EventListener/MailKitAccessListener.php` | Admin UI | FR-UI-004 |
+
+## Events
+
+| Source file | Spec section | Requirement IDs |
+| --- | --- | --- |
+| `src/Event/MailDeliveredEvent.php` | Events | FR-EVT-001 |
+| `src/Event/MailDeliveryFailedEvent.php` | Events | FR-EVT-001 |
+| `src/Event/MailMachineOpenedEvent.php` | Events | FR-TRK-004 |
+| `src/Event/MailOpenedEvent.php` | Events | FR-TRK-004 |
+| `src/Event/SentMailPersonalDataErasedEvent.php` | Events | FR-GDPR-002 |
+
+## Personal data (GDPR)
+
+| Source file | Spec section | Requirement IDs |
+| --- | --- | --- |
+| `src/Integration/UserKit/EmailTrackingPersonalDataEraser.php` | Personal data (GDPR) | FR-TRK-007 |
+| `src/Integration/UserKit/EmailTrackingPersonalDataExportProvider.php` | Personal data (GDPR) | FR-TRK-007 |
+| `src/Integration/UserKit/EmailsReceivedPersonalDataEraser.php` | Personal data (GDPR) | FR-GDPR-001, FR-GDPR-002 |
+| `src/Integration/UserKit/EmailsReceivedPersonalDataExportProvider.php` | Personal data (GDPR) | FR-GDPR-003 |
+| `src/Log/DefaultSentMailPersonalDataSubjectResolver.php` | Personal data (GDPR) | FR-GDPR-001, FR-GDPR-002 |
+| `src/Log/NullSentMailErasure.php` | Personal data (GDPR) | FR-GDPR-001 |
+| `src/Log/NullSentMailPersonalDataExporter.php` | Personal data (GDPR) | FR-GDPR-003 |
+| `src/Log/SentMailErasureInterface.php` | Personal data (GDPR) | FR-GDPR-001 |
+| `src/Log/SentMailErasureResult.php` | Personal data (GDPR) | FR-GDPR-001 |
+| `src/Log/SentMailPersonalDataEraserInterface.php` | Personal data (GDPR) | FR-GDPR-001, FR-GDPR-002 |
+| `src/Log/SentMailPersonalDataExporterInterface.php` | Personal data (GDPR) | FR-GDPR-003 |
+| `src/Log/SentMailPersonalDataSubject.php` | Personal data (GDPR) | FR-GDPR-001, FR-GDPR-002 |
+| `src/Log/SentMailPersonalDataSubjectResolverInterface.php` | Personal data (GDPR) | FR-GDPR-001, FR-GDPR-002 |
+
+## Branded e-mail
+
+| Source file | Spec section | Requirement IDs |
+| --- | --- | --- |
+| `src/Brand/BrandedEmailHelper.php` | Branded e-mail | FR-BRAND-001, FR-002 ([004](../004-branded-email/spec.md)) |
+| `src/Brand/BrandedEmailImage.php` | Branded e-mail | FR-BRAND-001, FR-004 ([004](../004-branded-email/spec.md)) |
+| `src/Brand/BrandedEmailPart.php` | Branded e-mail | FR-BRAND-001, FR-004 ([004](../004-branded-email/spec.md)) |
+| `src/Brand/BrandedEmailText.php` | Branded e-mail | FR-BRAND-001, FR-004 ([004](../004-branded-email/spec.md)) |
+| `src/Resources/views/email/branded_layout.html.twig` | Branded e-mail | FR-BRAND-001, FR-001 ([004](../004-branded-email/spec.md)) |
+| `src/Resources/views/email/branded_layout.txt.twig` | Branded e-mail | FR-BRAND-001, FR-001 ([004](../004-branded-email/spec.md)) |
+| `src/Twig/MailKitBrandTwigExtension.php` | Branded e-mail | FR-BRAND-002, FR-005 ([004](../004-branded-email/spec.md)) |
+
+## Microsoft Graph sending
+
+| Source file | Spec section | Requirement IDs |
+| --- | --- | --- |
+| `src/Graph/ConfiguredGraphMailboxProvider.php` | Microsoft Graph sending | FR-GRS-001 |
+| `src/Graph/GraphApiClient.php` | Microsoft Graph sending | FR-GRS-001 |
+| `src/Graph/GraphException.php` | Microsoft Graph sending | FR-GRS-001 |
+| `src/Graph/GraphMailbox.php` | Microsoft Graph sending | FR-GRS-001 |
+| `src/Graph/GraphMailboxProviderInterface.php` | Microsoft Graph sending | FR-GRS-001 |
+| `src/Graph/GraphSecret.php` | Microsoft Graph sending | FR-GRS-001 |
+| `src/Graph/GraphTokenProvider.php` | Microsoft Graph sending | FR-GRS-001 |
+| `src/Graph/Send/AttachmentFilename.php` | Microsoft Graph sending | FR-GRS-002 |
+| `src/Graph/Send/DeleteGraphDraft.php` | Microsoft Graph sending | FR-GRS-003 |
+| `src/Graph/Send/DeleteGraphDraftHandler.php` | Microsoft Graph sending | FR-GRS-003 |
+| `src/Graph/Send/GraphAttachment.php` | Microsoft Graph sending | FR-GRS-002 |
+| `src/Graph/Send/GraphMailSender.php` | Microsoft Graph sending | FR-GRS-002 |
+| `src/Graph/Send/GraphOutgoingMail.php` | Microsoft Graph sending | FR-GRS-002 |
+| `src/Graph/Send/GraphRecipient.php` | Microsoft Graph sending | FR-GRS-002 |
+| `src/Graph/Send/GraphSendLimits.php` | Microsoft Graph sending | FR-GRS-002 |
+| `src/Graph/Send/GraphSendResult.php` | Microsoft Graph sending | FR-GRS-002 |
+| `src/Graph/Send/PlusAddress.php` | Microsoft Graph sending | FR-GRS-002 |
+| `src/Graph/Transport/GraphTransport.php` | Microsoft Graph sending | FR-GRS-004 |
+| `src/Graph/Transport/GraphTransportFactory.php` | Microsoft Graph sending | FR-GRS-004 |
+| `src/Graph/Transport/GraphUnrecoverableTransportException.php` | Microsoft Graph sending | FR-GRS-004 |
+
+## Microsoft Graph inbound
+
+| Source file | Spec section | Requirement IDs |
+| --- | --- | --- |
+| `src/Graph/Inbound/AuthenticationResults.php` | Microsoft Graph inbound | FR-GRI-003 |
+| `src/Graph/Inbound/Command/GraphSchemaCommand.php` | Microsoft Graph inbound | FR-GRI-005 |
+| `src/Graph/Inbound/Command/GraphSubscriptionsCommand.php` | Microsoft Graph inbound | FR-GRI-005 |
+| `src/Graph/Inbound/Command/GraphSweepCommand.php` | Microsoft Graph inbound | FR-GRI-005 |
+| `src/Graph/Inbound/ConfiguredInboundProfiles.php` | Microsoft Graph inbound | FR-GRI-004 |
+| `src/Graph/Inbound/GraphDeltaSweeper.php` | Microsoft Graph inbound | FR-GRI-002 |
+| `src/Graph/Inbound/GraphInboundHandlerInterface.php` | Microsoft Graph inbound | FR-GRI-004 |
+| `src/Graph/Inbound/GraphInboundMessage.php` | Microsoft Graph inbound | FR-GRI-003 |
+| `src/Graph/Inbound/GraphInboundProcessor.php` | Microsoft Graph inbound | FR-GRI-004 |
+| `src/Graph/Inbound/GraphInboundProfilesProviderInterface.php` | Microsoft Graph inbound | FR-GRI-004 |
+| `src/Graph/Inbound/GraphMessageNormalizer.php` | Microsoft Graph inbound | FR-GRI-003 |
+| `src/Graph/Inbound/GraphSubscriptionManager.php` | Microsoft Graph inbound | FR-GRI-002 |
+| `src/Graph/Inbound/InboundAction.php` | Microsoft Graph inbound | FR-GRI-004 |
+| `src/Graph/Inbound/InboundAddress.php` | Microsoft Graph inbound | FR-GRI-003 |
+| `src/Graph/Inbound/InboundAttachment.php` | Microsoft Graph inbound | FR-GRI-003 |
+| `src/Graph/Inbound/InboundDecision.php` | Microsoft Graph inbound | FR-GRI-004 |
+| `src/Graph/Inbound/InboundFileTypes.php` | Microsoft Graph inbound | FR-GRI-003 |
+| `src/Graph/Inbound/InboundHtmlSanitizer.php` | Microsoft Graph inbound | FR-GRI-003 |
+| `src/Graph/Inbound/InboundLimits.php` | Microsoft Graph inbound | FR-GRI-003 |
+| `src/Graph/Inbound/Message/FetchGraphMessage.php` | Microsoft Graph inbound | FR-GRI-004 |
+| `src/Graph/Inbound/Message/GraphInboundMessageHandler.php` | Microsoft Graph inbound | FR-GRI-004 |
+| `src/Graph/Inbound/Message/RenewGraphSubscriptions.php` | Microsoft Graph inbound | FR-GRI-004 |
+| `src/Graph/Inbound/Message/SweepGraphMailbox.php` | Microsoft Graph inbound | FR-GRI-004 |
+| `src/Graph/Inbound/Store/GraphInboundSchemaListener.php` | Microsoft Graph inbound | FR-GRI-006 |
+| `src/Graph/Inbound/Store/GraphInboundStore.php` | Microsoft Graph inbound | FR-GRI-006, FR-SEC-001 |
+| `src/Graph/Inbound/Webhook/GraphWebhookController.php` | Microsoft Graph inbound | FR-GRI-001 |
+| `src/Graph/Inbound/Webhook/GraphWebhookRouteLoader.php` | Microsoft Graph inbound | FR-GRI-001 |
+
+## Open and click tracking
+
+| Source file | Spec section | Requirement IDs |
+| --- | --- | --- |
+| `src/Tracking/Command/TrackingPurgeCommand.php` | Open and click tracking | FR-TRK-006 |
+| `src/Tracking/Command/TrackingSchemaCommand.php` | Open and click tracking | FR-TRK-006 |
+| `src/Tracking/ConfiguredTrackableLinkFilter.php` | Open and click tracking | FR-TRK-002 |
+| `src/Tracking/CredentialLinkDetector.php` | Open and click tracking | FR-TRK-002 |
+| `src/Tracking/DefaultTrackingRecipientResolver.php` | Open and click tracking | FR-TRK-001 |
+| `src/Tracking/EmailLinkRewriterInterface.php` | Open and click tracking | FR-TRK-002 |
+| `src/Tracking/EmailTracker.php` | Open and click tracking | FR-TRK-001 |
+| `src/Tracking/EmailTrackingPersonalDataInterface.php` | Open and click tracking | FR-TRK-007 |
+| `src/Tracking/EmailTrackingPolicyInterface.php` | Open and click tracking | FR-TRK-001 |
+| `src/Tracking/EmailTrackingReaderInterface.php` | Open and click tracking | FR-TRK-005 |
+| `src/Tracking/HtmlLinkTracker.php` | Open and click tracking | FR-TRK-002 |
+| `src/Tracking/Http/TrackingPixelController.php` | Open and click tracking | FR-TRK-003 |
+| `src/Tracking/Http/TrackingRouteLoader.php` | Open and click tracking | FR-TRK-003 |
+| `src/Tracking/Message/RecordMailOpen.php` | Open and click tracking | FR-TRK-003 |
+| `src/Tracking/Message/RecordMailOpenHandler.php` | Open and click tracking | FR-TRK-003 |
+| `src/Tracking/NullEmailLinkRewriter.php` | Open and click tracking | FR-TRK-002 |
+| `src/Tracking/OpenClassifier.php` | Open and click tracking | FR-TRK-003 |
+| `src/Tracking/OpenRecorder.php` | Open and click tracking | FR-TRK-003 |
+| `src/Tracking/OpenStats.php` | Open and click tracking | FR-TRK-005 |
+| `src/Tracking/Store/TrackingSchemaListener.php` | Open and click tracking | FR-TRK-006 |
+| `src/Tracking/Store/TrackingStore.php` | Open and click tracking | FR-TRK-006, FR-SEC-001 |
+| `src/Tracking/TrackableLinkFilterInterface.php` | Open and click tracking | FR-TRK-002 |
+| `src/Tracking/TrackedEmail.php` | Open and click tracking | FR-TRK-001 |
+| `src/Tracking/TrackedLink.php` | Open and click tracking | FR-TRK-002 |
+| `src/Tracking/TrackingBaseUrl.php` | Open and click tracking | FR-TRK-001 |
+| `src/Tracking/TrackingCandidate.php` | Open and click tracking | FR-TRK-001 |
+| `src/Tracking/TrackingDecision.php` | Open and click tracking | FR-TRK-001 |
+| `src/Tracking/TrackingIds.php` | Open and click tracking | FR-TRK-001 |
+| `src/Tracking/TrackingRecipientResolverInterface.php` | Open and click tracking | FR-TRK-001 |
+| `src/Tracking/TrackingTokenSigner.php` | Open and click tracking | FR-TRK-003 |
+
+## Coverage summary
+
+| Category | Files | Mapped |
+| --- | ---: | ---: |
+| Bundle and dependency injection | 8 | 8 |
+| Settings | 7 | 7 |
+| DSN and sender | 20 | 20 |
+| Delivery | 5 | 5 |
+| Test e-mail and Resend | 7 | 7 |
+| Sent-mail log | 13 | 13 |
+| Readiness | 6 | 6 |
+| Admin UI | 20 | 20 |
+| Events | 5 | 5 |
+| Personal data (GDPR) | 13 | 13 |
+| Branded e-mail | 7 | 7 |
+| Microsoft Graph sending | 20 | 20 |
+| Microsoft Graph inbound | 27 | 27 |
+| Open and click tracking | 30 | 30 |
+| **Total** | **188** | **188** |

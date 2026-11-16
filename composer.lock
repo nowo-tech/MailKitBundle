@@ -1109,16 +1109,16 @@
         },
         {
             "name": "nowo-tech/doctrine-encrypt-bundle",
-            "version": "v2.12.1",
+            "version": "v2.13.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/DoctrineEncryptBundle.git",
-                "reference": "22e2f6cd925264c0f9230a856247861532fb6609"
+                "reference": "4d9a4520c64bcbe426009d49cbdd3897e88f859c"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/DoctrineEncryptBundle/zipball/22e2f6cd925264c0f9230a856247861532fb6609",
-                "reference": "22e2f6cd925264c0f9230a856247861532fb6609",
+                "url": "https://api.github.com/repos/nowo-tech/DoctrineEncryptBundle/zipball/4d9a4520c64bcbe426009d49cbdd3897e88f859c",
+                "reference": "4d9a4520c64bcbe426009d49cbdd3897e88f859c",
                 "shasum": ""
             },
             "require": {
@@ -1206,20 +1206,20 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-11-11T14:41:37+00:00"
+            "time": "2026-11-13T18:28:53+00:00"
         },
         {
             "name": "nowo-tech/form-kit-bundle",
-            "version": "v2.22.0",
+            "version": "v2.23.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/FormKitBundle.git",
-                "reference": "3571edc853fc0a40f0c345c5c57bae309d283d4b"
+                "reference": "1a95181865f6f7f2dd076fb6b1e32c0a41e23634"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/FormKitBundle/zipball/3571edc853fc0a40f0c345c5c57bae309d283d4b",
-                "reference": "3571edc853fc0a40f0c345c5c57bae309d283d4b",
+                "url": "https://api.github.com/repos/nowo-tech/FormKitBundle/zipball/1a95181865f6f7f2dd076fb6b1e32c0a41e23634",
+                "reference": "1a95181865f6f7f2dd076fb6b1e32c0a41e23634",
                 "shasum": ""
             },
             "require": {
@@ -1323,7 +1323,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-11-11T15:54:34+00:00"
+            "time": "2026-11-13T18:29:32+00:00"
         },
         {
             "name": "nowo-tech/instance-settings-bundle",
@@ -1552,16 +1552,16 @@
         },
         {
             "name": "nowo-tech/ui-kit-bundle",
-            "version": "v2.42.1",
+            "version": "v2.52.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/UiKitBundle.git",
-                "reference": "9166d7374953104edd0bfaf69803ea1a015d6299"
+                "reference": "2715214cf4c459b6aad33ba366d75b8cd0e4385f"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/UiKitBundle/zipball/9166d7374953104edd0bfaf69803ea1a015d6299",
-                "reference": "9166d7374953104edd0bfaf69803ea1a015d6299",
+                "url": "https://api.github.com/repos/nowo-tech/UiKitBundle/zipball/2715214cf4c459b6aad33ba366d75b8cd0e4385f",
+                "reference": "2715214cf4c459b6aad33ba366d75b8cd0e4385f",
                 "shasum": ""
             },
             "require": {
@@ -1650,7 +1650,7 @@
                 "issues": "https://github.com/nowo-tech/UiKitBundle/issues",
                 "source": "https://github.com/nowo-tech/UiKitBundle"
             },
-            "time": "2026-11-09T09:43:11+00:00"
+            "time": "2026-11-16T16:23:57+00:00"
         },
         {
             "name": "paragonie/constant_time_encoding",
@@ -8209,16 +8209,16 @@
         },
         {
             "name": "nowo-tech/auth-kit-bundle",
-            "version": "v1.40.0",
+            "version": "v1.47.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/AuthKitBundle.git",
-                "reference": "9a529e49e55a90980e81c6bec88ddcce21b61c5a"
+                "reference": "1b37d5b9a88e6aa2d2165b767d2934e3380f8ea5"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/AuthKitBundle/zipball/9a529e49e55a90980e81c6bec88ddcce21b61c5a",
-                "reference": "9a529e49e55a90980e81c6bec88ddcce21b61c5a",
+                "url": "https://api.github.com/repos/nowo-tech/AuthKitBundle/zipball/1b37d5b9a88e6aa2d2165b767d2934e3380f8ea5",
+                "reference": "1b37d5b9a88e6aa2d2165b767d2934e3380f8ea5",
                 "shasum": ""
             },
             "require": {
@@ -8263,7 +8263,7 @@
                 "nowo-tech/password-toggle-bundle": "^2.0.0",
                 "nowo-tech/phpstan-frankenphp": "^1.0",
                 "nowo-tech/slide-to-confirm-bundle": "^1.0",
-                "nowo-tech/user-kit-bundle": "^1.13",
+                "nowo-tech/user-kit-bundle": "^1.15",
                 "phpstan/phpstan": "^2.0",
                 "phpstan/phpstan-phpunit": "^2.0",
                 "phpstan/phpstan-symfony": "^2.0",
@@ -8284,6 +8284,7 @@
                 "nowo-tech/password-strength-bundle": "Strength policies, live feedback, and validator for registration and password reset fields (^2.0)",
                 "nowo-tech/password-toggle-bundle": "Password fields with visibility toggle (^2.0.3; registers the nowo_password_toggle asset package)",
                 "nowo-tech/slide-to-confirm-bundle": "Slide-to-confirm on registration consent and QR login approve (^1.0)",
+                "nowo-tech/user-kit-bundle": "GDPR erasure and export: registers the AuthKit personal-data erasers and export sections (^1.13)",
                 "symfony/http-client": "Required with symfony/ux-icons to fetch toggle icons on demand",
                 "symfony/lock": "Serializes AuthKitAttemptLimiter read-modify-write so concurrent requests cannot exceed rate limits; required with MFA (^7.4 || ^8.0; use a shared store on multi-host setups)",
                 "symfony/mailer": "Sends the invitation e-mails (invitations.mode: enabled; ^7.4 || ^8.0). Without it the inviter can be shown the link once (invitations.show_link_when_undelivered)",
@@ -8332,7 +8333,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-11-08T19:38:10+00:00"
+            "time": "2026-11-13T10:31:03+00:00"
         },
         {
             "name": "nowo-tech/brand-contracts",

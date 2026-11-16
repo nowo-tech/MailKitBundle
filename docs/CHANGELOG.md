@@ -79,6 +79,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Demo
+
+- The demo is built on UiKit and FormKit (REQ-DEMO-014 / REQ-DEMO-015): the Bootstrap CDN shell and the Bootstrap
+  Icons CDN are gone, the demo shell is UiKit's admin layout with its default theme (also the layout of the Instance
+  Settings and MailKit pages), and the demo forms are FormKit types themed by the `demo` profile on UiKit's form theme
+  (no `bootstrap_5_layout`). No bundle runtime change.
+
 ## [1.12.2] - 2026-11-14
 
 ### Fixed

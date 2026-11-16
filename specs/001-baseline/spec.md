@@ -142,9 +142,69 @@ to compile with a message naming the fix; routes exist only through the `nowo_ma
 - **FR-UI-004** — Access: `MailKitAccessCheckerInterface`, role / allow-all checkers, `AccessGuard` (firewall-aware,
   section access), `MailKitAccessListener`.
 
+
+### Events and personal data
+
+- **FR-EVT-001** — `MailDeliveredEvent` / `MailDeliveryFailedEvent`: scalar delivery outcome events dispatched after the
+  transport answered (no entity, no Mime object).
+- **FR-GDPR-001** — `SentMailErasureInterface` (null default) and `SentMailPersonalDataEraserInterface`: erase or redact
+  log rows of a subject in batches; `SentMailErasureResult`.
+- **FR-GDPR-002** — `SentMailPersonalDataSubject` (refuses unusable ids), subject resolver port with the default
+  resolver; `SentMailPersonalDataErasedEvent` after the erasure committed.
+- **FR-GDPR-003** — `SentMailPersonalDataExporterInterface` (null default) and the optional UserKit eraser / export
+  providers (`Integration/UserKit`).
+- **FR-SEC-001** — `ExactCollation`: binary NO PAD collation on identifier and key columns of the bundle tables (log,
+  Graph inbound, tracking), with a logged fallback when the server version has no patch number (REQ-SEC-006).
+- **FR-WRK-001** — `LegacyResendSettingsResetListener` forgets the legacy `resend` memo at request, Messenger and
+  console boundaries (worker mode without services resetter, REQ-RUNTIME-002).
+
+### Branded e-mail
+
+- **FR-BRAND-001** — `BrandedEmailHelper`, `BrandedEmailImage`, `BrandedEmailPart`, `BrandedEmailText` and the
+  `email/branded_layout` templates (details: [spec 004](../004-branded-email/spec.md)).
+- **FR-BRAND-002** — `MailKitBrandTwigExtension`: plain-text and colour helpers of the branded layouts.
+
+### Microsoft Graph sending (1.8)
+
+- **FR-GRS-001** — Mailbox port `GraphMailboxProviderInterface` (configured profiles by default), `GraphMailbox`,
+  `GraphSecret` (never printed), `GraphTokenProvider` (PSR-6 cached app-only tokens), `GraphApiClient` (deadline,
+  allowed upload hosts), `GraphException`.
+- **FR-GRS-002** — `GraphMailSender`: value objects in (`GraphOutgoingMail`, `GraphRecipient`, `GraphAttachment`,
+  `PlusAddress`, `AttachmentFilename`), Graph id and internetMessageId out (`GraphSendResult`), limits
+  (`GraphSendLimits`), upload sessions from 2.9 MB.
+- **FR-GRS-003** — `DeleteGraphDraft` + handler: delayed cleanup of an abandoned draft.
+- **FR-GRS-004** — `microsoft+graph://<profile>` mailer transport (`GraphTransportFactory`, `GraphTransport`,
+  `GraphUnrecoverableTransportException`).
+
+### Microsoft Graph inbound (1.9)
+
+- **FR-GRI-001** — Webhook (`GraphWebhookController`, opt-in `GraphWebhookRouteLoader`): validation echo, constant-time
+  client state, caps, rate limit, enqueue only.
+- **FR-GRI-002** — `GraphSubscriptionManager` (create / renew) and `GraphDeltaSweeper` (delta sweep).
+- **FR-GRI-003** — `GraphMessageNormalizer` to `GraphInboundMessage`: addresses, threading ids, sanitised HTML
+  (`InboundHtmlSanitizer`), finfo-typed capped attachments (`InboundFileTypes`, `InboundLimits`), SPF / DKIM / DMARC
+  (`AuthenticationResults`).
+- **FR-GRI-004** — `GraphInboundProcessor` hands each message once to the host port `GraphInboundHandlerInterface`
+  (`InboundDecision`, `InboundAction`); profiles port with the configured default; Messenger messages and handler.
+- **FR-GRI-005** — CLI `nowo:mail-kit:graph:schema`, `:subscriptions`, `:sweep`.
+- **FR-GRI-006** — `GraphInboundStore` (dedupe by internetMessageId, delta links) and its schema listener.
+
+### Open and click tracking (1.10)
+
+- **FR-TRK-001** — `EmailTracker` with the policy port, recipient resolver port (default resolver), per-send opaque ids
+  (`TrackingIds`, `TrackedEmail`, `TrackingCandidate`, `TrackingDecision`, `TrackingBaseUrl`).
+- **FR-TRK-002** — Link rewriting through the host short-link port (`HtmlLinkTracker`, `TrackedLink`, link filter,
+  `CredentialLinkDetector`; null rewriter by default); credential links are never tracked.
+- **FR-TRK-003** — Signed pixel (`TrackingTokenSigner`, `TrackingPixelController`, `TrackingRouteLoader`), open
+  recording through Messenger (`RecordMailOpen` + handler, `OpenRecorder`, `OpenClassifier` human / machine).
+- **FR-TRK-004** — `MailOpenedEvent` / `MailMachineOpenedEvent` with the send id.
+- **FR-TRK-005** — Reader port `EmailTrackingReaderInterface` and `OpenStats`.
+- **FR-TRK-006** — `TrackingStore` + schema listener; CLI `nowo:mail-kit:tracking:schema`, `:purge` (retention).
+- **FR-TRK-007** — GDPR export / erasure of tracking data (`EmailTrackingPersonalDataInterface`, UserKit providers).
+
 ---
 
 ## Success criteria
 
 - 100% statement and element coverage of `src/` (CI gate), PHPStan max with empty `ignoreErrors`, Igor clean.
-- Every file of `src/` listed in [`code-inventory.md`](code-inventory.md).
+- Every file of `src/` listed in [`code-inventory.md`](code-inventory.md): **188 / 188** mapped (1.12.2, audited 2026-11-16).

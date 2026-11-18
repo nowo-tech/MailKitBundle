@@ -15,6 +15,7 @@ use Nowo\MailKitBundle\Log\SentMailCsvExporter;
 use Nowo\MailKitBundle\Tracking\EmailTracker;
 use Nowo\MailKitBundle\Tracking\TrackingBaseUrl;
 use Nowo\MailKitBundle\Ui\MailKitPages;
+use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponsePolicy;
 use Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition;
 use Symfony\Component\Config\Definition\Builder\TreeBuilder;
 use Symfony\Component\Config\Definition\ConfigurationInterface;
@@ -346,6 +347,23 @@ final class Configuration implements ConfigurationInterface
                                     ->max(67_108_864)
                                 ->end()
                             ->end()
+                        ->end()
+                    ->end()
+                ->end()
+                ->arrayNode('conflict_response')
+                    ->info('REQ-RUNTIME-003 rule 6 (1.13): the answer of the bundle\'s routes to a lock conflict, deadlock or serialization failure: X-Conflict-Code CONFLICT_001 (with Retry-After) or CONFLICT_002 (part committed, no Retry-After).')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->enumNode('status')
+                            ->info('409 (platform default) or 503 (hosts that keep a Service Unavailable answer).')
+                            ->values([ConflictResponsePolicy::STATUS_CONFLICT, ConflictResponsePolicy::STATUS_SERVICE_UNAVAILABLE])
+                            ->defaultValue(ConflictResponsePolicy::STATUS_CONFLICT)
+                        ->end()
+                        ->integerNode('retry_after')
+                            ->info('Retry-After seconds of a CONFLICT_001 answer.')
+                            ->defaultValue(ConflictResponsePolicy::DEFAULT_RETRY_AFTER)
+                            ->min(0)
+                            ->max(3600)
                         ->end()
                     ->end()
                 ->end()

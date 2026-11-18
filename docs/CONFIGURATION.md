@@ -19,6 +19,7 @@
 - [web_ui](#web_ui)
   - [Layout and CSS stack (UiKit)](#layout-and-css-stack-uikit)
 - [security](#security)
+- [conflict_response](#conflict_response)
 - [FormKit profile](#formkit-profile)
 - [Instance Settings](#instance-settings)
 - [Timeouts (REQ-RUNTIME-001)](#timeouts-req-runtime-001)
@@ -175,6 +176,9 @@ nowo_mail_kit:
         access_roles: [ROLE_ADMIN]     # any of them; must not be empty (unless access_checker / allow_unauthenticated)
         access_checker: null           # service id implementing MailKitAccessCheckerInterface
         allow_unauthenticated: false   # DEV / DEMO only; refused unless kernel.debug is true
+    conflict_response:                 # 1.13: lock conflicts on MailKit's routes (REQ-RUNTIME-003)
+        status: 409                    # 409, or 503
+        retry_after: 1                 # seconds, CONFLICT_001 answers only (0 … 3600)
 ```
 
 Unknown keys are rejected. Switches (`mailer.decorate`, `dsn.allow_private_hosts`, `dsn.allow_insecure_tls`, `resend.enabled`, `log.enabled`, `log.map_entities`, `log.store_bodies`, `personal_data.enabled`, `graph.enabled`, `graph.inbound.enabled`, `graph.inbound.allow_remote_images`, `tracking.enabled`, `tracking.skip_redacted`, `web_ui.enabled`, `web_ui.export.enabled`, `web_ui.export.include_bodies`, `security.allow_unauthenticated`) must be literal booleans: `%env(bool:…)%` placeholders are refused because they would read as `true` while the container is built.
@@ -423,6 +427,17 @@ security:
         - { path: ^/admin/mail, roles: ROLE_ADMIN }
         - { path: ^/admin/settings, roles: ROLE_ADMIN }
 ```
+
+## conflict_response
+
+Since 1.13 (REQ-RUNTIME-003 rule 6). A deadlock, lock wait timeout or serialization failure on one of MailKit's routes
+(admin pages and actions, the Graph webhook, the tracking pixel) answers with this status and `X-Conflict-Code`.
+Host routes are never answered. See [CONCURRENCY.md](CONCURRENCY.md).
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `status` | `409` | `409`, or `503` for hosts that keep a Service Unavailable answer. |
+| `retry_after` | `1` | `Retry-After` seconds of a `CONFLICT_001` answer (nothing committed). A `CONFLICT_002` answer (part committed) has none. A runner's own hint wins. |
 
 ## FormKit profile
 

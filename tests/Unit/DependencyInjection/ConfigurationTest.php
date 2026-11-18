@@ -30,6 +30,10 @@ final class ConfigurationTest extends TestCase
         self::assertSame(['enabled' => true, 'max_rows' => 10_000, 'access_roles' => [], 'include_bodies' => false, 'body_batch_bytes' => 8_388_608], $config['web_ui']['export']);
         self::assertSame(['ROLE_ADMIN'], $config['security']['access_roles']);
         self::assertFalse($config['security']['allow_unauthenticated']);
+        self::assertSame(['status' => 409, 'retry_after' => 1], $config['conflict_response']);
+
+        $config = (new Processor())->processConfiguration(new Configuration(), [['conflict_response' => ['status' => 503, 'retry_after' => 30]]]);
+        self::assertSame(['status' => 503, 'retry_after' => 30], $config['conflict_response']);
     }
 
     public function testRoleAndListHelpers(): void

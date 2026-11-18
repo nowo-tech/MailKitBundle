@@ -6,6 +6,7 @@ namespace Nowo\MailKitBundle\Tracking;
 
 use Closure;
 use InvalidArgumentException;
+use Nowo\MailKitBundle\Concurrency\StorageConflicts;
 use Nowo\MailKitBundle\Mailer\MailHeaders;
 use Nowo\MailKitBundle\Tracking\Store\TrackingStore;
 use Psr\Log\LoggerInterface;
@@ -101,7 +102,9 @@ final readonly class EmailTracker
     }
 
     /**
-     * The tracked copy to deliver, or null to deliver the original. Never throws.
+     * The tracked copy to deliver, or null to deliver the original. Throws only a storage lock conflict (deadlock, lock
+     * wait timeout, serialization failure) of the tracking store, the tracking policy or the link rewriter (1.13,
+     * REQ-RUNTIME-003 rule 8): nothing was sent yet, so the caller's unit or Messenger can replay the send.
      *
      * @param string|null $logId sent-mail log row id of a queued message
      */
@@ -115,6 +118,9 @@ final readonly class EmailTracker
 
             return null;
         } catch (Throwable $exception) {
+            if (StorageConflicts::isConflict($exception)) {
+                throw $exception;
+            }
             $this->logger?->warning('Mail tracking skipped: the e-mail is sent untracked.', ['bundle' => 'NowoMailKitBundle', 'error' => $exception::class]);
 
             return null;
@@ -166,6 +172,9 @@ final readonly class EmailTracker
                 MailHeaders::value($message, MailHeaders::TENANT),
             ));
         } catch (Throwable $exception) {
+            if (StorageConflicts::isConflict($exception)) {
+                throw $exception;
+            }
             $this->logger?->warning('Mail tracking policy failed: the e-mail is sent untracked.', ['bundle' => 'NowoMailKitBundle', 'error' => $exception::class]);
 
             return null;
@@ -221,6 +230,9 @@ final readonly class EmailTracker
             }
             $new = $this->rewriter->rewrite($link);
         } catch (Throwable $exception) {
+            if (StorageConflicts::isConflict($exception)) {
+                throw $exception;
+            }
             $this->logger?->warning('Mail link rewriter failed: the link is kept.', ['bundle' => 'NowoMailKitBundle', 'error' => $exception::class]);
 
             return null;

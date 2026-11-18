@@ -22,7 +22,7 @@ help:
 	@echo "  make seed         Seed demo variables (idempotent)"
 	@echo "  make key          Generate Halite encryption secret key"
 	@echo "  make cache-clear  Clear Symfony cache"
-	@echo "  make update-bundle Update bundle from path repo"
+	@echo "  make update-bundle Update bundle from path repo (with its dependencies)"
 	@echo "  make test-e2e     Playwright happy path (official Playwright image)"
 	@echo "  make demo-screenshots Refresh docs/images/demo/*.webp"
 	@echo ""
@@ -101,7 +101,7 @@ cache-clear: ensure-up
 	$(COMPOSE) exec -T $(SERVICE_PHP) php bin/console cache:clear --env=dev --no-warmup || true
 
 update-bundle: ensure-up
-	$(COMPOSE) exec -T -e COMPOSER_MEMORY_LIMIT=-1 $(SERVICE_PHP) composer update nowo-tech/mail-kit-bundle --no-interaction
+	$(COMPOSE) exec -T -e COMPOSER_MEMORY_LIMIT=-1 $(SERVICE_PHP) composer update nowo-tech/mail-kit-bundle -w --no-interaction
 
 # REQ-MAKE-003: the demo has no PHPUnit suite (tests/ only holds the bootstrap); lint the wiring and templates instead.
 test: ensure-up

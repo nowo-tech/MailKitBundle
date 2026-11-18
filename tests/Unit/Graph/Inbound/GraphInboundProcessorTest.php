@@ -4,7 +4,12 @@ declare(strict_types=1);
 
 namespace Nowo\MailKitBundle\Tests\Unit\Graph\Inbound;
 
+use ArrayObject;
+use Doctrine\DBAL\Configuration;
+use Doctrine\DBAL\DriverManager;
+use Doctrine\Persistence\ManagerRegistry;
 use LogicException;
+use Nowo\MailKitBundle\Concurrency\StorageConflicts;
 use Nowo\MailKitBundle\Graph\GraphApiClient;
 use Nowo\MailKitBundle\Graph\GraphException;
 use Nowo\MailKitBundle\Graph\GraphTokenProvider;
@@ -14,21 +19,27 @@ use Nowo\MailKitBundle\Graph\Inbound\InboundAction;
 use Nowo\MailKitBundle\Graph\Inbound\InboundAttachment;
 use Nowo\MailKitBundle\Graph\Inbound\InboundHtmlSanitizer;
 use Nowo\MailKitBundle\Graph\Inbound\InboundLimits;
+use Nowo\MailKitBundle\Graph\Inbound\Store\GraphInboundStore;
 use Nowo\MailKitBundle\Tests\Support\GraphApiMock;
 use Nowo\MailKitBundle\Tests\Support\GraphInboundFixtures;
 use Nowo\MailKitBundle\Tests\Support\HostGraphMailboxProvider;
 use Nowo\MailKitBundle\Tests\Support\InboundStoreTrait;
 use Nowo\MailKitBundle\Tests\Support\RecordingInboundHandler;
 use Nowo\MailKitBundle\Tests\Support\RecordingLogger;
+use Nowo\MailKitBundle\Tests\Support\StatementHookMiddleware;
+use Nowo\MailKitBundle\Tests\Support\StorageFailures;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 use Symfony\Component\Cache\Adapter\ArrayAdapter;
 use Symfony\Component\HttpClient\Response\MockResponse;
+use Throwable;
 
+use function is_string;
 use function print_r;
 use function rawurldecode;
 use function str_contains;
 use function str_repeat;
+use function str_starts_with;
 use function strlen;
 
 final class GraphInboundProcessorTest extends TestCase
@@ -48,14 +59,14 @@ final class GraphInboundProcessorTest extends TestCase
         $this->logger  = new RecordingLogger();
     }
 
-    private function processor(?InboundLimits $limits = null): GraphInboundProcessor
+    private function processor(?InboundLimits $limits = null, ?GraphInboundStore $store = null): GraphInboundProcessor
     {
         $client = $this->mock->client();
 
         return new GraphInboundProcessor(
             new HostGraphMailboxProvider(),
             new GraphApiClient($client, new GraphTokenProvider($client, new ArrayAdapter())),
-            $this->inboundStore(),
+            $store ?? $this->inboundStore(),
             $this->handler,
             new GraphMessageNormalizer(new InboundHtmlSanitizer()),
             $limits ?? new InboundLimits(),
@@ -258,5 +269,48 @@ final class GraphInboundProcessorTest extends TestCase
         }
         $this->mock->override = null;
         self::assertSame(InboundAction::Route, $processor->process('acme', 'm9')?->action);
+    }
+
+    public function testAFailedDecisionWriteKeepsTheClaimAndAFailedReleaseIsLogged(): void
+    {
+        $inject     = new ArrayObject();
+        $connection = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'memory' => true], (new Configuration())->setMiddlewares([new StatementHookMiddleware(static function (string $sql) use ($inject): void {
+            $prefix  = $inject['sql'] ?? null;
+            $failure = $inject['failure'] ?? null;
+            if (is_string($prefix) && $failure instanceof Throwable && str_starts_with($sql, $prefix)) {
+                throw $failure;
+            }
+        })]));
+        $registry = $this->createStub(ManagerRegistry::class);
+        $registry->method('getConnection')->willReturn($connection);
+        $store = new GraphInboundStore($registry);
+        $store->execute($store->missingTablesSql());
+        $processor = $this->processor(null, $store);
+
+        // The host handled the message, then storing its decision fails: the claim stays (no second hand-over).
+        $this->deliver('m1');
+        $inject->exchangeArray(['sql' => 'UPDATE mail_kit_graph_inbound SET status', 'failure' => StorageFailures::deadlock()]);
+        try {
+            $processor->process('acme', 'm1');
+            self::fail('The failure must propagate (Messenger retries).');
+        } catch (Throwable $failure) {
+            self::assertTrue(StorageConflicts::isTransient($failure));
+        }
+        $inject->exchangeArray([]);
+        self::assertCount(1, $this->handler->messages);
+        self::assertNull($processor->process('acme', 'm1'), 'The retry sees the claim and skips the message.');
+        self::assertCount(1, $this->handler->messages);
+
+        // The host fails and the release fails too: the host failure propagates, the release failure is logged.
+        $this->deliver('m2');
+        $this->handler->fail = true;
+        $inject->exchangeArray(['sql' => 'DELETE FROM mail_kit_graph_inbound', 'failure' => new RuntimeException('release failed')]);
+        try {
+            $processor->process('acme', 'm2');
+            self::fail('The host failure must propagate.');
+        } catch (RuntimeException $failure) {
+            self::assertSame('Host storage unavailable.', $failure->getMessage());
+        }
+        self::assertTrue($this->logger->has('claim not released'));
     }
 }

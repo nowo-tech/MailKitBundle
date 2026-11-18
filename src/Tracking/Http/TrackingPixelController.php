@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\MailKitBundle\Tracking\Http;
 
 use Closure;
+use Nowo\MailKitBundle\Concurrency\StorageConflicts;
 use Nowo\MailKitBundle\Tracking\Message\RecordMailOpen;
 use Nowo\MailKitBundle\Tracking\OpenClassifier;
 use Nowo\MailKitBundle\Tracking\OpenRecorder;
@@ -64,6 +65,11 @@ final readonly class TrackingPixelController
             try {
                 $this->count($request, $token);
             } catch (Throwable $exception) {
+                // 1.13 (REQ-RUNTIME-003 rule 8): a lock conflict is not swallowed; MailKitConflictListener answers it
+                // (409 + X-Conflict-Code). Any other failure still answers the GIF (the open is only not counted).
+                if (StorageConflicts::isConflict($exception)) {
+                    throw $exception;
+                }
                 $this->logger?->warning('Mail open not recorded.', ['bundle' => 'NowoMailKitBundle', 'error' => $exception::class]);
             }
         }

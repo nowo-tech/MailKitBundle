@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Nowo\MailKitBundle\Tests\Unit\Graph\Inbound;
 
+use Doctrine\DBAL\Exception\DeadlockException;
+use Nowo\MailKitBundle\Concurrency\StorageConflicts;
 use Nowo\MailKitBundle\Graph\Inbound\ConfiguredInboundProfiles;
 use Nowo\MailKitBundle\Graph\Inbound\Message\FetchGraphMessage;
 use Nowo\MailKitBundle\Graph\Inbound\Message\RenewGraphSubscriptions;
@@ -16,6 +18,9 @@ use Nowo\MailKitBundle\Tests\Support\HostGraphMailboxProvider;
 use Nowo\MailKitBundle\Tests\Support\InboundStoreTrait;
 use Nowo\MailKitBundle\Tests\Support\RecordingBus;
 use Nowo\MailKitBundle\Tests\Support\RecordingLogger;
+use Nowo\MailKitBundle\Tests\Support\StorageFailures;
+use Nowo\TransactionDoctrine\ConflictCode;
+use Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\Request;
@@ -102,6 +107,42 @@ final class GraphWebhookControllerTest extends TestCase
         self::assertSame('text/plain; charset=utf-8', $response->headers->get('Content-Type'));
         self::assertSame('nosniff', $response->headers->get('X-Content-Type-Options'));
         self::assertStringContainsString("default-src 'none'", (string) $response->headers->get('Content-Security-Policy'));
+    }
+
+    public function testALockConflictAfterPartOfTheBatchWasQueuedIsMarkedCommitted(): void
+    {
+        $batch = ['value' => [
+            $this->notification('sub-a', $this->secret),
+            $this->notification('sub-a', $this->secret, ['resourceData' => ['id' => 'AAMkMsg2=']]),
+        ]];
+
+        // First dispatch fails: nothing was queued, the raw conflict goes up (CONFLICT_001).
+        $this->bus->failure = StorageFailures::deadlock();
+        try {
+            ($this->controller())($this->post($batch));
+            self::fail('Conflict expected.');
+        } catch (DeadlockException) {
+        }
+
+        // Second dispatch fails: the first message is queued (committed), so the answer must be CONFLICT_002.
+        $this->bus->failAt = 1;
+        try {
+            ($this->controller())($this->post($batch));
+            self::fail('Conflict expected.');
+        } catch (ConcurrencyConflict $conflict) {
+            self::assertTrue($conflict->committed);
+            self::assertSame(ConflictCode::Committed, StorageConflicts::code(new Request(), $conflict));
+        }
+
+        // Any other failure is rethrown unchanged.
+        $this->bus->messages = [];
+        $this->bus->failure  = new RuntimeException('transport down');
+        try {
+            ($this->controller())($this->post($batch));
+            self::fail('Failure expected.');
+        } catch (RuntimeException $failure) {
+            self::assertSame('transport down', $failure->getMessage());
+        }
     }
 
     public function testValidationTokenIsEchoedOnlyWhenSafe(): void

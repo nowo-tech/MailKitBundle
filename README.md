@@ -157,6 +157,7 @@ make release-check
 
 - [Templates (UiKit page contract)](docs/TEMPLATES.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [Concurrency (409 + CONFLICT codes, write paths)](docs/CONCURRENCY.md)
 - [Microsoft 365 setup for Graph sending](docs/MICROSOFT-GRAPH-SETUP.md)
 - [Roadmap](docs/ROADMAP.md)
 - [PSR evaluation (REQ-CS-007)](docs/PSR.md)

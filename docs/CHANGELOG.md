@@ -6,78 +6,124 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
-- [[1.12.2] - 2026-11-14](#1122---2026-11-14)
-  - [Fixed](#fixed)
-- [[1.12.1] - 2026-11-14](#1121---2026-11-14)
   - [Added](#added)
-  - [Fixed](#fixed-1)
-- [[1.12.0] - 2026-11-14](#1120---2026-11-14)
-  - [Added](#added-1)
   - [Changed](#changed)
+  - [Fixed](#fixed)
+  - [Demo](#demo)
+- [[1.12.2] - 2026-11-14](#1122---2026-11-14)
+  - [Fixed](#fixed-1)
+- [[1.12.1] - 2026-11-14](#1121---2026-11-14)
+  - [Added](#added-1)
+  - [Fixed](#fixed-2)
+- [[1.12.0] - 2026-11-14](#1120---2026-11-14)
+  - [Added](#added-2)
+  - [Changed](#changed-1)
   - [Tests](#tests)
 - [[1.11.0] - 2026-11-13](#1110---2026-11-13)
-  - [Changed](#changed-1)
+  - [Changed](#changed-2)
   - [Tests](#tests-1)
   - [Documentation](#documentation)
 - [[1.10.2] - 2026-11-12](#1102---2026-11-12)
-  - [Fixed](#fixed-2)
-- [[1.10.1] - 2026-11-12](#1101---2026-11-12)
   - [Fixed](#fixed-3)
-- [[1.10.0] - 2026-11-12](#1100---2026-11-12)
-  - [Added](#added-2)
-  - [Changed](#changed-2)
-  - [Tests](#tests-2)
-- [[1.9.1] - 2026-11-12](#191---2026-11-12)
+- [[1.10.1] - 2026-11-12](#1101---2026-11-12)
   - [Fixed](#fixed-4)
-  - [Security](#security)
-- [[1.9.0] - 2026-11-12](#190---2026-11-12)
+- [[1.10.0] - 2026-11-12](#1100---2026-11-12)
   - [Added](#added-3)
   - [Changed](#changed-3)
+  - [Tests](#tests-2)
+- [[1.9.1] - 2026-11-12](#191---2026-11-12)
+  - [Fixed](#fixed-5)
+  - [Security](#security)
+- [[1.9.0] - 2026-11-12](#190---2026-11-12)
+  - [Added](#added-4)
+  - [Changed](#changed-4)
   - [Audit NQ (before the 1.9.0 tag)](#audit-nq-before-the-190-tag)
   - [Audit NQ-v (verification, before the 1.9.0 tag)](#audit-nq-v-verification-before-the-190-tag)
   - [Security](#security-1)
   - [Tests](#tests-3)
 - [[1.8.0] - 2026-11-12](#180---2026-11-12)
-  - [Added](#added-4)
+  - [Added](#added-5)
   - [Security](#security-2)
   - [Tests](#tests-4)
 - [[1.7.1] - 2026-11-11](#171---2026-11-11)
-  - [Fixed](#fixed-5)
+  - [Fixed](#fixed-6)
   - [Tests](#tests-5)
   - [Documentation](#documentation-1)
 - [[1.7.0] - 2026-11-11](#170---2026-11-11)
-  - [Added](#added-5)
-  - [Changed](#changed-4)
-- [[1.6.0] - 2026-11-11](#160---2026-11-11)
   - [Added](#added-6)
   - [Changed](#changed-5)
-- [[1.5.0] - 2026-11-10](#150---2026-11-10)
+- [[1.6.0] - 2026-11-11](#160---2026-11-11)
   - [Added](#added-7)
   - [Changed](#changed-6)
-- [[1.4.0] - 2026-11-09](#140---2026-11-09)
+- [[1.5.0] - 2026-11-10](#150---2026-11-10)
   - [Added](#added-8)
+  - [Changed](#changed-7)
+- [[1.4.0] - 2026-11-09](#140---2026-11-09)
+  - [Added](#added-9)
   - [Security](#security-3)
 - [[1.3.0] - 2026-11-02](#130---2026-11-02)
-  - [Added](#added-9)
-  - [Changed](#changed-7)
-  - [Security](#security-4)
-- [[1.2.0] - 2026-11-02](#120---2026-11-02)
   - [Added](#added-10)
   - [Changed](#changed-8)
-  - [Fixed](#fixed-6)
-- [[1.1.1] - 2026-11-01](#111---2026-11-01)
-  - [Security](#security-5)
+  - [Security](#security-4)
+- [[1.2.0] - 2026-11-02](#120---2026-11-02)
+  - [Added](#added-11)
   - [Changed](#changed-9)
   - [Fixed](#fixed-7)
-- [[1.1.0] - 2026-11-01](#110---2026-11-01)
-  - [Added](#added-11)
+- [[1.1.1] - 2026-11-01](#111---2026-11-01)
+  - [Security](#security-5)
   - [Changed](#changed-10)
-- [[1.0.0] - 2026-10-31](#100---2026-10-31)
+  - [Fixed](#fixed-8)
+- [[1.1.0] - 2026-11-01](#110---2026-11-01)
   - [Added](#added-12)
+  - [Changed](#changed-11)
+- [[1.0.0] - 2026-10-31](#100---2026-10-31)
+  - [Added](#added-13)
   - [Security (independent audit, Appendix CA)](#security-independent-audit-appendix-ca)
   - [Security (re-verification follow-ups)](#security-re-verification-follow-ups)
 
 ## [Unreleased]
+
+### Added
+
+- **Conflict answer on the bundle's routes (REQ-RUNTIME-003 rule 6).** A deadlock, lock wait timeout or serialization
+  failure on an admin page or action, the Graph webhook or the tracking pixel now answers **409** with
+  `X-Conflict-Code`. The code is `CONFLICT_001` with `Retry-After` when nothing was committed, and `CONFLICT_002`
+  with no `Retry-After` when part of the request was. Admin routes go through your error page as an `HttpException`
+  that carries the headers. Unique violations and lost connections are not mapped. See
+  [CONCURRENCY.md](CONCURRENCY.md).
+- `conflict_response.status` (`409` default, or `503`) and `conflict_response.retry_after` (default `1`).
+- `docs/CONCURRENCY.md`: write-path table, codes, host options and residual risks.
+- Race tests on two real connections (MySQL 8.4, MariaDB 11.4, PostgreSQL 16 and 17): the inbound claim, the delta
+  link, the subscription swap, the open counter, and a listener conflict after a committed open. The real-database CI
+  job gains PostgreSQL 16 and runs them.
+- CI job "Dependency floor": the suites run with the lowest `nowo-tech/transaction-*` versions allowed, and the demo
+  lock must install every `nowo-tech/*` requirement (`.scripts/check-demo-lock.py`).
+
+### Changed
+
+- Requires `nowo-tech/transaction-doctrine` ^1.6 and `nowo-tech/transaction-contract` ^1.0.
+- **Lock conflicts are no longer swallowed (rule 8).** They now propagate:
+  - from the tracking store, the tracking policy and the link rewriter before the e-mail leaves;
+  - from tracking writes inside your transaction;
+  - from the pixel;
+  - from `MailOpenedEvent` and `MailMachineOpenedEvent` listeners;
+  - from the test e-mail action.
+
+  Other failures behave as before.
+- `GraphInboundStore::release()` throws instead of swallowing a failure. It retries a lock conflict once outside a
+  transaction. The processor logs a failed release ("claim not released") and still rethrows your handler's failure.
+
+### Fixed
+
+- `GraphInboundStore::saveSubscription()` runs its `DELETE` and `INSERT` in one transaction. A failed insert no longer
+  leaves the profile without a subscription.
+- `GraphInboundStore::saveDeltaLink()` no longer fails with a unique violation when two sweeps store the first link of
+  a profile at the same time. It does an `UPDATE`, then an `INSERT` whose duplicate key is caught (in a savepoint
+  inside a transaction).
+- The Graph inbound processor no longer releases the claim when storing the decision fails after your handler already
+  handled the message. A Messenger retry used to hand the message over a second time.
+- A lock conflict in the Graph webhook's dispatch loop, after part of the batch was queued, answers `CONFLICT_002`
+  instead of a 500.
 
 ### Demo
 

@@ -3,6 +3,11 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+  - [Lock conflicts answer 409](#lock-conflicts-answer-409)
+  - [Lock conflicts are no longer swallowed](#lock-conflicts-are-no-longer-swallowed)
+  - [Graph inbound: a failed decision write keeps the claim](#graph-inbound-a-failed-decision-write-keeps-the-claim)
+  - [transaction-doctrine and your entity manager](#transaction-doctrine-and-your-entity-manager)
+  - [Request-level CONFLICT_002](#request-level-conflict_002)
 - [To 1.12.2](#to-1122)
 - [To 1.12.1](#to-1121)
 - [To 1.12.0](#to-1120)
@@ -40,6 +45,74 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+Target **1.13.0** (minor), from **1.12.x**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle -w
+```
+
+`-w` installs the new requirements, `nowo-tech/transaction-doctrine` ^1.6 and `nowo-tech/transaction-contract` ^1.0.
+No schema change and no configuration is needed. Read [CONCURRENCY.md](CONCURRENCY.md) for the full picture.
+
+### Lock conflicts answer 409
+
+A deadlock, lock wait timeout or serialization failure on one of MailKit's routes (admin pages and actions, the Graph
+webhook, the tracking pixel) used to be a 500, or was swallowed. It now answers **409** with `X-Conflict-Code`:
+
+- `CONFLICT_001` and `Retry-After` when nothing was committed;
+- `CONFLICT_002` and no `Retry-After` when part of the request was.
+
+To keep a Service Unavailable status:
+
+```yaml
+nowo_mail_kit:
+    conflict_response:
+        status: 503
+        retry_after: 1
+```
+
+Admin routes reach your error page as an `HttpException` with that status and those headers. Host routes are never
+touched. Unique violations and lost connections are not conflicts and keep their old behaviour.
+
+### Lock conflicts are no longer swallowed
+
+These places now let a deadlock, lock wait timeout or serialization failure propagate. Other failures behave as
+before.
+
+- **Tracking before the e-mail leaves.** `EmailTracker::track()` (the tracking store, your tracking policy, your link
+  rewriter) throws the conflict instead of sending the e-mail untracked. Nothing was sent, so your unit of work or
+  Messenger can replay the send.
+- **Tracking writes inside your transaction.** On MySQL / MariaDB a deadlock rolls back your whole transaction, so you
+  must see it.
+- **The pixel, and your `MailOpenedEvent` / `MailMachineOpenedEvent` listeners.** A listener's conflict becomes a
+  `Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict` with `committed: true`, because the open was already
+  counted.
+- **The test e-mail action.** It answers 409 instead of a "failed" flash message.
+- **`GraphInboundStore::release()`.** It throws instead of swallowing every failure. If you call it yourself, catch
+  what you need. MailKit's processor logs it.
+
+After the send, the sent-mail log write and the `MailDeliveredEvent` / `MailDeliveryFailedEvent` listeners still only
+log a failure: a replay would send the e-mail twice.
+
+### Graph inbound: a failed decision write keeps the claim
+
+When your handler returned a decision but storing it failed, the claim used to be released. Messenger's retry then
+called your handler a second time. Now the claim is kept, the failure goes to Messenger, and the retry skips the
+message. If you relied on the second call, make your handler idempotent instead (rule 7).
+
+### transaction-doctrine and your entity manager
+
+MailKit's own runner works on its DBAL connection only (`DoctrineTransactionRunner::forConnection()`). It never
+receives, flushes, clears or resets your entity manager. If you also adopt transaction-doctrine 1.6's
+`DoctrineTransactionRunner::forHostEntityManager()` in your application, it throws a `LogicException` when your
+manager has unflushed changes as a run starts: flush or clear them first.
+
+### Request-level CONFLICT_002
+
+To answer `CONFLICT_002` when something was committed earlier in the same request (by your code or another bundle),
+register `Nowo\TransactionDoctrine\Symfony\NowoTransactionDoctrineBundle` with its commit detection on. Without it,
+the failure alone decides the code.
 
 ## To 1.12.2
 

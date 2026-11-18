@@ -9,6 +9,7 @@ use Nowo\InstanceSettingsBundle\Settings\InstanceSettingsInterface;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\MailerIntegrationPass;
 use Nowo\MailKitBundle\DependencyInjection\NowoMailKitExtension;
 use Nowo\MailKitBundle\Dsn\MailerDsnProviderInterface;
+use Nowo\MailKitBundle\EventListener\MailKitConflictListener;
 use Nowo\MailKitBundle\Integration\UserKit\EmailsReceivedPersonalDataEraser;
 use Nowo\MailKitBundle\Integration\UserKit\EmailsReceivedPersonalDataExportProvider;
 use Nowo\MailKitBundle\Log\DefaultSentMailPersonalDataSubjectResolver;
@@ -110,6 +111,13 @@ final class NowoMailKitExtensionTest extends TestCase
         self::assertTrue($container->getDefinition(LegacyResendSettings::class)->hasTag('kernel.reset'));
         self::assertTrue($container->getDefinition(MailerSettingsSection::class)->getArgument(6));
         self::assertSame('nowo_mail_kit', (new NowoMailKitExtension())->getAlias());
+
+        // REQ-RUNTIME-003 rule 6: the conflict answer of the bundle's routes.
+        $listener = $container->getDefinition(MailKitConflictListener::class);
+        self::assertSame([['event' => 'kernel.exception', 'priority' => -64]], $listener->getTag('kernel.event_listener'));
+        $policy = $listener->getArgument(0);
+        self::assertInstanceOf(Definition::class, $policy);
+        self::assertSame([409, 1], $policy->getArguments());
     }
 
     public function testThePassDetectsTheMessageBus(): void

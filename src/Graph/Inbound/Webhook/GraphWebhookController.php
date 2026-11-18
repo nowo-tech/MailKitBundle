@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\MailKitBundle\Graph\Inbound\Webhook;
 
 use JsonException;
+use Nowo\MailKitBundle\Concurrency\StorageConflicts;
 use Nowo\MailKitBundle\Graph\Inbound\GraphInboundProcessor;
 use Nowo\MailKitBundle\Graph\Inbound\GraphInboundProfilesProviderInterface;
 use Nowo\MailKitBundle\Graph\Inbound\Message\FetchGraphMessage;
@@ -17,6 +18,7 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\RateLimiter\RateLimiterFactory;
+use Throwable;
 
 use function array_key_exists;
 use function count;
@@ -112,9 +114,17 @@ final class GraphWebhookController
         if (!$this->verifiedLimiter->create('graph-webhook-verified')->consume()->isAccepted()) {
             return $this->plain('', 429);
         }
-        $queued = 0;
+        $queued     = 0;
+        $dispatched = 0;
         foreach ($valid as $message) {
-            $this->bus->dispatch($message);
+            try {
+                $this->bus->dispatch($message);
+            } catch (Throwable $failure) {
+                // 1.13 (REQ-RUNTIME-003 rule 6): a lock conflict after part of the batch was queued answers
+                // CONFLICT_002 (MailKitConflictListener); before it, CONFLICT_001 with Retry-After.
+                throw $dispatched > 0 && StorageConflicts::isConflict($failure) ? StorageConflicts::committed($failure) : $failure;
+            }
+            ++$dispatched;
             $queued += $message instanceof FetchGraphMessage ? 1 : 0;
         }
         $this->logger?->info('Microsoft Graph notifications received.', ['bundle' => 'NowoMailKitBundle', 'accepted' => count($valid), 'queued' => $queued]);

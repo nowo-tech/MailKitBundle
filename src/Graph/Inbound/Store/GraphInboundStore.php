@@ -5,12 +5,16 @@ declare(strict_types=1);
 namespace Nowo\MailKitBundle\Graph\Inbound\Store;
 
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Exception as DbalException;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\DBAL\Platforms\AbstractPlatform;
 use Doctrine\DBAL\Schema\Schema;
 use Doctrine\Persistence\ManagerRegistry;
+use Nowo\MailKitBundle\Concurrency\StorageConflicts;
 use Nowo\MailKitBundle\Doctrine\ExactCollation;
 use Nowo\MailKitBundle\Graph\Inbound\InboundAction;
+use Nowo\TransactionContract\TransientStorageFailure;
+use Nowo\TransactionDoctrine\DoctrineTransactionRunner;
 use Psr\Clock\ClockInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Clock\NativeClock;
@@ -41,6 +45,8 @@ final class GraphInboundStore
     public const STATUS_PROCESSING = 'processing';
 
     private const SAVEPOINT = 'nowo_mail_kit_graph_claim';
+
+    private const DELTA_SAVEPOINT = 'nowo_mail_kit_graph_delta';
 
     /**
      * @param string|null $connectionName DBAL connection (null = default)
@@ -80,19 +86,28 @@ final class GraphInboundStore
     }
 
     /**
-     * Stores a subscription (the client state is hashed) and drops the profile's other subscriptions.
+     * Stores a subscription (the client state is hashed) and drops the profile's other subscriptions, in one
+     * transaction (1.13, REQ-RUNTIME-003 rule 1: a failed insert no longer leaves the profile without a subscription).
+     * A lock conflict is rethrown as a {@see TransientStorageFailure} after the rollback (Messenger retries it).
+     *
+     * @throws TransientStorageFailure on a deadlock, lock wait timeout or serialization failure
+     * @throws DbalException any other database error, unchanged (a duplicate subscription id, for example)
      */
     public function saveSubscription(string $subscriptionId, string $profile, string $clientState, int $expiresAt): void
     {
         $connection = $this->connection();
-        $connection->executeStatement('DELETE FROM ' . $this->subscriptionTable() . ' WHERE profile = ?', [$profile]);
-        $connection->insert($this->subscriptionTable(), [
+        $row        = [
             'subscription_id'   => $subscriptionId,
             'profile'           => $profile,
             'client_state_hash' => hash('sha256', $clientState),
             'expires_at'        => $expiresAt,
             'created_at'        => $this->now(),
-        ]);
+        ];
+        // @igor-ignore - Closure runs synchronously inside run(); it is not stored on the service.
+        DoctrineTransactionRunner::forConnection($connection, null, $this->logger)->run(function () use ($connection, $profile, $row): void {
+            $connection->executeStatement('DELETE FROM ' . $this->subscriptionTable() . ' WHERE profile = ?', [$profile]);
+            $connection->insert($this->subscriptionTable(), $row);
+        });
     }
 
     /**
@@ -152,18 +167,37 @@ final class GraphInboundStore
     }
 
     /**
-     * Stores the delta (or next) link of a profile.
+     * Stores the delta (or next) link of a profile: an UPDATE, else an INSERT whose duplicate key (a concurrent sweep
+     * of the same profile stored it first) is caught and followed by the UPDATE (1.13, REQ-RUNTIME-003 rule 4; it was a
+     * check-then-insert that failed on that race). Inside an open transaction the INSERT runs in a savepoint, so the
+     * duplicate key never aborts the caller's transaction (PostgreSQL).
      */
     public function saveDeltaLink(string $profile, string $link): void
     {
         $connection = $this->connection();
-        $exists     = $connection->fetchOne('SELECT 1 FROM ' . $this->deltaTable() . ' WHERE profile = ?', [$profile]);
-        if ($exists !== false) {
-            $connection->executeStatement('UPDATE ' . $this->deltaTable() . ' SET delta_link = ?, updated_at = ? WHERE profile = ?', [$link, $this->now(), $profile]);
-
+        $now        = $this->now();
+        $sql        = 'UPDATE ' . $this->deltaTable() . ' SET delta_link = ?, updated_at = ? WHERE profile = ?';
+        // MySQL / MariaDB count changed rows only: 0 also when the same link is stored again in the same second; the
+        // INSERT then meets the existing key and the second UPDATE is a no-op.
+        if ($connection->executeStatement($sql, [$link, $now, $profile]) > 0) {
             return;
         }
-        $connection->insert($this->deltaTable(), ['profile' => $profile, 'delta_link' => $link, 'updated_at' => $this->now()]);
+        $nested = $connection->isTransactionActive();
+        if ($nested) {
+            $connection->createSavepoint(self::DELTA_SAVEPOINT);
+        }
+
+        try {
+            $connection->insert($this->deltaTable(), ['profile' => $profile, 'delta_link' => $link, 'updated_at' => $now]);
+            if ($nested) {
+                $connection->releaseSavepoint(self::DELTA_SAVEPOINT);
+            }
+        } catch (UniqueConstraintViolationException) {
+            if ($nested) {
+                $connection->rollbackSavepoint(self::DELTA_SAVEPOINT);
+            }
+            $connection->executeStatement($sql, [$link, $now, $profile]);
+        }
     }
 
     /**
@@ -225,14 +259,23 @@ final class GraphInboundStore
     }
 
     /**
-     * Forgets a claim (processing failed: the message is processed again on the next delivery).
+     * Forgets a claim (processing failed: the message is processed again on the next delivery). 1.13 (REQ-RUNTIME-003
+     * rule 8): a lock conflict outside a transaction is retried once; any other failure, or a second conflict, is
+     * thrown instead of swallowed (the caller logs it; the stale-claim timeout releases the claim then).
      */
     public function release(string $profile, string $internetMessageId): void
     {
+        $connection = $this->connection();
+        $sql        = 'DELETE FROM ' . $this->inboundTable() . ' WHERE message_key = ?';
+        $key        = self::key($profile, $internetMessageId);
+
         try {
-            $this->connection()->executeStatement('DELETE FROM ' . $this->inboundTable() . ' WHERE message_key = ?', [self::key($profile, $internetMessageId)]);
-        } catch (Throwable) {
-            // The stale-claim timeout releases it.
+            $connection->executeStatement($sql, [$key]);
+        } catch (Throwable $failure) {
+            if ($connection->isTransactionActive() || !StorageConflicts::isTransient($failure)) {
+                throw $failure;
+            }
+            $connection->executeStatement($sql, [$key]);
         }
     }
 

@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.13.0](#to-1130)
   - [Lock conflicts answer 409](#lock-conflicts-answer-409)
   - [Lock conflicts are no longer swallowed](#lock-conflicts-are-no-longer-swallowed)
   - [Graph inbound: a failed decision write keeps the claim](#graph-inbound-a-failed-decision-write-keeps-the-claim)
@@ -45,6 +46,14 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+## To 1.13.0
+
+From **1.12.2**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
 
 Target **1.13.0** (minor), from **1.12.x**:
 

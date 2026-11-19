@@ -14,6 +14,7 @@ use Doctrine\Persistence\ManagerRegistry;
 use Nowo\MailKitBundle\Concurrency\StorageConflicts;
 use Nowo\MailKitBundle\Event\MailOpenedEvent;
 use Nowo\MailKitBundle\EventListener\MailKitConflictListener;
+use Nowo\MailKitBundle\Graph\Inbound\InboundAction;
 use Nowo\MailKitBundle\Graph\Inbound\Store\GraphInboundStore;
 use Nowo\MailKitBundle\Tests\Support\StatementHookMiddleware;
 use Nowo\MailKitBundle\Tracking\Http\TrackingPixelController;
@@ -205,6 +206,53 @@ final class ConcurrencyRaceTest extends TestCase
         self::assertSame(2, (int) $this->a->fetchOne('SELECT n FROM ' . self::PREFIX . 'probe WHERE id = 1'), 'The host transaction committed its own work.');
         self::assertSame(0, $this->rows('mail_kit_graph_inbound'));
         self::assertSame(0, $this->rows('mail_kit_graph_delta'));
+    }
+
+    public function testALockTimeoutOnAnUpdateOrDeleteInsideAHostTransactionLeavesItUsable(): void
+    {
+        $storeA = $this->inbound($this->a);
+        $storeB = $this->inbound($this->b);
+
+        // Audit UE2-MK-1. The rows exist (committed); A holds them with SELECT ... FOR UPDATE. B runs the bundle's
+        // UPDATE / DELETE writes inside its own (host) transaction: each one times out on A's row lock, its savepoint is
+        // rolled back, and B's next statement still works (PostgreSQL aborts the whole transaction otherwise).
+        self::assertTrue($storeA->claim('acme', 'held@x', 900));
+        $storeA->saveDeltaLink('acme', 'https://graph.microsoft.com/v1.0/from-a');
+        $key = GraphInboundStore::key('acme', 'held@x');
+
+        $this->a->beginTransaction();
+        $this->a->fetchAllAssociative('SELECT profile FROM ' . self::PREFIX . 'mail_kit_graph_delta WHERE profile = ? FOR UPDATE', ['acme']);
+        $this->a->fetchAllAssociative('SELECT message_key FROM ' . self::PREFIX . 'mail_kit_graph_inbound WHERE message_key = ? FOR UPDATE', [$key]);
+
+        $this->b->beginTransaction();
+        $this->b->executeStatement('UPDATE ' . self::PREFIX . 'probe SET n = n + 1 WHERE id = ?', [1]);
+        foreach ([
+            static fn () => $storeB->saveDeltaLink('acme', 'https://graph.microsoft.com/v1.0/from-b'),
+            static fn () => $storeB->complete('acme', 'held@x', InboundAction::Route),
+            static fn () => $storeB->release('acme', 'held@x'),
+            static fn (): bool => $storeB->claim('acme', 'held@x', -1),
+        ] as $write) {
+            $failure = $this->expectFailure($write);
+            self::assertTrue(StorageConflicts::isConflict($failure), $failure::class);
+            self::assertSame(ConflictCode::RetrySafe, StorageConflicts::code(new Request(), $failure));
+            self::assertTrue($this->b->isTransactionActive());
+            $this->assertUsable($this->b);
+        }
+        $this->b->executeStatement('UPDATE ' . self::PREFIX . 'probe SET n = n + 1 WHERE id = ?', [1]);
+        $this->b->commit();
+        $this->a->rollBack();
+
+        self::assertSame(2, (int) $this->a->fetchOne('SELECT n FROM ' . self::PREFIX . 'probe WHERE id = 1'), 'The host transaction committed its own work.');
+        self::assertSame('https://graph.microsoft.com/v1.0/from-a', $storeA->deltaLink('acme'));
+        self::assertSame(GraphInboundStore::STATUS_PROCESSING, $this->a->fetchOne('SELECT status FROM ' . self::PREFIX . 'mail_kit_graph_inbound WHERE message_key = ?', [$key]));
+
+        // A has let go: the same writes now succeed inside B's transaction.
+        $this->b->beginTransaction();
+        $storeB->saveDeltaLink('acme', 'https://graph.microsoft.com/v1.0/from-b');
+        $storeB->complete('acme', 'held@x', InboundAction::Discard);
+        $this->b->commit();
+        self::assertSame('https://graph.microsoft.com/v1.0/from-b', $storeA->deltaLink('acme'));
+        self::assertSame('discard', $this->a->fetchOne('SELECT status FROM ' . self::PREFIX . 'mail_kit_graph_inbound WHERE message_key = ?', [$key]));
     }
 
     public function testASubscriptionSwapWhoseInsertFailsKeepsTheOldSubscription(): void

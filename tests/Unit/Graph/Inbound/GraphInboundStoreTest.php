@@ -193,6 +193,57 @@ final class GraphInboundStoreTest extends TestCase
         self::assertSame(0, (int) $connection->fetchOne('SELECT COUNT(*) FROM mail_kit_graph_inbound'));
     }
 
+    public function testAnyUpdateOrDeleteFailureInsideATransactionRollsBackItsSavepoint(): void
+    {
+        // Audit UE2-MK-1: a lock conflict on the delta UPDATE, the stale-claim UPDATE, complete() or release() must not
+        // leave the host transaction aborted (PostgreSQL); the failure is rethrown after the rollback to the savepoint.
+        /** @var ArrayObject<string, mixed> $state */
+        $state = new ArrayObject(['prefix' => null, 'drop' => false, 'store' => null]);
+        $store = $this->hookedStore(static function (string $sql) use ($state): void {
+            if (is_string($state['prefix']) && str_starts_with($sql, $state['prefix'])) {
+                if ($state['drop'] === true && $state['store'] instanceof GraphInboundStore) {
+                    // As after a MySQL deadlock: the server already dropped the savepoint.
+                    $state['store']->connection()->executeStatement('RELEASE SAVEPOINT nowo_mail_kit_graph_write');
+                }
+
+                throw StorageFailures::lockWaitTimeout();
+            }
+        });
+        $state['store'] = $store;
+        $connection     = $store->connection();
+        self::assertTrue($store->claim('acme', 'id@x', 0));
+        $store->saveDeltaLink('acme', 'https://graph.microsoft.com/v1.0/a');
+
+        foreach ([
+            ['UPDATE mail_kit_graph_delta', static fn () => $store->saveDeltaLink('acme', 'https://graph.microsoft.com/v1.0/b'), false],
+            ['UPDATE mail_kit_graph_inbound SET claimed_at', static fn (): bool => $store->claim('acme', 'id@x', -1), false],
+            ['UPDATE mail_kit_graph_inbound SET status', static fn () => $store->complete('acme', 'id@x', InboundAction::Route), false],
+            ['DELETE FROM mail_kit_graph_inbound', static fn () => $store->release('acme', 'id@x'), false],
+            ['DELETE FROM mail_kit_graph_inbound', static fn () => $store->release('acme', 'id@x'), true],
+        ] as [$prefix, $write, $drop]) {
+            $connection->beginTransaction();
+            $connection->insert('mail_kit_graph_delta', ['profile' => 'host-row', 'delta_link' => 'x', 'updated_at' => 1]);
+            $state['prefix'] = $prefix;
+            $state['drop']   = $drop;
+            $this->assertTransientFailure($write);
+            $state['prefix'] = null;
+            self::assertTrue($connection->isTransactionActive());
+            self::assertSame(1, (int) $connection->fetchOne('SELECT COUNT(*) FROM mail_kit_graph_delta WHERE profile = ?', ['host-row']), 'The host transaction goes on.');
+            $connection->rollBack();
+        }
+        self::assertSame('https://graph.microsoft.com/v1.0/a', $store->deltaLink('acme'));
+        self::assertSame('processing', $connection->fetchOne('SELECT status FROM mail_kit_graph_inbound'));
+
+        // The same writes succeed inside a transaction (savepoint released) and commit with it.
+        $connection->beginTransaction();
+        $store->saveDeltaLink('acme', 'https://graph.microsoft.com/v1.0/c');
+        $store->complete('acme', 'id@x', InboundAction::Discard);
+        $connection->commit();
+        self::assertSame('https://graph.microsoft.com/v1.0/c', $store->deltaLink('acme'));
+        self::assertSame('discard', $connection->fetchOne('SELECT status FROM mail_kit_graph_inbound'));
+        self::assertSame(0, $connection->getTransactionNestingLevel());
+    }
+
     public function testCompleteRetriesOneLockConflictOutsideATransaction(): void
     {
         $budget = new ArrayObject([1]);

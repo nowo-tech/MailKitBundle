@@ -6,16 +6,17 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+  - [Fixed](#fixed)
 - [[1.13.0] - 2026-11-19](#1130---2026-11-19)
   - [Added](#added)
   - [Changed](#changed)
-  - [Fixed](#fixed)
+  - [Fixed](#fixed-1)
   - [Demo](#demo)
 - [[1.12.2] - 2026-11-14](#1122---2026-11-14)
-  - [Fixed](#fixed-1)
+  - [Fixed](#fixed-2)
 - [[1.12.1] - 2026-11-14](#1121---2026-11-14)
   - [Added](#added-1)
-  - [Fixed](#fixed-2)
+  - [Fixed](#fixed-3)
 - [[1.12.0] - 2026-11-14](#1120---2026-11-14)
   - [Added](#added-2)
   - [Changed](#changed-1)
@@ -25,15 +26,15 @@ All notable changes to this project are documented here. The format follows
   - [Tests](#tests-1)
   - [Documentation](#documentation)
 - [[1.10.2] - 2026-11-12](#1102---2026-11-12)
-  - [Fixed](#fixed-3)
-- [[1.10.1] - 2026-11-12](#1101---2026-11-12)
   - [Fixed](#fixed-4)
+- [[1.10.1] - 2026-11-12](#1101---2026-11-12)
+  - [Fixed](#fixed-5)
 - [[1.10.0] - 2026-11-12](#1100---2026-11-12)
   - [Added](#added-3)
   - [Changed](#changed-3)
   - [Tests](#tests-2)
 - [[1.9.1] - 2026-11-12](#191---2026-11-12)
-  - [Fixed](#fixed-5)
+  - [Fixed](#fixed-6)
   - [Security](#security)
 - [[1.9.0] - 2026-11-12](#190---2026-11-12)
   - [Added](#added-4)
@@ -47,7 +48,7 @@ All notable changes to this project are documented here. The format follows
   - [Security](#security-2)
   - [Tests](#tests-4)
 - [[1.7.1] - 2026-11-11](#171---2026-11-11)
-  - [Fixed](#fixed-6)
+  - [Fixed](#fixed-7)
   - [Tests](#tests-5)
   - [Documentation](#documentation-1)
 - [[1.7.0] - 2026-11-11](#170---2026-11-11)
@@ -69,11 +70,11 @@ All notable changes to this project are documented here. The format follows
 - [[1.2.0] - 2026-11-02](#120---2026-11-02)
   - [Added](#added-11)
   - [Changed](#changed-9)
-  - [Fixed](#fixed-7)
+  - [Fixed](#fixed-8)
 - [[1.1.1] - 2026-11-01](#111---2026-11-01)
   - [Security](#security-5)
   - [Changed](#changed-10)
-  - [Fixed](#fixed-8)
+  - [Fixed](#fixed-9)
 - [[1.1.0] - 2026-11-01](#110---2026-11-01)
   - [Added](#added-12)
   - [Changed](#changed-11)
@@ -83,6 +84,16 @@ All notable changes to this project are documented here. The format follows
   - [Security (re-verification follow-ups)](#security-re-verification-follow-ups)
 
 ## [Unreleased]
+
+### Fixed
+
+- **Graph inbound writes no longer abort the host's transaction on a lock conflict (audit UE2-MK-1).** Inside an open
+  host transaction, the delta-link `UPDATE`s of `GraphInboundStore::saveDeltaLink()`, the stale-claim `UPDATE` of
+  `claim()`, and the statements of `complete()` and `release()` now run in a savepoint, like the claim and delta-link
+  `INSERT`s already did. A lock wait timeout, deadlock or serialization failure rolls back only that savepoint and is
+  rethrown unchanged, so the host's PostgreSQL transaction stays usable. The conflict codes and the retry rules
+  (one retry outside a transaction, none inside) are unchanged. Two-connection race test on MySQL 8.4, MariaDB 11.4
+  and PostgreSQL 16.
 
 ## [1.13.0] - 2026-11-19
 

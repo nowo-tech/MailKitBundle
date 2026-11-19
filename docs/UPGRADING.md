@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.13.1](#to-1131)
 - [To 1.13.0](#to-1130)
   - [Lock conflicts answer 409](#lock-conflicts-answer-409)
   - [Lock conflicts are no longer swallowed](#lock-conflicts-are-no-longer-swallowed)
@@ -46,6 +47,14 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+## To 1.13.1
+
+From **1.13.0**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
 
 ## To 1.13.0
 

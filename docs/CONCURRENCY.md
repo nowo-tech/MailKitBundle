@@ -35,11 +35,11 @@ request or a replayed Messenger message. It applies from **1.13.0**.
 | GDPR erasure of an address (`forgetAddress()` / `erase()`) | One transaction (`transactional()`), or the caller's | Exact re-check in PHP of every pre-filtered row; delete by id in batches of 500 | Exception to the caller (UserKit eraser, `nowo:mail-kit:forget-recipient`) |
 | Log retention (`purgeBefore()`, `nowo:mail-kit:purge`) | One `DELETE` per keyset batch | Idempotent (delete by id) | Exception to the command; run it again |
 | Graph inbound claim (`GraphInboundStore::claim()`) | One `INSERT`; inside a host transaction it runs in a savepoint, rolled back on any failure | Unique `message_key` plus a caught duplicate; stale takeover with a conditional `UPDATE … WHERE claimed_at < ?` | Messenger retries; the retry sees the claim |
-| Graph inbound decision (`complete()`) | One `UPDATE` | By key; one retry on a lock conflict outside a transaction | Rethrown, and the claim is kept (no second hand-over to your handler) |
-| Graph inbound release (`release()`) | One `DELETE` | By key; one retry on a lock conflict outside a transaction | Thrown (no longer swallowed); the processor logs it and rethrows your failure |
+| Graph inbound decision (`complete()`) | One `UPDATE`, in a savepoint inside a host transaction | By key; one retry on a lock conflict outside a transaction | Rethrown, and the claim is kept (no second hand-over to your handler) |
+| Graph inbound release (`release()`) | One `DELETE`, in a savepoint inside a host transaction | By key; one retry on a lock conflict outside a transaction | Thrown (no longer swallowed); the processor logs it and rethrows your failure |
 | Graph subscription swap (`saveSubscription()`) | **One transaction**: `DELETE` the profile's rows and `INSERT` the new one (1.13) | All or nothing | `TransientStorageFailure` after the rollback; Messenger or the command retries |
 | Graph subscription renewal and removal | One `UPDATE` or `DELETE` by id | By id | Exception to Messenger or the command |
-| Graph delta link (`saveDeltaLink()`) | `UPDATE`, else an `INSERT` (in a savepoint inside a transaction, rolled back on any failure) | Unique `profile`, duplicate caught and followed by the `UPDATE` (1.13; it used to be a check-then-insert) | Exception to Messenger or the command |
+| Graph delta link (`saveDeltaLink()`) | `UPDATE`, else an `INSERT` (each in a savepoint inside a transaction, rolled back on any failure) | Unique `profile`, duplicate caught and followed by the `UPDATE` (1.13; it used to be a check-then-insert) | Exception to Messenger or the command |
 | Graph inbound retention (`purge()`) | One `DELETE` | Idempotent | Exception to Messenger |
 | Graph webhook (`GraphWebhookController`) | Writes nothing itself; it only dispatches messages | — | 409: `CONFLICT_001` when the first dispatch fails, `CONFLICT_002` when part of the batch was already queued |
 | Tracking send row (`TrackingStore::createSend()`) | One `INSERT`, in a savepoint inside a host transaction | New random send id | A lock conflict is rethrown (nothing was sent yet); any other failure sends the e-mail untracked |
@@ -109,7 +109,9 @@ or to Messenger.
 
 ## Savepoints inside your transaction
 
-When your transaction is open, the claim and the delta-link `INSERT` run in their own savepoint. The savepoint is
+When your transaction is open, every Graph inbound write runs in its own savepoint: the claim `INSERT` and its
+stale-claim `UPDATE`, the delta-link `UPDATE` and `INSERT`, and the `complete()` / `release()` statements (the last
+three since audit UE2-MK-1). The savepoint is
 rolled back on **any** failure: a duplicate key (then caught), a lock wait timeout, a deadlock or a serialization
 failure (then rethrown). Your PostgreSQL transaction therefore never stays aborted, and your next statement works.
 On MySQL / MariaDB a deadlock rolls back your whole transaction anyway; the original failure is rethrown even when

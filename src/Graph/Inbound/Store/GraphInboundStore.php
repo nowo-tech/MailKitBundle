@@ -36,8 +36,9 @@ use function is_string;
  * - `<prefix>mail_kit_graph_inbound`: idempotency records, keyed by SHA-256(profile, internetMessageId) — no address,
  *   subject or id in clear.
  *
- * Times are UNIX seconds (BIGINT). A claim inside an open host transaction runs in a savepoint, so a duplicate key
- * never aborts the host's transaction (PostgreSQL).
+ * Times are UNIX seconds (BIGINT). Inside an open host transaction every inbound write (the claim, the delta link,
+ * complete, release) runs in a savepoint, so a duplicate key or a lock conflict never aborts the host's transaction
+ * (PostgreSQL); the failure is rethrown after the rollback to the savepoint (audit UE2-MK-1).
  */
 final class GraphInboundStore
 {
@@ -47,6 +48,8 @@ final class GraphInboundStore
     private const SAVEPOINT = 'nowo_mail_kit_graph_claim';
 
     private const DELTA_SAVEPOINT = 'nowo_mail_kit_graph_delta';
+
+    private const WRITE_SAVEPOINT = 'nowo_mail_kit_graph_write';
 
     /**
      * @param string|null $connectionName DBAL connection (null = default)
@@ -170,7 +173,8 @@ final class GraphInboundStore
      * Stores the delta (or next) link of a profile: an UPDATE, else an INSERT whose duplicate key (a concurrent sweep
      * of the same profile stored it first) is caught and followed by the UPDATE (1.13, REQ-RUNTIME-003 rule 4; it was a
      * check-then-insert that failed on that race). Inside an open transaction the INSERT runs in a savepoint, so the
-     * duplicate key never aborts the caller's transaction (PostgreSQL).
+     * duplicate key never aborts the caller's transaction (PostgreSQL); so do both UPDATEs (audit UE2-MK-1: a lock
+     * timeout on the row no longer leaves the caller's transaction aborted).
      */
     public function saveDeltaLink(string $profile, string $link): void
     {
@@ -179,11 +183,11 @@ final class GraphInboundStore
         $sql        = 'UPDATE ' . $this->deltaTable() . ' SET delta_link = ?, updated_at = ? WHERE profile = ?';
         // MySQL / MariaDB count changed rows only: 0 also when the same link is stored again in the same second; the
         // INSERT then meets the existing key and the second UPDATE is a no-op.
-        if ($connection->executeStatement($sql, [$link, $now, $profile]) > 0) {
+        if ($this->write($connection, $sql, [$link, $now, $profile]) > 0) {
             return;
         }
         if (!$this->insertOnce($connection, self::DELTA_SAVEPOINT, $this->deltaTable(), ['profile' => $profile, 'delta_link' => $link, 'updated_at' => $now])) {
-            $connection->executeStatement($sql, [$link, $now, $profile]);
+            $this->write($connection, $sql, [$link, $now, $profile]);
         }
     }
 
@@ -214,14 +218,16 @@ final class GraphInboundStore
             return true;
         }
 
-        return $connection->executeStatement(
+        return $this->write(
+            $connection,
             'UPDATE ' . $this->inboundTable() . ' SET claimed_at = ? WHERE message_key = ? AND status = ? AND claimed_at < ?',
             [$now, $key, self::STATUS_PROCESSING, $now - $staleAfter],
         ) === 1;
     }
 
     /**
-     * Records the host's decision for a claimed message.
+     * Records the host's decision for a claimed message. Inside an open transaction the UPDATE runs in a savepoint and a
+     * failure is thrown at once (audit UE2-MK-1: the caller's transaction stays usable on PostgreSQL).
      */
     public function complete(string $profile, string $internetMessageId, InboundAction $action): void
     {
@@ -230,7 +236,7 @@ final class GraphInboundStore
         $params     = [$action->value, $this->now(), self::key($profile, $internetMessageId)];
 
         try {
-            $connection->executeStatement($sql, $params);
+            $this->write($connection, $sql, $params);
         } catch (Throwable $failure) {
             // 1.13 (audit UE-MK-4): one retry of a lock conflict outside a transaction; the host already handled the
             // message, so a lost decision would keep the claim until the stale-claim timeout.
@@ -244,7 +250,8 @@ final class GraphInboundStore
     /**
      * Forgets a claim (processing failed: the message is processed again on the next delivery). 1.13 (REQ-RUNTIME-003
      * rule 8): a lock conflict outside a transaction is retried once; any other failure, or a second conflict, is
-     * thrown instead of swallowed (the caller logs it; the stale-claim timeout releases the claim then).
+     * thrown instead of swallowed (the caller logs it; the stale-claim timeout releases the claim then). Inside an open
+     * transaction the DELETE runs in a savepoint (audit UE2-MK-1).
      */
     public function release(string $profile, string $internetMessageId): void
     {
@@ -253,7 +260,7 @@ final class GraphInboundStore
         $key        = self::key($profile, $internetMessageId);
 
         try {
-            $connection->executeStatement($sql, [$key]);
+            $this->write($connection, $sql, [$key]);
         } catch (Throwable $failure) {
             if ($connection->isTransactionActive() || !StorageConflicts::isTransient($failure)) {
                 throw $failure;
@@ -298,6 +305,36 @@ final class GraphInboundStore
 
             return false;
         }
+    }
+
+    /**
+     * Runs one write statement; inside an open transaction it runs in a savepoint that is rolled back on any failure
+     * (audit UE2-MK-1), so a lock wait timeout, a deadlock or a serialization failure never leaves the caller's
+     * PostgreSQL transaction aborted. The failure is rethrown unchanged after that rollback. Returns the affected rows.
+     *
+     * @param list<mixed> $params
+     */
+    private function write(Connection $connection, string $sql, array $params): int
+    {
+        if (!$connection->isTransactionActive()) {
+            return (int) $connection->executeStatement($sql, $params);
+        }
+        $connection->createSavepoint(self::WRITE_SAVEPOINT);
+
+        try {
+            $count = (int) $connection->executeStatement($sql, $params);
+        } catch (Throwable $failure) {
+            try {
+                $connection->rollbackSavepoint(self::WRITE_SAVEPOINT);
+            } catch (Throwable) {
+                // The savepoint is gone (MySQL / MariaDB drop them on a deadlock): the original failure tells.
+            }
+
+            throw $failure;
+        }
+        $connection->releaseSavepoint(self::WRITE_SAVEPOINT);
+
+        return $count;
     }
 
     /**

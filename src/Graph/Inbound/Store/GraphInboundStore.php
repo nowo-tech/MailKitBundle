@@ -182,20 +182,7 @@ final class GraphInboundStore
         if ($connection->executeStatement($sql, [$link, $now, $profile]) > 0) {
             return;
         }
-        $nested = $connection->isTransactionActive();
-        if ($nested) {
-            $connection->createSavepoint(self::DELTA_SAVEPOINT);
-        }
-
-        try {
-            $connection->insert($this->deltaTable(), ['profile' => $profile, 'delta_link' => $link, 'updated_at' => $now]);
-            if ($nested) {
-                $connection->releaseSavepoint(self::DELTA_SAVEPOINT);
-            }
-        } catch (UniqueConstraintViolationException) {
-            if ($nested) {
-                $connection->rollbackSavepoint(self::DELTA_SAVEPOINT);
-            }
+        if (!$this->insertOnce($connection, self::DELTA_SAVEPOINT, $this->deltaTable(), ['profile' => $profile, 'delta_link' => $link, 'updated_at' => $now])) {
             $connection->executeStatement($sql, [$link, $now, $profile]);
         }
     }
@@ -217,28 +204,14 @@ final class GraphInboundStore
         $connection = $this->connection();
         $key        = self::key($profile, $internetMessageId);
         $now        = $this->now();
-        $nested     = $connection->isTransactionActive();
-        if ($nested) {
-            $connection->createSavepoint(self::SAVEPOINT);
-        }
-
-        try {
-            $connection->insert($this->inboundTable(), [
-                'message_key'  => $key,
-                'profile'      => $profile,
-                'status'       => self::STATUS_PROCESSING,
-                'claimed_at'   => $now,
-                'completed_at' => null,
-            ]);
-            if ($nested) {
-                $connection->releaseSavepoint(self::SAVEPOINT);
-            }
-
+        if ($this->insertOnce($connection, self::SAVEPOINT, $this->inboundTable(), [
+            'message_key'  => $key,
+            'profile'      => $profile,
+            'status'       => self::STATUS_PROCESSING,
+            'claimed_at'   => $now,
+            'completed_at' => null,
+        ])) {
             return true;
-        } catch (UniqueConstraintViolationException) {
-            if ($nested) {
-                $connection->rollbackSavepoint(self::SAVEPOINT);
-            }
         }
 
         return $connection->executeStatement(
@@ -252,10 +225,20 @@ final class GraphInboundStore
      */
     public function complete(string $profile, string $internetMessageId, InboundAction $action): void
     {
-        $this->connection()->executeStatement(
-            'UPDATE ' . $this->inboundTable() . ' SET status = ?, completed_at = ? WHERE message_key = ?',
-            [$action->value, $this->now(), self::key($profile, $internetMessageId)],
-        );
+        $connection = $this->connection();
+        $sql        = 'UPDATE ' . $this->inboundTable() . ' SET status = ?, completed_at = ? WHERE message_key = ?';
+        $params     = [$action->value, $this->now(), self::key($profile, $internetMessageId)];
+
+        try {
+            $connection->executeStatement($sql, $params);
+        } catch (Throwable $failure) {
+            // 1.13 (audit UE-MK-4): one retry of a lock conflict outside a transaction; the host already handled the
+            // message, so a lost decision would keep the claim until the stale-claim timeout.
+            if ($connection->isTransactionActive() || !StorageConflicts::isTransient($failure)) {
+                throw $failure;
+            }
+            $connection->executeStatement($sql, $params);
+        }
     }
 
     /**
@@ -276,6 +259,44 @@ final class GraphInboundStore
                 throw $failure;
             }
             $connection->executeStatement($sql, [$key]);
+        }
+    }
+
+    /**
+     * Inserts one row; false when its key already exists (a concurrent writer stored it first). Inside an open
+     * transaction the INSERT runs in a savepoint that is rolled back on **any** failure (1.13, audit UE-MK-1): a
+     * duplicate key, a lock wait timeout, a deadlock or a serialization failure never leaves the caller's PostgreSQL
+     * transaction aborted. Failures other than the duplicate key are rethrown after that rollback.
+     *
+     * @param array<string, mixed> $row
+     */
+    private function insertOnce(Connection $connection, string $savepoint, string $table, array $row): bool
+    {
+        $nested = $connection->isTransactionActive();
+        if ($nested) {
+            $connection->createSavepoint($savepoint);
+        }
+
+        try {
+            $connection->insert($table, $row);
+            if ($nested) {
+                $connection->releaseSavepoint($savepoint);
+            }
+
+            return true;
+        } catch (Throwable $failure) {
+            if ($nested) {
+                try {
+                    $connection->rollbackSavepoint($savepoint);
+                } catch (Throwable) {
+                    // The savepoint is gone (MySQL / MariaDB drop them on a deadlock): the original failure tells.
+                }
+            }
+            if (!$failure instanceof UniqueConstraintViolationException) {
+                throw $failure;
+            }
+
+            return false;
         }
     }
 

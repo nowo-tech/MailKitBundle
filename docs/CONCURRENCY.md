@@ -10,6 +10,7 @@ request or a replayed Messenger message. It applies from **1.13.0**.
 - [What MailKit does not store](#what-mailkit-does-not-store)
 - [Conflict answer and codes](#conflict-answer-and-codes)
 - [Host options](#host-options)
+- [Savepoints inside your transaction](#savepoints-inside-your-transaction)
 - [Failures that are not swallowed](#failures-that-are-not-swallowed)
 - [Tests](#tests)
 - [Residual risks](#residual-risks)
@@ -33,12 +34,12 @@ request or a replayed Messenger message. It applies from **1.13.0**.
 | Sent-mail log row (`SentMailRecorder::queued/sent/failed`) | One `INSERT` (plus the optional body row), or one `UPDATE … attempts = attempts + 1` by id; autocommit | New UUIDv7 primary key; atomic counter | Best effort: a failure is logged and the e-mail is not affected (see [Residual risks](#residual-risks)) |
 | GDPR erasure of an address (`forgetAddress()` / `erase()`) | One transaction (`transactional()`), or the caller's | Exact re-check in PHP of every pre-filtered row; delete by id in batches of 500 | Exception to the caller (UserKit eraser, `nowo:mail-kit:forget-recipient`) |
 | Log retention (`purgeBefore()`, `nowo:mail-kit:purge`) | One `DELETE` per keyset batch | Idempotent (delete by id) | Exception to the command; run it again |
-| Graph inbound claim (`GraphInboundStore::claim()`) | One `INSERT`; inside a host transaction it runs in a savepoint | Unique `message_key` plus a caught duplicate; stale takeover with a conditional `UPDATE … WHERE claimed_at < ?` | Messenger retries; the retry sees the claim |
-| Graph inbound decision (`complete()`) | One `UPDATE` | By key | Rethrown, and the claim is kept (no second hand-over to your handler) |
+| Graph inbound claim (`GraphInboundStore::claim()`) | One `INSERT`; inside a host transaction it runs in a savepoint, rolled back on any failure | Unique `message_key` plus a caught duplicate; stale takeover with a conditional `UPDATE … WHERE claimed_at < ?` | Messenger retries; the retry sees the claim |
+| Graph inbound decision (`complete()`) | One `UPDATE` | By key; one retry on a lock conflict outside a transaction | Rethrown, and the claim is kept (no second hand-over to your handler) |
 | Graph inbound release (`release()`) | One `DELETE` | By key; one retry on a lock conflict outside a transaction | Thrown (no longer swallowed); the processor logs it and rethrows your failure |
 | Graph subscription swap (`saveSubscription()`) | **One transaction**: `DELETE` the profile's rows and `INSERT` the new one (1.13) | All or nothing | `TransientStorageFailure` after the rollback; Messenger or the command retries |
 | Graph subscription renewal and removal | One `UPDATE` or `DELETE` by id | By id | Exception to Messenger or the command |
-| Graph delta link (`saveDeltaLink()`) | `UPDATE`, else an `INSERT` (in a savepoint inside a transaction) | Unique `profile`, duplicate caught and followed by the `UPDATE` (1.13; it used to be a check-then-insert) | Exception to Messenger or the command |
+| Graph delta link (`saveDeltaLink()`) | `UPDATE`, else an `INSERT` (in a savepoint inside a transaction, rolled back on any failure) | Unique `profile`, duplicate caught and followed by the `UPDATE` (1.13; it used to be a check-then-insert) | Exception to Messenger or the command |
 | Graph inbound retention (`purge()`) | One `DELETE` | Idempotent | Exception to Messenger |
 | Graph webhook (`GraphWebhookController`) | Writes nothing itself; it only dispatches messages | — | 409: `CONFLICT_001` when the first dispatch fails, `CONFLICT_002` when part of the batch was already queued |
 | Tracking send row (`TrackingStore::createSend()`) | One `INSERT`, in a savepoint inside a host transaction | New random send id | A lock conflict is rethrown (nothing was sent yet); any other failure sends the e-mail untracked |
@@ -106,6 +107,14 @@ For a retrying runner around your own units, alias `TransactionRunnerInterface` 
 `nowo-tech/doctrine-deadlock-retry-bundle`. MailKit's own runner makes one attempt and leaves the retry to the client
 or to Messenger.
 
+## Savepoints inside your transaction
+
+When your transaction is open, the claim and the delta-link `INSERT` run in their own savepoint. The savepoint is
+rolled back on **any** failure: a duplicate key (then caught), a lock wait timeout, a deadlock or a serialization
+failure (then rethrown). Your PostgreSQL transaction therefore never stays aborted, and your next statement works.
+On MySQL / MariaDB a deadlock rolls back your whole transaction anyway; the original failure is rethrown even when
+the server already dropped the savepoint.
+
 ## Failures that are not swallowed
 
 Since 1.13 (rule 8), a lock conflict propagates where a replay is safe:
@@ -130,7 +139,10 @@ twice:
   - two workers claiming the same message (a lock wait, then the duplicate);
   - two sweeps storing the delta link of a new profile (an injected interleaving, and inside a transaction on
     PostgreSQL);
-  - a subscription swap under a held row lock (all or nothing);
+  - a subscription swap under a held row lock (all or nothing), and one whose `INSERT` fails (the old subscription
+    survives);
+  - a lock timeout on the claim and delta-link `INSERT` inside the host's transaction (the next statement still
+    works);
   - two pixels on the same send (409 `CONFLICT_001`, then both opens counted);
   - a listener conflict after the counted open (409 `CONFLICT_002`).
 
@@ -150,7 +162,7 @@ twice:
 - **A failed release keeps a claim.** If `release()` fails twice, the claim stays `processing`. Messenger's retry then
   skips the message as "already being processed", and it is handed over again only on a later delivery after
   `stale_claim_seconds`. The failure is logged at error level ("claim not released").
-- **A failed decision write keeps a claim.** If `complete()` fails after your handler handled the message, the claim
+- **A failed decision write keeps a claim.** If `complete()` fails twice after your handler handled the message, the claim
   stays `processing`. A later delivery after `stale_claim_seconds` hands the message over again. This is rare, and
   your handler should be idempotent (rule 7).
 - **Concurrent subscription swaps.** Two concurrent `ensure()` runs for one profile can each create a Graph

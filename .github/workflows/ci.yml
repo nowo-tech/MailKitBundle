@@ -105,6 +105,7 @@ jobs:
           - { name: 'PostgreSQL 16', image: 'postgres:16', port: 5432, scheme: postgresql, user: postgres, query: 'serverVersion=16&charset=utf8', health: 'pg_isready -U postgres' }
           # DBAL 3 (composer.json allows ^3.8 || ^4.0): the same tests with the lowest DBAL major.
           - { name: 'MySQL 8.4 (DBAL 3)', image: 'mysql:8.4', port: 3306, scheme: mysql, user: root, query: 'serverVersion=8.4&charset=utf8mb4', health: 'mysqladmin ping -h 127.0.0.1 -uroot -pci-throwaway', dbal: '3' }
+          - { name: 'PostgreSQL 16 (DBAL 3)', image: 'postgres:16', port: 5432, scheme: postgresql, user: postgres, query: 'serverVersion=16&charset=utf8', health: 'pg_isready -U postgres', dbal: '3' }
     services:
       db:
         image: ${{ matrix.db.image }}

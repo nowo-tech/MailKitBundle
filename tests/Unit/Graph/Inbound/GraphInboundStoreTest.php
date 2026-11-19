@@ -24,6 +24,7 @@ use Symfony\Component\Clock\MockClock;
 use Throwable;
 
 use function hash;
+use function is_string;
 use function str_starts_with;
 
 final class GraphInboundStoreTest extends TestCase
@@ -152,6 +153,77 @@ final class GraphInboundStoreTest extends TestCase
             self::assertCount(1, $deletes);
         } finally {
             $store->connection()->rollBack();
+        }
+    }
+
+    public function testAnyInsertFailureInsideATransactionRollsBackItsSavepoint(): void
+    {
+        // Audit UE-MK-1: a lock conflict on the INSERT (not only a duplicate key) must not leave the host transaction
+        // aborted (PostgreSQL); the failure is rethrown after the rollback to the savepoint.
+        /** @var ArrayObject<string, mixed> $state */
+        $state = new ArrayObject(['prefix' => null, 'drop' => null, 'store' => null]);
+        $store = $this->hookedStore(static function (string $sql) use ($state): void {
+            if (is_string($state['prefix']) && str_starts_with($sql, $state['prefix'])) {
+                if (is_string($state['drop']) && $state['store'] instanceof GraphInboundStore) {
+                    // As after a MySQL deadlock: the server already dropped the savepoint.
+                    $state['store']->connection()->executeStatement('RELEASE SAVEPOINT ' . $state['drop']);
+                }
+
+                throw StorageFailures::lockWaitTimeout();
+            }
+        });
+        $state['store'] = $store;
+        $connection     = $store->connection();
+
+        foreach ([
+            ['INSERT INTO mail_kit_graph_delta', static fn () => $store->saveDeltaLink('acme', 'https://graph.microsoft.com/v1.0/a'), null],
+            ['INSERT INTO mail_kit_graph_inbound', static fn (): bool => $store->claim('acme', 'id@x', 900), null],
+            ['INSERT INTO mail_kit_graph_inbound', static fn (): bool => $store->claim('acme', 'id@y', 900), 'nowo_mail_kit_graph_claim'],
+        ] as [$prefix, $write, $drop]) {
+            $connection->beginTransaction();
+            $connection->insert('mail_kit_graph_delta', ['profile' => 'host-row', 'delta_link' => 'x', 'updated_at' => 1]);
+            $state['prefix'] = $prefix;
+            $state['drop']   = $drop;
+            $this->assertTransientFailure($write);
+            $state['prefix'] = null;
+            self::assertTrue($connection->isTransactionActive());
+            self::assertSame(1, (int) $connection->fetchOne('SELECT COUNT(*) FROM mail_kit_graph_delta WHERE profile = ?', ['host-row']), 'The host transaction goes on.');
+            $connection->rollBack();
+        }
+        self::assertSame(0, (int) $connection->fetchOne('SELECT COUNT(*) FROM mail_kit_graph_inbound'));
+    }
+
+    public function testCompleteRetriesOneLockConflictOutsideATransaction(): void
+    {
+        $budget = new ArrayObject([1]);
+        $store  = $this->hookedStore(static function (string $sql) use ($budget): void {
+            if (str_starts_with($sql, 'UPDATE mail_kit_graph_inbound SET status') && $budget[0] > 0) {
+                --$budget[0];
+
+                throw StorageFailures::deadlock();
+            }
+        });
+        self::assertTrue($store->claim('acme', 'id@x', 900));
+        $store->complete('acme', 'id@x', InboundAction::Discard);
+        self::assertSame('discard', $store->connection()->fetchOne('SELECT status FROM mail_kit_graph_inbound'));
+
+        $budget[0] = 2;
+        $this->assertTransientFailure(static fn () => $store->complete('acme', 'id@x', InboundAction::Route));
+
+        $budget[0] = 1;
+        $store->connection()->beginTransaction();
+        try {
+            $this->assertTransientFailure(static fn () => $store->complete('acme', 'id@x', InboundAction::Route));
+            self::assertSame(0, $budget[0], 'No retry inside a transaction.');
+        } finally {
+            $store->connection()->rollBack();
+        }
+
+        $store->connection()->executeStatement('DROP TABLE mail_kit_graph_inbound');
+        try {
+            $store->complete('acme', 'id@x', InboundAction::Route);
+            self::fail('A non-transient failure is thrown at once.');
+        } catch (TableNotFoundException) {
         }
     }
 

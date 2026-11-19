@@ -175,6 +175,51 @@ final class ConcurrencyRaceTest extends TestCase
         self::assertSame(1, $this->rows('mail_kit_graph_subscription'));
     }
 
+    public function testALockTimeoutOnTheInsertInsideAHostTransactionLeavesItUsable(): void
+    {
+        $storeA = $this->inbound($this->a);
+        $storeB = $this->inbound($this->b);
+
+        // Audit UE-MK-1. A holds uncommitted rows on the keys B is about to insert. B runs the bundle's writes inside its
+        // own (host) transaction: each INSERT times out on A's key, the savepoint is rolled back, and B's next
+        // statement still works (PostgreSQL aborts the whole transaction otherwise). On MySQL / MariaDB the delta
+        // UPDATE may already wait on A's row; the host transaction survives either way.
+        $this->a->beginTransaction();
+        self::assertTrue($storeA->claim('acme', 'held@x', 900));
+        $storeA->saveDeltaLink('acme', 'https://graph.microsoft.com/v1.0/from-a');
+
+        $this->b->beginTransaction();
+        $this->b->executeStatement('UPDATE ' . self::PREFIX . 'probe SET n = n + 1 WHERE id = ?', [1]);
+        foreach ([
+            static fn (): bool => $storeB->claim('acme', 'held@x', 900),
+            static fn () => $storeB->saveDeltaLink('acme', 'https://graph.microsoft.com/v1.0/from-b'),
+        ] as $write) {
+            $failure = $this->expectFailure($write);
+            self::assertTrue(StorageConflicts::isConflict($failure), $failure::class);
+            $this->assertUsable($this->b);
+        }
+        $this->b->executeStatement('UPDATE ' . self::PREFIX . 'probe SET n = n + 1 WHERE id = ?', [1]);
+        $this->b->commit();
+        $this->a->rollBack();
+
+        self::assertSame(2, (int) $this->a->fetchOne('SELECT n FROM ' . self::PREFIX . 'probe WHERE id = 1'), 'The host transaction committed its own work.');
+        self::assertSame(0, $this->rows('mail_kit_graph_inbound'));
+        self::assertSame(0, $this->rows('mail_kit_graph_delta'));
+    }
+
+    public function testASubscriptionSwapWhoseInsertFailsKeepsTheOldSubscription(): void
+    {
+        // Audit UE-MK-2: the DELETE succeeds, the INSERT fails (the new id belongs to another profile): one rollback.
+        $storeB = $this->inbound($this->b);
+        $storeB->saveSubscription('sub-acme', 'acme', 'state-a', 2_000_000_000);
+        $storeB->saveSubscription('sub-globex', 'globex', 'state-g', 2_000_000_000);
+        $failure = $this->expectFailure(static fn () => $storeB->saveSubscription('sub-globex', 'acme', 'state-x', 2_100_000_000));
+        self::assertFalse(StorageConflicts::isConflict($failure), 'A duplicate id is a real error, not a conflict.');
+        self::assertSame(0, $this->b->getTransactionNestingLevel());
+        self::assertSame(['id' => 'sub-acme', 'expires_at' => 2_000_000_000], $this->inbound($this->a)->subscription('acme'));
+        self::assertSame(2, $this->rows('mail_kit_graph_subscription'));
+    }
+
     public function testTwoPixelsCountBothOpensAndALockWaitAnswersConflict001(): void
     {
         $storeA = $this->tracking($this->a);

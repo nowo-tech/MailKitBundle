@@ -93,9 +93,13 @@ All notable changes to this project are documented here. The format follows
   [CONCURRENCY.md](CONCURRENCY.md).
 - `conflict_response.status` (`409` default, or `503`) and `conflict_response.retry_after` (default `1`).
 - `docs/CONCURRENCY.md`: write-path table, codes, host options and residual risks.
-- Race tests on two real connections (MySQL 8.4, MariaDB 11.4, PostgreSQL 16 and 17): the inbound claim, the delta
-  link, the subscription swap, the open counter, and a listener conflict after a committed open. The real-database CI
-  job gains PostgreSQL 16 and runs them.
+- Race tests on two real connections (MySQL 8.4, MariaDB 11.4, PostgreSQL 16 and 17):
+  - the inbound claim, the delta link and the subscription swap (including a failed INSERT that keeps the old
+    subscription);
+  - a lock timeout on an INSERT inside the host's transaction;
+  - the open counter, and a listener conflict after a committed open.
+
+  The real-database CI job gains PostgreSQL 16 plus MySQL 8.4 and PostgreSQL 16 cells on DBAL 3, and runs them.
 - CI job "Dependency floor": the suites run with the lowest `nowo-tech/transaction-*` versions allowed, and the demo
   lock must install every `nowo-tech/*` requirement (`.scripts/check-demo-lock.py`).
 
@@ -124,6 +128,11 @@ All notable changes to this project are documented here. The format follows
   handled the message. A Messenger retry used to hand the message over a second time.
 - A lock conflict in the Graph webhook's dispatch loop, after part of the batch was queued, answers `CONFLICT_002`
   instead of a 500.
+- Inside an open transaction, the savepoint of the inbound claim and of the delta-link INSERT is now rolled back on
+  any failure, not only on a duplicate key. A lock wait timeout, deadlock or serialization failure on that INSERT no
+  longer leaves the caller's PostgreSQL transaction aborted. The failure is rethrown after the rollback (audit UE-MK-1).
+- `GraphInboundStore::complete()` retries a lock conflict once outside a transaction, so a decision is not lost to a
+  single lock wait (audit UE-MK-4).
 
 ### Demo
 

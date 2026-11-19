@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\MailKitBundle\TestMail;
 
+use Nowo\MailKitBundle\Concurrency\StorageConflicts;
 use Nowo\MailKitBundle\Dsn\RuntimeDsn;
 use Nowo\MailKitBundle\Log\ErrorScrubber;
 use Nowo\MailKitBundle\Mailer\DeliveryFailedException;
@@ -127,6 +128,11 @@ final readonly class TestMailSender
         try {
             $resend instanceof RuntimeDsn ? $this->transport->sendVia($resend, $email) : $this->transport->send($email);
         } catch (Throwable $exception) {
+            // 1.13 (REQ-RUNTIME-003 rule 6): a storage lock conflict before the send is not a delivery failure; it
+            // reaches MailKitConflictListener (409 + X-Conflict-Code on the admin action).
+            if (StorageConflicts::isConflict($exception)) {
+                throw $exception;
+            }
             $this->logger?->warning('Test e-mail failed.', ['bundle' => 'NowoMailKitBundle', 'channel' => $channel, 'transport' => $label, 'error' => $exception::class]);
 
             return new TestMailResult(TestMailOutcome::Failed, $recipient, $exception instanceof DeliveryFailedException ? $exception->getMessage() : ErrorScrubber::scrub($exception->getMessage()));

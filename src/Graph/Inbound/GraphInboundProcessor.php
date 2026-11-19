@@ -37,7 +37,8 @@ use const FILEINFO_MIME_TYPE;
  * Processes one inbound Graph message (1.9): fetches it (capped), claims it by internetMessageId (idempotency), reads
  * its attachments into capped temporary streams (type detected by content, names neutralised, limits applied),
  * normalises it, asks the host port for a decision and records it. Temporary streams are closed when the call ends.
- * A host exception releases the claim and is rethrown (Messenger retries).
+ * A host exception releases the claim and is rethrown (Messenger retries); a failure to store the decision after
+ * the host handled the message keeps the claim (no second hand-over) and is rethrown.
  *
  * Stateless (FrankenPHP worker mode); logs carry the profile, the decision and counts — never addresses, subjects,
  * bodies or file names.
@@ -143,9 +144,8 @@ final class GraphInboundProcessor
             }
             $message  = $this->normalizer->normalize($profile, $mailbox->address, $data, $attachments, $attachedMessage, $oversized);
             $decision = $this->handler->handle($message);
-            $this->store->complete($profile, $key, $decision->action);
         } catch (Throwable $exception) {
-            $this->store->release($profile, $key);
+            $this->releaseClaim($profile, $key);
             $this->logger?->warning('Microsoft Graph inbound message not processed; it will be retried.', ['bundle' => 'NowoMailKitBundle', 'profile' => $profile, 'error' => $exception::class]);
 
             throw $exception;
@@ -154,6 +154,11 @@ final class GraphInboundProcessor
                 $attachment->release();
             }
         }
+
+        // 1.13 (REQ-RUNTIME-003 rule 7): outside the try — the host has handled the message, so a failed write of the
+        // decision must not release the claim (a retry would hand the message over twice); it stays `processing` and
+        // the failure goes to Messenger, whose retry sees the claim and skips the message.
+        $this->store->complete($profile, $key, $decision->action);
 
         $rejected = 0;
         foreach ($attachments as $attachment) {
@@ -168,6 +173,19 @@ final class GraphInboundProcessor
         ]);
 
         return $decision;
+    }
+
+    /**
+     * Releases the claim of a message the host did not handle. A failed release is logged, never hides the host's
+     * failure (rethrown by the caller): the claim is then taken over after `stale_claim_seconds`.
+     */
+    private function releaseClaim(string $profile, string $key): void
+    {
+        try {
+            $this->store->release($profile, $key);
+        } catch (Throwable $failure) {
+            $this->logger?->error('Microsoft Graph inbound claim not released; the message is taken over after the stale-claim timeout.', ['bundle' => 'NowoMailKitBundle', 'profile' => $profile, 'error' => $failure::class]);
+        }
     }
 
     /**

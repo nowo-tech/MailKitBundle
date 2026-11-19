@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\MailKitBundle\Tests\Unit\TestMail;
 
+use Doctrine\DBAL\Exception\DeadlockException;
 use Nowo\MailKitBundle\Dsn\DsnHostGuard;
 use Nowo\MailKitBundle\Dsn\MailerDsnValidator;
 use Nowo\MailKitBundle\Mailer\RuntimeTransport;
@@ -17,7 +18,18 @@ use Nowo\MailKitBundle\Tests\Support\FakeSettings;
 use Nowo\MailKitBundle\Tests\Support\MemoryMailStore;
 use Nowo\MailKitBundle\Tests\Support\MemoryTransport;
 use Nowo\MailKitBundle\Tests\Support\MemoryTransportFactory;
+use Nowo\MailKitBundle\Tests\Support\ShortLinkRewriter;
 use Nowo\MailKitBundle\Tests\Support\StaticDsnProvider;
+use Nowo\MailKitBundle\Tests\Support\StorageFailures;
+use Nowo\MailKitBundle\Tests\Support\TrackingStoreTrait;
+use Nowo\MailKitBundle\Tracking\ConfiguredTrackableLinkFilter;
+use Nowo\MailKitBundle\Tracking\CredentialLinkDetector;
+use Nowo\MailKitBundle\Tracking\EmailTracker;
+use Nowo\MailKitBundle\Tracking\EmailTrackingPolicyInterface;
+use Nowo\MailKitBundle\Tracking\HtmlLinkTracker;
+use Nowo\MailKitBundle\Tracking\TrackingCandidate;
+use Nowo\MailKitBundle\Tracking\TrackingDecision;
+use Nowo\MailKitBundle\Tracking\TrackingTokenSigner;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Mailer\Transport;
 use Symfony\Component\Mime\Email;
@@ -27,6 +39,8 @@ use Symfony\Component\Security\Core\User\InMemoryUser;
 
 final class TestMailSenderTest extends TestCase
 {
+    use TrackingStoreTrait;
+
     private MemoryMailStore $store;
 
     protected function setUp(): void
@@ -77,6 +91,23 @@ final class TestMailSenderTest extends TestCase
         $failed = $this->sender(new FakeSettings(['mailer.from' => 'noreply@example.com']), dsn: 'memory://fail')->sendMailer('qa@example.com');
         self::assertSame(TestMailOutcome::Failed, $failed->outcome);
         self::assertStringContainsString('smtp://***@relay.example.com', (string) $failed->error);
+    }
+
+    public function testALockConflictBeforeTheSendIsNotAFailedTestMail(): void
+    {
+        $settings = new MailSettings(new FakeSettings(['mailer.from' => 'noreply@example.com']), false);
+        $policy   = new class implements EmailTrackingPolicyInterface {
+            public function decide(TrackingCandidate $candidate): TrackingDecision
+            {
+                throw StorageFailures::deadlock();
+            }
+        };
+        $tracker   = new EmailTracker($policy, new ShortLinkRewriter(), new ConfiguredTrackableLinkFilter([]), new CredentialLinkDetector(), new TrackingTokenSigner('test-tracking-secret-REDACTED-0000000000'), $this->trackingStore(), new HtmlLinkTracker(), 'https://app.example.com/e/o');
+        $factory   = new Transport([new MemoryTransportFactory($this->store)]);
+        $transport = new RuntimeTransport(new MemoryTransport('fallback', $this->store), new StaticDsnProvider(), new MailerDsnValidator(['memory'], new DsnHostGuard([], resolveDns: false), $factory), $factory, new SenderPolicy($settings), tracker: $tracker);
+
+        $this->expectException(DeadlockException::class);
+        (new TestMailSender($transport, $settings))->sendMailer('qa@example.com');
     }
 
     public function testResendChannel(): void

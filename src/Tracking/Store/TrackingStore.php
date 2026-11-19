@@ -11,6 +11,7 @@ use Doctrine\DBAL\ParameterType;
 use Doctrine\DBAL\Platforms\AbstractPlatform;
 use Doctrine\DBAL\Schema\Schema;
 use Doctrine\Persistence\ManagerRegistry;
+use Nowo\MailKitBundle\Concurrency\StorageConflicts;
 use Nowo\MailKitBundle\Doctrine\ExactCollation;
 use Nowo\MailKitBundle\Tracking\EmailTrackingPersonalDataInterface;
 use Nowo\MailKitBundle\Tracking\EmailTrackingReaderInterface;
@@ -72,11 +73,13 @@ final class TrackingStore implements EmailTrackingReaderInterface, EmailTracking
     }
 
     /**
-     * Stores a new send; false when it could not be stored (the e-mail then goes out untracked).
+     * Stores a new send; false when it could not be stored (the e-mail then goes out untracked). 1.13 (REQ-RUNTIME-003
+     * rule 8): a lock conflict (deadlock, lock wait timeout, serialization failure) is rethrown instead — this runs
+     * before the e-mail leaves, so the caller's unit (or Messenger) can replay the send without sending it twice.
      */
     public function createSend(string $sendId, ?string $templateId, ?string $recipientId, ?string $tenant, ?string $logId = null): bool
     {
-        return $this->guarded('create', fn (Connection $connection): int => (int) $connection->insert($this->table(), [
+        return $this->guarded('create', true, fn (Connection $connection): int => (int) $connection->insert($this->table(), [
             'send_id'            => $sendId,
             'log_id'             => $logId,
             'template_id'        => $templateId,
@@ -89,19 +92,21 @@ final class TrackingStore implements EmailTrackingReaderInterface, EmailTracking
     }
 
     /**
-     * Links a send to its sent-mail log row (best effort).
+     * Links a send to its sent-mail log row (best effort: it runs after the e-mail left, so any failure, a lock conflict
+     * included, is logged and not rethrown — a replay would send the e-mail twice).
      */
     public function attachLog(string $sendId, string $logId): void
     {
-        $this->guarded('attach', fn (Connection $connection): int => (int) $connection->executeStatement('UPDATE ' . $this->table() . ' SET log_id = ? WHERE send_id = ?', [$logId, $sendId]));
+        $this->guarded('attach', false, fn (Connection $connection): int => (int) $connection->executeStatement('UPDATE ' . $this->table() . ' SET log_id = ? WHERE send_id = ?', [$logId, $sendId]));
     }
 
     /**
-     * Forgets a send whose delivery failed (best effort).
+     * Forgets a send whose delivery failed (best effort: the delivery failure is what the caller sees; any failure
+     * here is logged).
      */
     public function discard(string $sendId): void
     {
-        $this->guarded('discard', fn (Connection $connection): int => (int) $connection->executeStatement('DELETE FROM ' . $this->table() . ' WHERE send_id = ?', [$sendId]));
+        $this->guarded('discard', false, fn (Connection $connection): int => (int) $connection->executeStatement('DELETE FROM ' . $this->table() . ' WHERE send_id = ?', [$sendId]));
     }
 
     /**
@@ -315,11 +320,14 @@ final class TrackingStore implements EmailTrackingReaderInterface, EmailTracking
     }
 
     /**
-     * Runs a write in a savepoint when the host has a transaction open; a failure is logged and returns 0.
+     * Runs a write in a savepoint when the host has a transaction open; a failure is logged and returns 0. A lock
+     * conflict is rethrown after the savepoint rollback (1.13, REQ-RUNTIME-003 rule 8) before the send
+     * (`$beforeSend`), and inside the host's transaction (MySQL / MariaDB roll the whole transaction back on a
+     * deadlock: the host must see it); after the send in autocommit it is logged like any other failure.
      *
      * @param callable(Connection): int $write
      */
-    private function guarded(string $operation, callable $write): int
+    private function guarded(string $operation, bool $beforeSend, callable $write): int
     {
         $connection = null;
         $nested     = false;
@@ -342,6 +350,9 @@ final class TrackingStore implements EmailTrackingReaderInterface, EmailTracking
                 } catch (Throwable) {
                     // The host transaction reports its own state.
                 }
+            }
+            if (($beforeSend || $nested) && StorageConflicts::isConflict($exception)) {
+                throw $exception;
             }
             $this->failed($operation, $exception);
 

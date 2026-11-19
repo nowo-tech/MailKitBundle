@@ -88,6 +88,7 @@ jobs:
 
 
   # CA L2: erasure and recipient search must work on every supported database, not only SQLite.
+  # REQ-RUNTIME-003 (1.13): the same jobs run the two-connection race tests (tests/Integration/Concurrency).
   database-platforms:
     name: Log on ${{ matrix.db.name }}
     runs-on: ubuntu-latest
@@ -101,6 +102,10 @@ jobs:
           - { name: 'MySQL 8.4', image: 'mysql:8.4', port: 3306, scheme: mysql, user: root, query: 'serverVersion=8.4&charset=utf8mb4', health: 'mysqladmin ping -h 127.0.0.1 -uroot -pci-throwaway' }
           - { name: 'MariaDB 11', image: 'mariadb:11.4', port: 3306, scheme: mysql, user: root, query: 'serverVersion=11.4.0-MariaDB&charset=utf8mb4', health: 'healthcheck.sh --connect' }
           - { name: 'PostgreSQL 17', image: 'postgres:17', port: 5432, scheme: postgresql, user: postgres, query: 'serverVersion=17&charset=utf8', health: 'pg_isready -U postgres' }
+          - { name: 'PostgreSQL 16', image: 'postgres:16', port: 5432, scheme: postgresql, user: postgres, query: 'serverVersion=16&charset=utf8', health: 'pg_isready -U postgres' }
+          # DBAL 3 (composer.json allows ^3.8 || ^4.0): the same tests with the lowest DBAL major.
+          - { name: 'MySQL 8.4 (DBAL 3)', image: 'mysql:8.4', port: 3306, scheme: mysql, user: root, query: 'serverVersion=8.4&charset=utf8mb4', health: 'mysqladmin ping -h 127.0.0.1 -uroot -pci-throwaway', dbal: '3' }
+          - { name: 'PostgreSQL 16 (DBAL 3)', image: 'postgres:16', port: 5432, scheme: postgresql, user: postgres, query: 'serverVersion=16&charset=utf8', health: 'pg_isready -U postgres', dbal: '3' }
     services:
       db:
         image: ${{ matrix.db.image }}
@@ -134,10 +139,64 @@ jobs:
       - name: Install dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
 
+      - name: Downgrade to DBAL 3
+        if: matrix.db.dbal == '3'
+        run: |
+          composer update doctrine/dbal --with 'doctrine/dbal:^3.8' --with-all-dependencies --prefer-dist --no-progress --no-interaction
+          composer show doctrine/dbal
+
       - name: Sent-mail log tests (recorder, erasure, search)
         run: |
           export MAIL_KIT_TEST_DATABASE_URL="${{ matrix.db.scheme }}://${{ matrix.db.user }}:${DB_CI_PASSWORD}@127.0.0.1:${{ matrix.db.port }}/mailkit?${{ matrix.db.query }}"
           vendor/bin/phpunit --no-coverage tests/Integration/Log
+
+      - name: Concurrency race tests (two connections, REQ-RUNTIME-003)
+        timeout-minutes: 10
+        run: |
+          export MAIL_KIT_TEST_DATABASE_URL="${{ matrix.db.scheme }}://${{ matrix.db.user }}:${DB_CI_PASSWORD}@127.0.0.1:${{ matrix.db.port }}/mailkit?${{ matrix.db.query }}"
+          vendor/bin/phpunit --no-coverage --fail-on-skipped tests/Integration/Concurrency
+
+  # Dependency floor: the code must work with the LOWEST nowo-tech/transaction-* versions composer.json allows (a host
+  # can run `composer update nowo-tech/mail-kit-bundle` without updating them), and the demo lock must install what the
+  # bundle requires (the demo installs from its lock, so a requirement added later is never installed and Demo smoke
+  # fails with "class not found").
+  deps-floor:
+    name: Dependency floor (nowo-tech/transaction-* lowest, demo lock)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Demo lock satisfies the bundle's nowo-tech requirements
+        run: python3 .scripts/check-demo-lock.py . --only 'nowo-tech/*'
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: json, pdo_sqlite, sodium
+          coverage: none
+          tools: composer:v2
+
+      - name: Install dependencies
+        run: |
+          composer config platform.php 8.4.1
+          composer update --prefer-dist --no-progress --no-interaction
+
+      - name: Downgrade nowo-tech/transaction-* to the lowest allowed versions
+        run: |
+          composer update 'nowo-tech/transaction-*' --prefer-lowest --prefer-dist --no-progress --no-interaction
+          composer show 'nowo-tech/transaction-*'
+
+      - name: PHPStan at the floor
+        run: composer phpstan
+
+      - name: Unit and integration suites at the floor
+        timeout-minutes: 15
+        env:
+          SYMFONY_DEPRECATIONS_HELPER: max[direct]=0
+        run: php -d memory_limit=2G vendor/bin/phpunit --no-coverage
 
   code-style:
     name: Code Style

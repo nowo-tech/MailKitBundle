@@ -17,6 +17,7 @@
 - [Boundary events](#boundary-events)
 - [Worker tests](#worker-tests)
 - [Host rule: entity managers](#host-rule-entity-managers)
+- [Concurrency](#concurrency)
 - [Usage recommendations in worker mode](#usage-recommendations-in-worker-mode)
 - [Re-audit triggers](#re-audit-triggers)
 
@@ -116,6 +117,14 @@ Static checks: `composer igor` (107 service files in 1.8, 0 KO, 0 WARN) and PHPS
 ## Host rule: entity managers
 
 A host that disables or bypasses the services resetter must also clear its **own** entity managers at every boundary (main request start or end, each Messenger message, each console command); otherwise the identity map serves stale rows (for example a downgraded permission or a soft-deleted item) across requests (REQ-RUNTIME-002 rule 7). MailKit writes its log through DBAL and reads Instance Settings rows with `HINT_REFRESH`, so it does not depend on the identity map itself.
+
+## Concurrency
+
+Simultaneous writes (two workers, retries, Messenger replays) are covered in [CONCURRENCY.md](CONCURRENCY.md)
+(REQ-RUNTIME-003, 1.13). It lists the write-path table, the 409 / `CONFLICT_001` / `CONFLICT_002` answer of MailKit's
+routes, and the residual risks. The conflict listener and `StorageConflicts` keep no state. The stores resolve
+their connection on every call, and the transaction runner is created per call. Nothing survives a request in worker
+mode with kernel reset off.
 
 ## Re-audit triggers
 

@@ -12,6 +12,21 @@ This bundle is **FrankenPHP worker mode friendly**.
 
 The transport built from the stored DSN is cached per DSN and dropped on `kernel.reset` and on `SettingsChangedEvent`; the DSN itself is read on every send, so a change saved in one worker is used by every worker on its next message. See [docs/FRANKENPHP-WORKER-AUDIT.md](docs/FRANKENPHP-WORKER-AUDIT.md). If your worker runs without `kernel.reset` (services resetter off), note that Symfony's own `mailer.message_logger_listener` keeps every sent message until a reset (about 3 KB per mail): reset it yourself, or remove it in prod (for example a compiler pass calling `$container->removeDefinition('mailer.message_logger_listener')` when the profiler is off).
 
+## Table of contents
+
+- [Screenshots](#screenshots)
+- [Features](#features)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Requirements](#requirements)
+- [Configuration](#configuration)
+- [Usage](#usage)
+- [Demo](#demo)
+- [Development](#development)
+- [Documentation](#documentation)
+- [Tests and coverage](#tests-and-coverage)
+- [License and author](#license-and-author)
+
 ## Screenshots
 
 <table>
@@ -32,7 +47,7 @@ The transport built from the stored DSN is cached per DSN and dropped on `kernel
 - **Runtime DSN** — `RuntimeTransport` decorates `mailer.transports` (used by the framework mailer **and** the Messenger `SendEmailMessage` handler): the DSN comes from the `mailer.dsn` setting (or the Resend key) on every send, the framework transport (`MAILER_DSN`) is the fallback, a message with an `X-Transport` header keeps its named transport. The built transport is cached per DSN and reset on `kernel.reset` / `SettingsChangedEvent` (worker safe). Replace the source with your own `MailerDsnProviderInterface`.
 - **DB-only mode** — map `bootstrap.mailer_dsn` / `bootstrap.resend_api_key` to `%env()%` once, run `nowo:instance-settings:seed-from-fallbacks` (InstanceSettings 1.2) and drop the env vars; the settings pages and `OutboundMailReadiness::missingFields()` warn when a required setting is empty.
 - **`MailerInterface` decorator** — fills the runtime **From** (`mailer.from` / `mailer.from_name`) and **Reply-To** when a message has none, before the framework mailer builds the envelope or queues it.
-- **Sender port** (1.5, framework-free since 1.12) — `SenderIdentityProviderInterface` (`defaultFrom()` / `defaultReplyTo()` return the bundle `MailAddress` value object, no Symfony Mime type) supplies the default **From** / **Reply-To** from your own domain (tenant, brand, your configuration); set `mailer.sender_provider` to its service id. The Mime-typed `SenderProviderInterface` keeps working, deprecated until 2.0 ([USAGE](docs/USAGE.md#using-it-from-a-ddd--hexagonal-application), [UPGRADING](docs/UPGRADING.md)).
+- **Sender port** (1.5, framework-free since 1.12) — `SenderIdentityProviderInterface` (`defaultFrom()` / `defaultReplyTo()` return the bundle `MailAddress` value object, no Symfony Mime type) supplies the default **From** / **Reply-To** from your own domain (tenant, brand, your configuration); set `mailer.sender_provider` to its service id. The Mime-typed `SenderProviderInterface` was removed in 2.0 ([USAGE](docs/USAGE.md#using-it-from-a-ddd--hexagonal-application), [UPGRADING](docs/UPGRADING.md)).
 - **Settings section** — `mailer`: DSN (encrypted secret), sender address and name, Reply-To, test recipient. With `resend.enabled` (1.3): a `provider` choice (`dsn` / `resend`) and only the selected provider's rows — the DSN for `dsn`, the Resend API key (encrypted) and sender for `resend` (InstanceSettings `visible_when`; hidden rows keep their values). Validated on save and import; never rendered back.
 - **DSN validation** — allow-listed schemes (SMTP + common provider bridges; `sendmail`, `native` and `null` always refused), parse and build check (missing bridge detected), host SSRF guard: private / loopback / link-local / reserved / cloud-metadata addresses and `localhost` / `*.local` / `*.internal` names refused, host names resolved with a bounded lookup; `allowed_hosts` for an internal relay. A refused DSN fails the send (no silent fallback).
 - **Redacted audit** — `MailerDsnAudit` (`scheme://host[:port]`, never credentials) in logs, the admin header and `SettingsChangedEvent` audit lines; transport errors are scrubbed of credentials before they are stored or shown.
@@ -45,13 +60,17 @@ The transport built from the stored DSN is cached per DSN and dropped on `kernel
 - **Microsoft Graph** (1.8, opt-in) — send from a Microsoft 365 shared mailbox with app-only credentials: `GraphMailSender` (plain value objects in, Graph id + internetMessageId out) or the `microsoft+graph://<profile>` mailer transport; own `Message-ID`, `In-Reply-To`, `References`, per-message (plus-address) Reply-To, streamed attachments with upload sessions from 2.9 MB; tokens cached in PSR-6, nothing kept per worker; host mailbox port for DDD apps ([USAGE](docs/USAGE.md#microsoft-graph-shared-mailbox), [owner setup](docs/MICROSOFT-GRAPH-SETUP.md)).
 - **Microsoft Graph inbound** (1.9, opt-in) — read the shared mailbox: change-notification webhook (validation echo, constant-time client state, caps, rate limit, enqueue only), subscriptions with renewal, delta sweep, and a normalised message (plus-address tags, threading ids, sanitised HTML, finfo-typed capped attachments, SPF / DKIM / DMARC, forwarded flag) handed to your route / quarantine / discard port, once per internetMessageId ([USAGE](docs/USAGE.md#inbound-mail-from-a-graph-mailbox)).
 - **Open and click tracking** (1.10, opt-in) — per-send opaque id, signed 1×1 pixel (`/e/o/{token}.gif`, stateless, always the GIF, human and machine opens apart, truncated IP, user-agent family only) and link rewriting through your short-link port; your policy decides per template and recipient, security e-mails, credential links and opted-out recipients are never tracked; retention purge and GDPR export / erasure ([USAGE](docs/USAGE.md#open-and-click-tracking)).
-- **Fail-closed wiring** — the container refuses to compile without Instance Settings (unless both the DSN and sender providers are host services, 1.6) or the framework mailer, with the UI on but no form CSRF, with an empty role list, or with `allow_unauthenticated` outside `kernel.debug`.
+- **Fail-closed wiring** — the container refuses to compile without Instance Settings (unless both the DSN and sender providers are host services, 1.6), with the log on but no Doctrine ORM (2.0), or without the framework mailer, with the UI on but no form CSRF, with an empty role list, or with `allow_unauthenticated` outside `kernel.debug`.
 
 ## Installation
 
 ```bash
-composer require nowo-tech/mail-kit-bundle
+composer require nowo-tech/mail-kit-bundle nowo-tech/instance-settings-bundle doctrine/orm
 ```
+
+Since 2.0 Instance Settings (the settings page of the default setup) and the Doctrine ORM (the sent-mail log) are
+suggested, not installed with MailKit: require them as above, or give MailKit its DSN and sender through your own
+ports and turn the log off ([USAGE](docs/USAGE.md)). Upgrading from 1.x: [UPGRADING "To 2.0.0"](docs/UPGRADING.md).
 
 With Symfony Flex the recipe adds `config/packages/nowo_mail_kit.yaml` and the route import. Without Flex, register `NowoInstanceSettingsBundle` (and its dependencies) and `NowoMailKitBundle`, then import the routes — see [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
@@ -100,7 +119,8 @@ Schedule `php bin/console nowo:mail-kit:log:purge` daily.
 
 - PHP **8.2+** (`>=8.2 <8.6`; Symfony 8.x requires PHP 8.4+)
 - Symfony **7.4**, **8.0** or **8.1** (FrameworkBundle with the mailer, Form, Validator, Security CSRF, RateLimiter, HttpClient, TwigBundle; SecurityBundle for the admin UI)
-- `nowo-tech/instance-settings-bundle` **^1.0** (settings store, encrypted secrets, settings UI), Doctrine ORM **3.3+**, `nowo-tech/ui-kit-bundle` **^2.17.3**, `nowo-tech/form-kit-bundle` **^2.17**, `nowo-tech/outbound-url-guard-bundle` **^1.3**, `twig/extra-bundle`
+- `nowo-tech/ui-kit-bundle` **^2.23**, `nowo-tech/form-kit-bundle` **^2.17**, `nowo-tech/outbound-url-guard-bundle` **^1.3**, DoctrineBundle with the DBAL, `twig/extra-bundle`
+- Default setup (suggested since 2.0, require them yourself): `nowo-tech/instance-settings-bundle` **^1.3.1** (settings store, encrypted secrets with `nowo-tech/doctrine-encrypt-bundle` **^2.10**, settings UI) and Doctrine ORM **3.3+** (the sent-mail log)
 - Optional: `symfony/resend-mailer` (Resend), `nowo-tech/auth-kit-bundle` (readiness adapter), `nowo-tech/brand-contracts` **^1.0** (branded e-mails)
 
 ## Configuration

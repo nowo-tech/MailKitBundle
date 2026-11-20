@@ -24,7 +24,6 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 | Source file | Spec section | Requirement IDs |
 | --- | --- | --- |
 | `src/Settings/MailerSettingsSection.php` | Settings | FR-SET-001, FR-DBO-002 ([002](../002-db-only-seed/spec.md)), FR-PRV-001, FR-PRV-004 ([003](../003-provider-fields/spec.md)) |
-| `src/Settings/ResendSettingsSection.php` | Settings | FR-SET-002 (deprecated constant holder since 1.3, FR-PRV-005 ([003](../003-provider-fields/spec.md))) |
 | `src/Settings/LegacyResendSettings.php` | Settings | FR-PRV-004 ([003](../003-provider-fields/spec.md)) |
 | `src/Form/LegacyResendSettingsTypeExtension.php` | Settings | FR-PRV-004 ([003](../003-provider-fields/spec.md)) |
 | `src/Command/PurgeLegacyResendCommand.php` | Settings | FR-PRV-007 ([003](../003-provider-fields/spec.md)) |
@@ -50,11 +49,9 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 | `src/Validator/ResendApiKeyAcceptedValidator.php` | DSN and sender | FR-PRV-003 ([003](../003-provider-fields/spec.md)) |
 | `src/Sender/SenderAddress.php` | DSN and sender | FR-SND-001 |
 | `src/Sender/SenderPolicy.php` | DSN and sender | FR-SND-001 |
-| `src/Sender/SenderProviderInterface.php` | DSN and sender | FR-SND-001 |
 | `src/Sender/SenderIdentityProviderInterface.php` | DSN and sender | FR-SND-001 |
 | `src/Sender/MailAddress.php` | DSN and sender | FR-SND-001 |
 | `src/Sender/MimeAddressMapper.php` | DSN and sender | FR-SND-001 |
-| `src/Sender/SenderProviderGate.php` | DSN and sender | FR-SND-001 |
 
 ## Delivery
 

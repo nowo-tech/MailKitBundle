@@ -33,7 +33,7 @@ names for health pages.
 
 - **FR-DBO-001** Configuration `bootstrap.mailer_dsn`, `bootstrap.resend_api_key` (scalar, default null), never used
   to send.
-- **FR-DBO-002** `MailerSettingsSection` / `ResendSettingsSection` implement `SectionFallbackProviderInterface`
+- **FR-DBO-002** `MailerSettingsSection` / `ResendSettingsSection` (removed in 2.0) implement `SectionFallbackProviderInterface`
   (secret fallbacks `dsn`, `api_key`) and `SettingsSectionNoticesInterface` (`settings.notice_missing`, `%fields%`),
   the readiness resolved lazily through a service closure.
 - **FR-DBO-003** `MailSettings::missingFields()`, `OutboundMailReadiness::missingFields()` / `missingFieldsOf()`,

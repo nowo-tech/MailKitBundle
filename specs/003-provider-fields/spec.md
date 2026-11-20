@@ -71,7 +71,7 @@ lists them and deletes nothing).
 - **FR-PRV-007** `nowo:mail-kit:purge-legacy-resend [--dry-run] [--force]`: deletes the `resend` rows only once
   `mailer.provider` is stored and the old key / sender equal the mailer values; otherwise exit 1 listing the rows;
   idempotent; names only.
-- **FR-PRV-005** `ResendSettingsSection` is a deprecated holder of `NAME = 'resend'`; the Resend actions guard and
+- **FR-PRV-005** `ResendSettingsSection` is a deprecated holder of `NAME = 'resend'` (removed in 2.0); the Resend actions guard and
   redirect on the `mailer` section; `SettingsChangedListener` reacts to `mailer` only.
 - **FR-PRV-006** Docs (README, USAGE, CONFIGURATION, SECURITY, UPGRADING, CHANGELOG), 7 locales, demo with the Resend
   provider (offline key check stand-in) and the `visible-when` peer.

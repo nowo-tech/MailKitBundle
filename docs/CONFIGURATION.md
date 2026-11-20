@@ -13,11 +13,9 @@
 - [personal_data](#personal_data)
 - [brand](#brand)
 - [graph](#graph)
-  - [graph.inbound](#graphinbound)
 - [tracking](#tracking)
 - [doctrine](#doctrine)
 - [web_ui](#web_ui)
-  - [Layout and CSS stack (UiKit)](#layout-and-css-stack-uikit)
 - [security](#security)
 - [conflict_response](#conflict_response)
 - [FormKit profile](#formkit-profile)
@@ -35,7 +33,7 @@ nowo_mail_kit:
     mailer:
         decorate: true                 # decorate mailer.mailer + mailer.transports (runtime DSN on every send)
         dsn_provider: null             # service id implementing MailerDsnProviderInterface (null = Instance Settings)
-        sender_provider: null          # service id implementing SenderIdentityProviderInterface (1.12) or the deprecated SenderProviderInterface (null = Instance Settings, 1.5)
+        sender_provider: null          # service id implementing SenderIdentityProviderInterface (null = Instance Settings, 1.5)
         fallback_counts_as_ready: false # MAILER_DSN counts for isOutboundMailReady() when nothing is stored
     dsn:
         allowed_schemes: [smtp, smtps, mailgun, mailgun+api, …, scaleway+smtp]   # sendmail / native / null refused
@@ -59,7 +57,7 @@ nowo_mail_kit:
         rate_interval: '10 minutes'
     log:
         enabled: true
-        map_entities: true             # 1.6: false (only with enabled: false) = no SentMail mapping in your EM
+        map_entities: null             # 1.6; null = follows enabled (2.0). true keeps the tables of a log turned off mapped
         store_bodies: false            # personal data: off by default
         retention_days: 30             # nowo:mail-kit:log:purge default (1 … 3650)
         purge_batch_size: 1000         # rows per DELETE (1 … 100000)
@@ -189,7 +187,7 @@ Unknown keys are rejected. Switches (`mailer.decorate`, `dsn.allow_private_hosts
 | --- | --- | --- |
 | `decorate` | `true` | Registers `nowo_mail_kit.mailer` (decorates `mailer.mailer`, the `MailerInterface`) and `RuntimeTransport` as decorator of `mailer.transports`, so the framework mailer **and** the Messenger `SendEmailMessage` handler use the runtime DSN. With `false`, the framework mailer is untouched; `RuntimeTransport` (fallback = `mailer.transports`), the test e-mail, readiness and the log still work for code that uses them directly. |
 | `dsn_provider` | `null` | Service id of a `MailerDsnProviderInterface`; the default reads the `mailer` settings. Since 1.6, with `sender_provider` also set, Instance Settings becomes optional ([USAGE](USAGE.md#using-it-from-a-ddd--hexagonal-application)). |
-| `sender_provider` | `null` | Since 1.5. Service id of a `Sender\SenderIdentityProviderInterface` (since 1.12, framework-free: `defaultFrom()` / `defaultReplyTo()` return a `Sender\MailAddress`) or of the deprecated `Sender\SenderProviderInterface` (Symfony Mime `Address`, removed in 2.0) — the default `From` / `Reply-To` of messages without one. The default reads the `mailer` settings (`MailSettings`, which implements both). A service implementing neither fails the container build. |
+| `sender_provider` | `null` | Since 1.5. Service id of a `Sender\SenderIdentityProviderInterface` (since 1.12, framework-free: `defaultFrom()` / `defaultReplyTo()` return a `Sender\MailAddress`) — the default `From` / `Reply-To` of messages without one. The default reads the `mailer` settings (`MailSettings`). A service, or a decorator of the sender, that does not implement the interface fails the container build; the Mime-typed `Sender\SenderProviderInterface` was removed in 2.0. Without Instance Settings, `dsn_provider` and `sender_provider` are both required. |
 | `fallback_counts_as_ready` | `false` | `isOutboundMailReady()` is false while nothing is stored, because `MAILER_DSN` cannot be inspected through the framework transports. Set it to `true` when your `MAILER_DSN` is a real transport. |
 
 ## dsn
@@ -243,8 +241,8 @@ here (it would be compiled into the container). See [USAGE](USAGE.md#db-only-mod
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `enabled` | `true` | Sent-mail log writes and log pages. With `false` and Doctrine registered, the purge / forget commands and `SentMailErasureInterface` still work on rows written while the log was on (1.6). |
-| `map_entities` | `true` | 1.6. Doctrine mapping of `SentMail` / `SentMailBody`. `false` is allowed only with `enabled: false` (XML-only entity managers); purge or erase the tables first, the next schema diff proposes dropping them. In 2.0 the default follows `enabled`; since 1.14, leaving it unset with `enabled: false` (and DoctrineBundle installed) triggers a deprecation notice: set it explicitly. |
+| `enabled` | `true` | Sent-mail log writes and log pages. Needs `doctrine/orm` (suggested since 2.0): `true` without it fails the container build. With `false` and the ORM registered, the purge / forget commands and `SentMailErasureInterface` still work on rows written while the log was on (1.6), as long as the entities stay mapped (`map_entities: true`). |
+| `map_entities` | `null` (follows `enabled`) | 1.6. Doctrine mapping of `SentMail` / `SentMailBody`. Unset, it follows `enabled` since 2.0 (it was `true` in 1.x). `true` keeps the tables of a log you turned off mapped. `false` is allowed only with `enabled: false` (XML-only entity managers). When the mapping leaves your entity manager, purge or erase the tables first: the next schema diff proposes dropping them. |
 | `store_bodies` | `false` | Store the HTML / text bodies (≤ 1 MiB each, redacted values masked) and expose `GET …/log/{id}/body`. |
 | `retention_days` | `30` | Default age of `nowo:mail-kit:log:purge`. |
 | `purge_batch_size` | `1000` | Rows per keyset batch. |
@@ -256,7 +254,7 @@ always registered; this node only drives the UserKit bridge. See [USAGE — GDPR
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `enabled` | `false` | Opt-in. `true`: with `nowo-tech/user-kit-bundle` installed and the log entities mapped (`log.map_entities: true`, Doctrine registered), register the UserKit eraser `emails_received` (priority 110, before the host identity eraser) and the export section `emails_received`. Remove your own `emails_received` export provider first: UserKit throws a `LogicException` on a duplicate section key. Keep `false` when your application erases / exports the log tables itself or must retain the log. Literal boolean. |
+| `enabled` | `false` | Opt-in. `true`: with `nowo-tech/user-kit-bundle` installed and the log entities mapped (`log.map_entities` resolving to true, the ORM registered), register the UserKit eraser `emails_received` (priority 110, before the host identity eraser) and the export section `emails_received`. Remove your own `emails_received` export provider first: UserKit throws a `LogicException` on a duplicate section key. Keep `false` when your application erases / exports the log tables itself or must retain the log. Literal boolean. |
 | `subject_resolver` | `null` | Service id implementing `Log\SentMailPersonalDataSubjectResolverInterface` (the addresses of a user). `null` = the original user identifier when it is an e-mail, plus `getEmail()`. |
 
 ## brand

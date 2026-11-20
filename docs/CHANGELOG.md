@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[1.14.0] - 2026-11-20](#1140---2026-11-20)
   - [Added](#added)
   - [Changed](#changed)
   - [Deprecated](#deprecated)
@@ -88,6 +89,8 @@ All notable changes to this project are documented here. The format follows
   - [Security (re-verification follow-ups)](#security-re-verification-follow-ups)
 
 ## [Unreleased]
+
+## [1.14.0] - 2026-11-20
 
 ### Added
 

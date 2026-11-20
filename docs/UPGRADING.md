@@ -4,6 +4,7 @@
 
 - [Unreleased](#unreleased)
 - [To 1.14.0](#to-1140)
+- [To 1.14.0](#to-1140-1)
   - [`log.map_entities` unset with the log off](#logmap_entities-unset-with-the-log-off)
   - [Host sender services on `SenderProviderInterface`](#host-sender-services-on-senderproviderinterface)
   - [No host-flush probe in MailKit](#no-host-flush-probe-in-mailkit)
@@ -52,6 +53,14 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+## To 1.14.0
+
+From **1.13.1**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
 
 ## To 1.14.0
 

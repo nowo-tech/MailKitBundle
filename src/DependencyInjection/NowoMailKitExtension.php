@@ -222,7 +222,6 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
                             'type'      => 'attribute',
                             'dir'       => __DIR__ . '/../Entity',
                             'prefix'    => 'Nowo\MailKitBundle\Entity',
-                            'alias'     => 'NowoMailKit',
                             'is_bundle' => false,
                         ],
                     ],

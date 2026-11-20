@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, 1.x]
   pull_request:
-    branches: [main, master]
+    branches: [main, master, 1.x]
 
 # Superseded PR runs are cancelled. Push runs (main/master) get their own group (run_id), so a main run is never
 # cancelled, not even while pending: tag_when_green.sh needs a completed run on every release commit.
@@ -209,6 +209,51 @@ jobs:
         run: |
           export MAIL_KIT_TEST_DATABASE_URL="${{ matrix.db.scheme }}://${{ matrix.db.user }}:${DB_CI_PASSWORD}@127.0.0.1:${{ matrix.db.port }}/mailkit?${{ matrix.db.query }}"
           vendor/bin/phpunit --no-coverage --fail-on-skipped tests/Integration/Concurrency
+
+  # 2.0 (REQ-ARCH-001 rule 8): Instance Settings, DoctrineEncrypt and the ORM are suggested, not required. The host
+  # that provides the DSN and sender ports must boot, send and refuse a log without the ORM with none of them installed.
+  # auth-kit-bundle and user-kit-bundle (require-dev) require the ORM, so they go too.
+  without-suggested:
+    name: Without Instance Settings, DoctrineEncrypt and the ORM
+    runs-on: ubuntu-latest
+    needs: changes
+    # Never skip this job: light mode runs only its first step, so the required context always appears.
+    if: ${{ !cancelled() }}
+    env:
+      HEAVY: ${{ needs.changes.outputs.mode != 'light' }}
+
+    steps:
+      - name: Light mode (deps/docs-only PR) - nothing to run
+        if: env.HEAVY != 'true'
+        run: echo "Light mode, this job has nothing to do."
+
+      - name: Checkout code
+        if: env.HEAVY == 'true'
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        if: env.HEAVY == 'true'
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: json, pdo_sqlite, sodium
+          coverage: none
+          tools: composer:v2
+
+      - name: Remove the suggested packages (and the dev packages that require them)
+        if: env.HEAVY == 'true'
+        run: |
+          composer remove --dev --no-update --no-interaction nowo-tech/instance-settings-bundle nowo-tech/doctrine-encrypt-bundle doctrine/orm nowo-tech/auth-kit-bundle nowo-tech/user-kit-bundle
+          composer update --prefer-dist --no-progress --no-interaction
+          for p in doctrine/orm nowo-tech/instance-settings-bundle nowo-tech/doctrine-encrypt-bundle; do
+            if composer show "$p" >/dev/null 2>&1; then echo "::error::$p is still installed"; exit 1; fi
+          done
+
+      - name: DDD host kernel tests without them
+        if: env.HEAVY == 'true'
+        env:
+          SYMFONY_DEPRECATIONS_HELPER: max[direct]=0
+        run: vendor/bin/phpunit --no-coverage --fail-on-skipped tests/Integration/Ddd
 
   # Dependency floor: the code must work with the LOWEST nowo-tech/transaction-* versions composer.json allows (a host
   # can run `composer update nowo-tech/mail-kit-bundle` without updating them), and the demo lock must install what the

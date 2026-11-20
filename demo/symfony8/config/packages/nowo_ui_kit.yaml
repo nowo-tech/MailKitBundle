@@ -2,6 +2,8 @@
 # token override); the demo shell (base.html.twig) is the admin layout of every bundle page.
 nowo_ui_kit:
     css_framework: custom
+    base_stylesheet: true
     icon_set: none
     layouts:
         admin: 'base.html.twig'
+        guest: 'base.html.twig'

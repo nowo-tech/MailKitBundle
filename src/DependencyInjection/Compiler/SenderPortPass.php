@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\MailKitBundle\DependencyInjection\Compiler;
 
 use LogicException;
+use Nowo\MailKitBundle\Sender\MailAddress;
 use Nowo\MailKitBundle\Sender\SenderIdentityProviderInterface;
 use Nowo\MailKitBundle\Sender\SenderPolicy;
 use Nowo\MailKitBundle\Sender\SenderProviderGate;
@@ -22,6 +23,7 @@ use function in_array;
 use function is_a;
 use function is_string;
 use function sprintf;
+use function trigger_deprecation;
 
 /**
  * Wires the framework-free 1.12 twin of the sender port (REQ-ARCH-001 rule 3) and refuses a
@@ -47,7 +49,9 @@ use function sprintf;
  * a port does not select a provider, the configuration does.
  *
  * The deprecation of the old interface reaches the application through its `@deprecated` tag (Symfony's
- * DebugClassLoader, in debug mode), not from this pass.
+ * DebugClassLoader, in debug mode) and, since 1.14 (2.0 deprecation layer), through one build-time notice per host
+ * class that implements it: the configured service and every decorator of the sender (the deprecated port id or the
+ * configured chain). MailKit's own classes ({@see MailSettings}, the gate) are not reported.
  *
  * Host decorators (1.12.1): when the deprecated port id or the configured service is decorated, the new port follows
  * the decorated service — straight when every decorator implements the new port, through a gate otherwise — so it
@@ -98,6 +102,7 @@ final class SenderPortPass implements CompilerPassInterface
         if ($class !== null && !$newPort && !$oldPort) {
             throw new LogicException(sprintf('nowo_mail_kit.mailer.sender_provider: the service "%s" (%s) must implement "%s" (or the deprecated "%s").', $target, $class, SenderIdentityProviderInterface::class, SenderProviderInterface::class));
         }
+        $this->deprecateLegacyPort($container, $configured, $target, $oldPort ? $class : null);
 
         if ($class === MailSettings::class) {
             // Built-in default: both ports return the same values, so the deprecated alias keeps today's wiring.
@@ -203,6 +208,57 @@ final class SenderPortPass implements CompilerPassInterface
         }
 
         return $found ? $all : null;
+    }
+
+    /**
+     * 1.14: one build-time deprecation per host class behind the sender that implements the deprecated
+     * {@see SenderProviderInterface} (removed in 2.0, so such a class no longer loads): the configured service, then
+     * every decorator of the deprecated port id and of the configured chain. MailKit's own implementations
+     * ({@see MailSettings}, {@see SenderProviderGate}) are skipped; a
+     * service whose class is only known at runtime (factory, synthetic) cannot be checked here.
+     *
+     * @param class-string|null $configuredClass class of the configured service when it implements the deprecated port
+     */
+    private function deprecateLegacyPort(ContainerBuilder $container, string $configured, string $target, ?string $configuredClass): void
+    {
+        $reported = [];
+        if ($configuredClass !== null && !$this->ownClass($configuredClass)) {
+            $reported[$configuredClass] = true;
+            trigger_deprecation('nowo-tech/mail-kit-bundle', '1.14', 'The sender service "%s" (%s) set in "nowo_mail_kit.mailer.sender_provider" implements "%s", which is deprecated and removed in 2.0. Implement "%s" instead (it returns "%s" rather than a Symfony Mime Address; see UPGRADING.md "To 1.12.0").', $target, $configuredClass, SenderProviderInterface::class, SenderIdentityProviderInterface::class, MailAddress::class);
+        }
+
+        $ids  = [SenderProviderInterface::class, $configured];
+        $seen = [];
+        while ($ids !== []) {
+            $decorated = array_pop($ids);
+            if (isset($seen[$decorated])) {
+                continue;
+            }
+            $seen[$decorated] = true;
+            if ($container->hasAlias($decorated)) {
+                $ids[] = (string) $container->getAlias($decorated);
+            }
+            foreach ($container->getDefinitions() as $id => $definition) {
+                if (($definition->getDecoratedService()[0] ?? null) !== $decorated) {
+                    continue;
+                }
+                $ids[] = $id;
+                $class = $this->classOf($container, $id);
+                if ($class === null || isset($reported[$class]) || $this->ownClass($class) || !is_a($class, SenderProviderInterface::class, true)) {
+                    continue;
+                }
+                $reported[$class] = true;
+                trigger_deprecation('nowo-tech/mail-kit-bundle', '1.14', 'The service "%s" (%s) decorates the MailKit sender and implements "%s", which is deprecated and removed in 2.0. Implement "%s" instead (see UPGRADING.md "To 1.12.0").', $id, $class, SenderProviderInterface::class, SenderIdentityProviderInterface::class);
+            }
+        }
+    }
+
+    /**
+     * Whether the class belongs to MailKit itself (never reported by {@see self::deprecateLegacyPort()}).
+     */
+    private function ownClass(string $class): bool
+    {
+        return in_array($class, [MailSettings::class, SenderProviderGate::class], true);
     }
 
     /**

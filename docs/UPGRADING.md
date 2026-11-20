@@ -3,6 +3,11 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.14.0](#to-1140)
+  - [`log.map_entities` unset with the log off](#logmap_entities-unset-with-the-log-off)
+  - [Host sender services on `SenderProviderInterface`](#host-sender-services-on-senderproviderinterface)
+  - [No host-flush probe in MailKit](#no-host-flush-probe-in-mailkit)
+  - [Preparing for 2.0](#preparing-for-20)
 - [To 1.13.1](#to-1131)
 - [To 1.13.0](#to-1130)
   - [Lock conflicts answer 409](#lock-conflicts-answer-409)
@@ -47,6 +52,99 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+## To 1.14.0
+
+From **1.13.x**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle -w
+```
+
+`-w` installs the new floor `nowo-tech/transaction-doctrine` ^1.9. This minor changes no behaviour: it adds build-time
+deprecation notices for everything 2.0 changes, so the deprecation log of your application (the profiler's
+"Deprecations" tab, `bin/console debug:container --deprecations`, or the test suite with deprecations reported)
+becomes the list of what to migrate. The notices are raised once, when the container is built, never per request or
+per message. A host with none of the cases below gets no notice.
+
+### `log.map_entities` unset with the log off
+
+In 1.x `log.map_entities` defaults to `true`; in 2.0 it defaults to `log.enabled`. The two differ only when the log is
+off (`log.enabled: false`) and DoctrineBundle is installed: in 2.0 the `SentMail` / `SentMailBody` mapping then leaves
+your entity manager and your schema tool proposes dropping both tables. In that case, while the option is unset, the
+build triggers:
+
+> Since nowo-tech/mail-kit-bundle 1.14: Not setting "nowo_mail_kit.log.map_entities" while "nowo_mail_kit.log.enabled"
+> is false is deprecated: it keeps the log entities (SentMail, SentMailBody) mapped in your entity manager. In 2.0 the
+> option defaults to "log.enabled" (false here), so they are no longer mapped and your schema tool proposes dropping
+> their tables. Set "nowo_mail_kit.log.map_entities: true" to keep the mapping, or "nowo_mail_kit.log.map_entities:
+> false" to opt in to the 2.0 behaviour now (see UPGRADING.md "To 1.14.0").
+
+Choose one and set it explicitly; either value silences the notice and keeps working unchanged in 2.0:
+
+```yaml
+nowo_mail_kit:
+    log:
+        enabled: false
+        map_entities: true    # keep the tables mapped (the 1.x behaviour)
+        # map_entities: false # the 2.0 default: purge or erase the log rows first, then drop the tables
+```
+
+With the log on (the default), or without DoctrineBundle, nothing changes in 2.0 and there is no notice.
+
+### Host sender services on `SenderProviderInterface`
+
+`Sender\SenderProviderInterface` (deprecated since 1.12) is removed in 2.0, so a class that still implements it no
+longer loads. Until now the deprecation only reached you through the `@deprecated` tag in debug mode. Since 1.14 the
+build triggers one notice per host class behind the sender that implements it: the service named in
+`nowo_mail_kit.mailer.sender_provider`, and every decorator of the sender (of the
+`Nowo\MailKitBundle\Sender\SenderProviderInterface` id or of the configured service):
+
+> Since nowo-tech/mail-kit-bundle 1.14: The sender service "app.sender" (App\Mail\TenantSender) set in
+> "nowo_mail_kit.mailer.sender_provider" implements "Nowo\MailKitBundle\Sender\SenderProviderInterface", which is
+> deprecated and removed in 2.0. Implement "Nowo\MailKitBundle\Sender\SenderIdentityProviderInterface" instead (it
+> returns "Nowo\MailKitBundle\Sender\MailAddress" rather than a Symfony Mime Address; see UPGRADING.md "To 1.12.0").
+
+> Since nowo-tech/mail-kit-bundle 1.14: The service "app.sender_decorator" (App\Mail\SenderDecorator) decorates the
+> MailKit sender and implements "Nowo\MailKitBundle\Sender\SenderProviderInterface", which is deprecated and removed
+> in 2.0. Implement "Nowo\MailKitBundle\Sender\SenderIdentityProviderInterface" instead (see UPGRADING.md "To
+> 1.12.0").
+
+A class that implements both interfaces is reported too: drop the deprecated one once nothing injects it. Move each
+class as shown in [To 1.12.0](#sender-identity-without-symfony-mime-senderidentityproviderinterface); the configured
+service id stays the same. The built-in `MailSettings` sender is never reported. A service built by a factory cannot
+be checked when the container is built; check it yourself. Services of yours that **inject**
+`SenderProviderInterface` are not reported either: inject `SenderIdentityProviderInterface` instead (it is always
+autowirable).
+
+### No host-flush probe in MailKit
+
+MailKit never flushes your entity manager: the sent-mail log, tracking and Graph inbound stores write through the
+DBAL connection, and the settings are written by Instance Settings. There is therefore no host-flush probe and no
+flush default to flip in 2.0.
+
+### Preparing for 2.0
+
+2.0 contains only what 1.x has already announced; nothing new breaks:
+
+- **Composer moves.** `nowo-tech/instance-settings-bundle`, `nowo-tech/doctrine-encrypt-bundle` and `doctrine/orm`
+  move from `require` to `suggest`. MailKit already runs without them (`mailer.dsn_provider` /
+  `mailer.sender_provider` ports, `log.enabled: false`), but a host that got them through MailKit loses them on the
+  next `composer update`. This cannot raise a runtime notice. **If your application uses any of them itself (its own
+  settings sections, encrypted fields, entities), require them directly now:**
+
+  ```bash
+  composer require nowo-tech/instance-settings-bundle nowo-tech/doctrine-encrypt-bundle doctrine/orm
+  ```
+
+  A host that keeps the default MailKit setup (the `mailer` settings section, the sent-mail log) needs Instance
+  Settings and the ORM in 2.0 as well, so require them too.
+- **`SenderProviderInterface` removed** (with its wiring: the gate between the two ports). Clear the notices above.
+- **`log.map_entities` follows `log.enabled`.** Clear the notice above.
+- `symfony/mime` stays in `require` (the mailer needs it); it only leaves the public port.
+
+1.x keeps receiving security fixes for 6 months after 2.0.0 is released: fixes rated Moderate and above are
+backported to the last 1.x minor.
 
 ## To 1.13.1
 

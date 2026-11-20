@@ -224,7 +224,7 @@ final class Configuration implements ConfigurationInterface
                     ->children()
                         ->booleanNode('enabled')->defaultTrue()->end()
                         ->booleanNode('map_entities')
-                            ->info('1.6: add the Doctrine mapping of the log entities (SentMail, SentMailBody). false (only with enabled: false) keeps them out of your entity manager, e.g. on an XML-mapping-only DDD host; drop or purge existing log tables yourself first. Default true; planned to follow log.enabled in 2.0.')
+                            ->info('1.6: add the Doctrine mapping of the log entities (SentMail, SentMailBody). false (only with enabled: false) keeps them out of your entity manager, e.g. on an XML-mapping-only DDD host; drop or purge existing log tables yourself first. Default true; follows log.enabled in 2.0 (since 1.14 a deprecation notice asks to set it when the log is off).')
                             ->defaultTrue()
                         ->end()
                         ->booleanNode('store_bodies')

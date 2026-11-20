@@ -12,7 +12,8 @@ use Nowo\MailKitBundle\Mailer\MailHeaders;
 use Nowo\MailKitBundle\Mailer\RuntimeTransport;
 use Nowo\MailKitBundle\NowoMailKitBundle;
 use Nowo\MailKitBundle\Sender\SenderAddress;
-use Nowo\MailKitBundle\Sender\SenderProviderInterface;
+use Nowo\MailKitBundle\Sender\SenderIdentityProviderInterface;
+use Nowo\MailKitBundle\Sender\SenderPolicy;
 use Nowo\MailKitBundle\Settings\MailSettings;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Mime\Address;
@@ -39,7 +40,7 @@ use const FILTER_VALIDATE_EMAIL;
  * Recipient: the explicit address, else `mailer.test_recipient`, else the e-mail of the user (a `getEmail()`
  * method, or an identifier that is an address).
  *
- * Sender of the mailer test: the host {@see SenderProviderInterface} when `mailer.sender_provider` is set (the same
+ * Sender of the mailer test: the host {@see SenderIdentityProviderInterface} when `mailer.sender_provider` is set (the same
  * sender as real mail, 1.6), else the `mailer` settings. Without Instance Settings `$settings` is null: no stored
  * test recipient and no Resend test.
  */
@@ -51,7 +52,7 @@ final readonly class TestMailSender
     /**
      * @param MailSettings|null $settings the `mailer` settings; null without Instance Settings (host providers)
      * @param bool $requirePublicDomain `sender.require_public_domain`
-     * @param SenderProviderInterface|null $senderProvider host sender port (`mailer.sender_provider`); wins over the settings
+     * @param SenderIdentityProviderInterface|null $senderProvider host sender port (`mailer.sender_provider`); wins over the settings
      */
     public function __construct(
         private RuntimeTransport $transport,
@@ -59,7 +60,7 @@ final readonly class TestMailSender
         private ?TranslatorInterface $translator = null,
         private bool $requirePublicDomain = true,
         private ?LoggerInterface $logger = null,
-        private ?SenderProviderInterface $senderProvider = null,
+        private ?SenderIdentityProviderInterface $senderProvider = null,
     ) {
     }
 
@@ -69,7 +70,9 @@ final readonly class TestMailSender
     public function sendMailer(?string $to = null, ?object $user = null): TestMailResult
     {
         // The host sender port when one is wired (same sender as real mail), else the `mailer` settings.
-        $from = $this->senderProvider instanceof SenderProviderInterface ? $this->senderProvider->from() : $this->settings?->from();
+        $from = $this->senderProvider instanceof SenderIdentityProviderInterface
+            ? SenderPolicy::toMime($this->senderProvider, $this->senderProvider->defaultFrom(), 'from', $this->logger)
+            : $this->settings?->from();
 
         return $this->send('mailer', $from, $to, $user);
     }

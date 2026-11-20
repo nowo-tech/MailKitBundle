@@ -10,7 +10,6 @@ use Nowo\MailKitBundle\Dsn\RuntimeDsn;
 use Nowo\MailKitBundle\Sender\MailAddress;
 use Nowo\MailKitBundle\Sender\MimeAddressMapper;
 use Nowo\MailKitBundle\Sender\SenderIdentityProviderInterface;
-use Nowo\MailKitBundle\Sender\SenderProviderInterface;
 use Symfony\Component\Mime\Address;
 use Throwable;
 
@@ -27,9 +26,9 @@ use function trim;
  * `mailer.provider` keeps the 1.2 behaviour: `resend.enabled` selects Resend, `resend.api_key` / `resend.from` apply.
  *
  * Default sender of the sender policy (1.5): implements the framework-free {@see SenderIdentityProviderInterface}
- * (1.12) and the deprecated {@see SenderProviderInterface}, so both ports resolve to the same stored values.
+ * (1.12). {@see self::from()} / {@see self::replyTo()} return the same addresses as Symfony Mime values.
  */
-final readonly class MailSettings implements SenderIdentityProviderInterface, SenderProviderInterface
+final readonly class MailSettings implements SenderIdentityProviderInterface
 {
     /**
      * @param bool $resendEnabled `nowo_mail_kit.resend.enabled` (the `mailer` section offers the Resend provider)

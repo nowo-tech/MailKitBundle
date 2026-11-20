@@ -6,15 +6,13 @@ namespace Nowo\MailKitBundle\Tests\Integration\Ddd;
 
 use DateTimeImmutable;
 use Doctrine\ORM\EntityManagerInterface;
-use Doctrine\ORM\Tools\SchemaTool;
+use LogicException;
 use Nowo\InstanceSettingsBundle\Settings\InstanceSettingsInterface;
 use Nowo\MailKitBundle\DependencyInjection\NowoMailKitExtension;
-use Nowo\MailKitBundle\Entity\SentMail;
+use Nowo\MailKitBundle\Doctrine\TablePrefixListener;
 use Nowo\MailKitBundle\EventListener\SettingsChangedListener;
 use Nowo\MailKitBundle\Log\NullSentMailErasure;
 use Nowo\MailKitBundle\Log\SentMailErasureInterface;
-use Nowo\MailKitBundle\Log\SentMailLogTableMissingException;
-use Nowo\MailKitBundle\Log\SentMailRecorder;
 use Nowo\MailKitBundle\Readiness\OutboundMailReadinessInterface;
 use Nowo\MailKitBundle\Settings\MailerSettingsSection;
 use Nowo\MailKitBundle\Settings\MailSettings;
@@ -25,9 +23,6 @@ use Nowo\MailKitBundle\Tests\Integration\Kernel\MailKitTestKernel;
 use Nowo\MailKitBundle\Tests\Support\RequestTenantSenderProvider;
 use Nowo\MailKitBundle\Tests\Support\SendMailController;
 use Nowo\MailKitBundle\Tests\Support\StaticDsnProvider;
-use Nowo\MailKitBundle\Tests\Support\StaticSenderProvider;
-use Symfony\Bundle\FrameworkBundle\Console\Application;
-use Symfony\Component\Console\Tester\ApplicationTester;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\HttpKernel;
@@ -37,6 +32,7 @@ use Symfony\Component\Routing\RouterInterface;
 
 use function array_keys;
 use function gc_collect_cycles;
+use function interface_exists;
 use function memory_get_usage;
 use function str_contains;
 use function Symfony\Component\DependencyInjection\Loader\Configurator\service;
@@ -45,6 +41,9 @@ use function Symfony\Component\DependencyInjection\Loader\Configurator\service;
  * 1.6 (architecture bar rule 8): a strict DDD host that provides the DSN and sender ports boots MailKit without
  * Instance Settings and without Doctrine ORM, and serves many requests in one kept-alive kernel (FrankenPHP worker
  * mode, kernel reset off: `http_kernel` handle / terminate, no services resetter).
+ *
+ * 2.0: Instance Settings, DoctrineEncrypt and the ORM are suggested, not required. CI runs this class with the three
+ * packages removed (job "Without Instance Settings, DoctrineEncrypt and the ORM"), so it must not touch their classes.
  */
 final class HostProvidersKernelTest extends KernelTestCase
 {
@@ -93,6 +92,53 @@ final class HostProvidersKernelTest extends KernelTestCase
         }
     }
 
+    public function testBootsWithDoctrineButWithoutTheOrm(): void
+    {
+        $kernel    = $this->bootHost(['orm']);
+        $container = $this->container($kernel);
+
+        self::assertTrue($container->has('doctrine'));
+        self::assertFalse($container->has('doctrine.orm.entity_manager'));
+        self::assertFalse($container->has(TablePrefixListener::class));
+        self::assertInstanceOf(NullSentMailErasure::class, $this->service($kernel, SentMailErasureInterface::class));
+
+        $this->mailer($kernel)->send((new Email())->to('a@example.net')->subject('Hi')->text('Hi'));
+        self::assertCount(1, $this->store($kernel)->sentVia('default'));
+    }
+
+    /**
+     * Q7: a host that lost Instance Settings (it came with MailKit 1.x) and configured no DSN / sender port must not
+     * fall back silently to the framework transport: the build fails and says what to install.
+     */
+    public function testWithoutInstanceSettingsOrHostPortsTheBuildFails(): void
+    {
+        try {
+            $this->bootKernel(['log' => ['enabled' => false]], without: ['instance_settings', 'doctrine']);
+            self::fail('The build must fail without Instance Settings and without host ports.');
+        } catch (LogicException $e) {
+            self::assertStringContainsString('composer require nowo-tech/instance-settings-bundle', $e->getMessage());
+            self::assertStringContainsString('nowo_mail_kit.mailer.dsn_provider and nowo_mail_kit.mailer.sender_provider', $e->getMessage());
+        }
+    }
+
+    /**
+     * Without doctrine/orm installed (the CI job without the suggested packages) the log, on by default, fails the
+     * build with what to do; with the ORM installed MailKit configures it for the log mapping, as in 1.x.
+     */
+    public function testTheLogOnNeedsTheOrm(): void
+    {
+        $boot = fn (): MailKitTestKernel => $this->bootKernel(['log' => ['enabled' => true]] + self::HOST_CONFIG, without: ['instance_settings', 'orm'], extra: $this->hostServices(...));
+        if (interface_exists(EntityManagerInterface::class)) {
+            self::assertTrue($this->container($boot())->has('doctrine.orm.entity_manager'));
+
+            return;
+        }
+
+        $this->expectException(LogicException::class);
+        $this->expectExceptionMessage(NowoMailKitExtension::LOG_NEEDS_ORM);
+        $boot();
+    }
+
     public function testKeptAliveKernelServesManyTenantsWithoutLeakingState(): void
     {
         $kernel = $this->bootHost();
@@ -130,166 +176,26 @@ final class HostProvidersKernelTest extends KernelTestCase
     }
 
     /**
-     * LL-MK-M1: a host that turns the log off after it was on keeps its tables (no schema diff against 1.5.0) and its
-     * erasure / retention really delete the rows written while the log was on.
+     * @param list<string> $without `doctrine` (no DoctrineBundle) or `orm` (DoctrineBundle with the DBAL only)
      */
-    public function testStandardHostWithTheLogOffKeepsTheMappingAndReallyErases(): void
-    {
-        $kernel  = $this->bootKernel(['log' => ['enabled' => false]]);
-        $manager = $this->entityManager($kernel);
-        self::assertContains(SentMail::class, $this->mappedClasses($manager));
-        self::assertSame([], (new SchemaTool($manager))->getUpdateSchemaSql($manager->getMetadataFactory()->getAllMetadata()));
-        self::assertTrue($this->container($kernel)->getParameter(NowoMailKitExtension::INSTANCE_SETTINGS_PARAMETER));
-
-        // Rows from when the log was on.
-        $recorder = $this->service($kernel, SentMailRecorder::class);
-        $recorder->sent(null, (new Email())->from('ops@example.com')->to('victim@example.net')->subject('Hi')->text('Hi'), 'memory', null, 10);
-        $recorder->sent(null, (new Email())->from('ops@example.com')->to('other@example.net')->subject('Hi')->text('Hi'), 'memory', null, 10);
-        $connection = $this->connection($kernel);
-        self::assertSame(2, (int) $connection->fetchOne('SELECT COUNT(*) FROM mail_kit_sent_mail'));
-
-        // The log is off: a send records nothing.
-        $this->mailer($kernel)->send((new Email())->from('ops@example.com')->to('victim@example.net')->subject('Hi')->text('Hi'));
-        self::assertSame(2, (int) $connection->fetchOne('SELECT COUNT(*) FROM mail_kit_sent_mail'));
-
-        $erasure = $this->service($kernel, SentMailErasureInterface::class);
-        self::assertSame($recorder, $erasure);
-        self::assertSame(['deleted' => 1, 'unlinked' => 0, 'redacted' => 0], $erasure->forgetAddress('victim@example.net'));
-        self::assertSame(1, $erasure->purgeBefore(new DateTimeImmutable('+1 day')));
-        self::assertSame(0, (int) $connection->fetchOne('SELECT COUNT(*) FROM mail_kit_sent_mail'));
-    }
-
-    public function testMapEntitiesOffKeepsTheLogOutOfTheEntityManager(): void
-    {
-        $kernel  = $this->bootKernel(['log' => ['enabled' => false, 'map_entities' => false]]);
-        $manager = $this->entityManager($kernel);
-        self::assertNotContains(SentMail::class, $this->mappedClasses($manager));
-
-        // No log tables: nothing stored, nothing to erase (no SQL error).
-        $erasure = $this->service($kernel, SentMailErasureInterface::class);
-        self::assertSame(['deleted' => 0, 'unlinked' => 0, 'redacted' => 0], $erasure->forgetAddress('victim@example.net'));
-        self::assertSame(0, $erasure->purgeBefore(new DateTimeImmutable('+1 day')));
-    }
-
-    /**
-     * LL-MK-L3: with the entities mapped, a missing log table never reads as a successful erasure.
-     */
-    public function testMissingLogTablesFailClearlyWhenTheEntitiesAreMapped(): void
-    {
-        $kernel     = $this->bootKernel();
-        $connection = $this->connection($kernel);
-        $connection->executeStatement('DROP TABLE mail_kit_sent_mail_body');
-        $connection->executeStatement('DROP TABLE mail_kit_sent_mail');
-        $erasure = $this->service($kernel, SentMailErasureInterface::class);
-
-        try {
-            $erasure->forgetAddress('victim@example.net');
-            self::fail('A missing log table must not read as success.');
-        } catch (SentMailLogTableMissingException $missing) {
-            self::assertSame(['mail_kit_sent_mail', 'mail_kit_sent_mail_body'], $missing->tables);
-            self::assertStringContainsString('table_prefix', $missing->getMessage());
-        }
-        try {
-            $erasure->purgeBefore(new DateTimeImmutable('+1 day'));
-            self::fail('A missing log table must not read as success.');
-        } catch (SentMailLogTableMissingException $missing) {
-            self::assertSame(0, $missing->deleted);
-        }
-
-        $application = new Application($kernel);
-        $application->setAutoExit(false);
-        $tester = new ApplicationTester($application);
-        self::assertNotSame(0, $tester->run(['command' => 'nowo:mail-kit:log:forget', 'email' => 'victim@example.net']));
-        self::assertStringContainsString('do not exist', $tester->getDisplay(true));
-    }
-
-    public function testAMissingBodyTableStillErasesTheMainRowsThenFails(): void
-    {
-        $kernel   = $this->bootKernel();
-        $recorder = $this->service($kernel, SentMailRecorder::class);
-        foreach (['victim@example.net', 'other@example.net', 'third@example.net'] as $to) {
-            $recorder->sent(null, (new Email())->from('ops@example.com')->to($to)->subject('Hi')->text('Hi'), 'memory', null, 10);
-        }
-        $connection = $this->connection($kernel);
-        $connection->executeStatement('DROP TABLE mail_kit_sent_mail_body');
-
-        try {
-            $recorder->forgetAddress('victim@example.net');
-            self::fail('A missing body table must be reported.');
-        } catch (SentMailLogTableMissingException $missing) {
-            self::assertSame(['mail_kit_sent_mail_body'], $missing->tables);
-            self::assertSame(1, $missing->deleted);
-        }
-        self::assertSame(2, (int) $connection->fetchOne('SELECT COUNT(*) FROM mail_kit_sent_mail'));
-
-        try {
-            $recorder->purgeBefore(new DateTimeImmutable('+1 day'), 1);
-            self::fail('A missing body table must be reported.');
-        } catch (SentMailLogTableMissingException $missing) {
-            self::assertSame(2, $missing->deleted);
-        }
-        self::assertSame(0, (int) $connection->fetchOne('SELECT COUNT(*) FROM mail_kit_sent_mail'));
-    }
-
-    /**
-     * LL-MK-L2: with Instance Settings and a host sender port, the test e-mail uses the port, like real mail.
-     */
-    public function testTheTestEmailUsesTheHostSenderPortWithInstanceSettings(): void
-    {
-        $kernel = $this->bootKernel(['mailer' => ['sender_provider' => StaticSenderProvider::class]], extra: static function (ContainerConfigurator $container): void {
-            $container->services()->set(StaticSenderProvider::class);
-        });
-
-        self::assertSame(TestMailOutcome::Sent, $this->service($kernel, TestMailSender::class)->sendMailer('ops@example.net')->outcome);
-        $message = $this->store($kernel)->sentVia('fallback')[0]->getOriginalMessage();
-        self::assertInstanceOf(Email::class, $message);
-        self::assertSame('tenant@example.com', $message->getFrom()[0]->getAddress());
-    }
-
-    public function testStandardHostWithTheLogOnErasesThroughThePort(): void
-    {
-        $kernel = $this->bootKernel();
-        self::assertInstanceOf(SentMailRecorder::class, $this->service($kernel, SentMailErasureInterface::class));
-        $this->mailer($kernel)->send((new Email())->from('ops@example.com')->to('a@example.net')->subject('Hi')->text('Hi'));
-        self::assertSame(['deleted' => 1, 'unlinked' => 0, 'redacted' => 0], $this->service($kernel, SentMailErasureInterface::class)->forgetAddress('a@example.net'));
-    }
-
-    private function entityManager(MailKitTestKernel $kernel): EntityManagerInterface
-    {
-        $manager = $this->container($kernel)->get('doctrine.orm.entity_manager');
-        self::assertInstanceOf(EntityManagerInterface::class, $manager);
-
-        return $manager;
-    }
-
-    /**
-     * @return list<string>
-     */
-    private function mappedClasses(EntityManagerInterface $manager): array
-    {
-        $classes = [];
-        foreach ($manager->getMetadataFactory()->getAllMetadata() as $metadata) {
-            $classes[] = $metadata->getName();
-        }
-
-        return $classes;
-    }
-
-    private function bootHost(): MailKitTestKernel
+    private function bootHost(array $without = ['doctrine']): MailKitTestKernel
     {
         return $this->bootKernel(
             self::HOST_CONFIG,
-            without: ['instance_settings', 'doctrine'],
+            without: ['instance_settings', ...$without],
             routes: static function (RoutingConfigurator $routes): void {
                 $routes->import('.', 'nowo_mail_kit');
                 $routes->add('host_send', '/send/{tenant}')->controller(SendMailController::class);
             },
-            extra: static function (ContainerConfigurator $container): void {
-                $services = $container->services();
-                $services->set(StaticDsnProvider::class)->args(['memory://default']);
-                $services->set(RequestTenantSenderProvider::class)->args([service('request_stack')]);
-                $services->set(SendMailController::class)->args([service('mailer.mailer')])->public()->tag('controller.service_arguments');
-            },
+            extra: $this->hostServices(...),
         );
+    }
+
+    private function hostServices(ContainerConfigurator $container): void
+    {
+        $services = $container->services();
+        $services->set(StaticDsnProvider::class)->args(['memory://default']);
+        $services->set(RequestTenantSenderProvider::class)->args([service('request_stack')]);
+        $services->set(SendMailController::class)->args([service('mailer.mailer')])->public()->tag('controller.service_arguments');
     }
 }

@@ -10,7 +10,7 @@ use Nowo\MailKitBundle\Mailer\RuntimeTransport;
 use Nowo\MailKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\MailKitBundle\Tests\Integration\Kernel\MailKitTestKernel;
 use Nowo\MailKitBundle\Tests\Support\StaticDsnProvider;
-use Nowo\MailKitBundle\Tests\Support\StaticSenderProvider;
+use Nowo\MailKitBundle\Tests\Support\StaticSenderIdentityProvider;
 use Nowo\MailKitBundle\Tests\Support\TrackingKernelTrait;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
@@ -121,13 +121,13 @@ final class MessengerRetryTest extends KernelTestCase
     private function boot(array $config, ?string $dsn): MailKitTestKernel
     {
         return $this->bootKernel(
-            $config + ['mailer' => ['dsn_provider' => StaticDsnProvider::class, 'sender_provider' => StaticSenderProvider::class], 'web_ui' => ['enabled' => false]],
+            $config + ['mailer' => ['dsn_provider' => StaticDsnProvider::class, 'sender_provider' => StaticSenderIdentityProvider::class], 'web_ui' => ['enabled' => false]],
             without: ['instance_settings'],
             routes: static function (): void {
             },
             extra: self::trackingServices(static function (ContainerConfigurator $container) use ($dsn): void {
                 $container->services()->set(StaticDsnProvider::class)->args([$dsn])->public();
-                $container->services()->set(StaticSenderProvider::class);
+                $container->services()->set(StaticSenderIdentityProvider::class);
             }),
         );
     }

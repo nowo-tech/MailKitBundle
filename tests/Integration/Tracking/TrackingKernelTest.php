@@ -15,7 +15,7 @@ use Nowo\MailKitBundle\Tests\Integration\Kernel\MailKitTestKernel;
 use Nowo\MailKitBundle\Tests\Support\HostTrackingPolicy;
 use Nowo\MailKitBundle\Tests\Support\ShortLinkRewriter;
 use Nowo\MailKitBundle\Tests\Support\StaticDsnProvider;
-use Nowo\MailKitBundle\Tests\Support\StaticSenderProvider;
+use Nowo\MailKitBundle\Tests\Support\StaticSenderIdentityProvider;
 use Nowo\MailKitBundle\Tests\Support\TrackingKernelTrait;
 use Nowo\MailKitBundle\Tracking\EmailTracker;
 use Nowo\MailKitBundle\Tracking\EmailTrackingReaderInterface;
@@ -325,7 +325,7 @@ final class TrackingKernelTest extends KernelTestCase
     {
         return $this->bootKernel(
             [
-                'mailer'   => ['dsn_provider' => StaticDsnProvider::class, 'sender_provider' => StaticSenderProvider::class],
+                'mailer'   => ['dsn_provider' => StaticDsnProvider::class, 'sender_provider' => StaticSenderIdentityProvider::class],
                 'log'      => ['enabled' => false],
                 'web_ui'   => ['enabled' => false],
                 'tracking' => self::tracking($tracking),
@@ -338,7 +338,7 @@ final class TrackingKernelTest extends KernelTestCase
             extra: self::trackingServices(static function (ContainerConfigurator $container) use ($dsn): void {
                 $services = $container->services();
                 $services->set(StaticDsnProvider::class)->args([$dsn])->public();
-                $services->set(StaticSenderProvider::class);
+                $services->set(StaticSenderIdentityProvider::class);
                 $container->extension('twig', ['paths' => ['%kernel.project_dir%/tests/Fixtures/templates']]);
             }),
         );

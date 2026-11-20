@@ -6,15 +6,13 @@ namespace Nowo\MailKitBundle\Tests\Support;
 
 use Nowo\MailKitBundle\Sender\MailAddress;
 use Nowo\MailKitBundle\Sender\SenderIdentityProviderInterface;
-use Nowo\MailKitBundle\Sender\SenderProviderInterface;
-use Symfony\Component\Mime\Address;
 
 /**
- * Host decorator of a sender service that implements both ports (1.12.1 decorator tests).
+ * Host decorator of the sender port (decorator tests).
  */
-final readonly class IdentitySenderDecorator implements SenderIdentityProviderInterface, SenderProviderInterface
+final readonly class IdentitySenderDecorator implements SenderIdentityProviderInterface
 {
-    public function __construct(public SenderIdentityProviderInterface|SenderProviderInterface $inner)
+    public function __construct(public SenderIdentityProviderInterface $inner)
     {
     }
 
@@ -24,16 +22,6 @@ final readonly class IdentitySenderDecorator implements SenderIdentityProviderIn
     }
 
     public function defaultReplyTo(): ?MailAddress
-    {
-        return null;
-    }
-
-    public function from(): Address
-    {
-        return new Address('decorated-identity@example.com');
-    }
-
-    public function replyTo(): ?Address
     {
         return null;
     }

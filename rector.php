@@ -26,6 +26,8 @@ return RectorConfig::configure()
     ->withSkip([
         // The worker-request tests push / pop requests on one stack on purpose.
         PushRequestToRequestStackConstructorRector::class => [__DIR__ . '/tests'],
+        // 1.x host classes on the sender port removed in 2.0 (build-error tests): the interface no longer exists.
+        __DIR__ . '/tests/Fixtures/RemovedPort',
         __DIR__ . '/demo',
         __DIR__ . '/vendor',
     ]);

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\MailKitBundle\DependencyInjection;
 
+use Doctrine\ORM\EntityManagerInterface;
 use finfo;
 use LogicException;
 use Nowo\AuthKitBundle\Mailer\OutboundMailReadyCheckerInterface;
@@ -90,8 +91,8 @@ use Nowo\MailKitBundle\Security\AccessGuard;
 use Nowo\MailKitBundle\Security\AllowAllMailKitAccessChecker;
 use Nowo\MailKitBundle\Security\ConfigurableMailKitAccessChecker;
 use Nowo\MailKitBundle\Security\MailKitAccessCheckerInterface;
+use Nowo\MailKitBundle\Sender\SenderIdentityProviderInterface;
 use Nowo\MailKitBundle\Sender\SenderPolicy;
-use Nowo\MailKitBundle\Sender\SenderProviderInterface;
 use Nowo\MailKitBundle\Settings\LegacyResendSettings;
 use Nowo\MailKitBundle\Settings\MailerSettingsSection;
 use Nowo\MailKitBundle\Settings\MailSettings;
@@ -157,7 +158,6 @@ use function is_string;
 use function sprintf;
 use function str_contains;
 use function strlen;
-use function trigger_deprecation;
 
 /**
  * Loads `nowo_mail_kit`: the Instance Settings sections, DSN / sender validation, the runtime transport and mailer
@@ -165,7 +165,9 @@ use function trigger_deprecation;
  *
  * 1.6 (architecture bar rule 8): Instance Settings is optional when the host provides both configuration ports
  * (`mailer.dsn_provider` and `mailer.sender_provider`). Without it the settings section, its change listener and the
- * settings actions are not registered; with `log.enabled: false` the bundle needs no Doctrine either.
+ * settings actions are not registered; with `log.enabled: false` the bundle needs no Doctrine ORM either. Since 2.0
+ * Instance Settings, DoctrineEncrypt and the ORM are suggested, not required: every service that uses one of them is
+ * registered only when it is installed, and a configuration that needs a missing one fails the build.
  */
 final class NowoMailKitExtension extends Extension implements PrependExtensionInterface
 {
@@ -183,6 +185,15 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
 
     /** Container parameter: true when the configuration is read from Instance Settings (1.6). */
     public const INSTANCE_SETTINGS_PARAMETER = 'nowo_mail_kit.instance_settings';
+
+    /** Build error of a log turned on without doctrine/orm (2.0, rule 8). */
+    public const LOG_NEEDS_ORM = 'NowoMailKitBundle: "nowo_mail_kit.log.enabled: true" (the default) needs doctrine/orm, which MailKit no longer installs since 2.0: run "composer require doctrine/orm" or set "nowo_mail_kit.log.enabled: false" (see UPGRADING.md "To 2.0.0").';
+
+    /**
+     * Build-time parameter set by the prepend (2.0): whether the Doctrine ORM is installed and configured (the host's
+     * `doctrine.orm` or the log mapping prepended by this extension). Removed from the compiled container.
+     */
+    public const ORM_PARAMETER = '.nowo_mail_kit.orm';
 
     /**
      * Unit-of-work boundaries of the {@see LegacyResendSettings} memo: event name => [listener method, priority].
@@ -209,12 +220,13 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
     }
 
     /**
-     * Prepends the Doctrine mapping of the log entities (unless `log.map_entities: false`, 1.6), the FormKit profile and
-     * the AuthKit mail-ready checker.
+     * Prepends the Doctrine mapping of the log entities (when `log.map_entities` resolves to true, 1.6; it follows
+     * `log.enabled` since 2.0, and needs the ORM), the FormKit profile and the AuthKit mail-ready checker.
      */
     public function prepend(ContainerBuilder $container): void
     {
-        if ($container->hasExtension('doctrine') && $this->mapEntitiesInRawConfig($container)) {
+        $orm = $container->hasExtension('doctrine') && interface_exists(EntityManagerInterface::class);
+        if ($orm && $this->mapEntitiesInRawConfig($container)) {
             $container->prependExtensionConfig('doctrine', [
                 'orm' => [
                     'mappings' => [
@@ -229,6 +241,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             ]);
         }
 
+        $container->setParameter(self::ORM_PARAMETER, $orm && $this->ormConfigured($container));
         $this->prependFormKitProfile($container);
         $this->assertNoLegacyResendArea($container);
 
@@ -239,42 +252,39 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
     }
 
     /**
-     * `log.map_entities` of the unprocessed configuration (last value wins; default true, also with `log.enabled:
-     * false`, so tables written while the log was on stay mapped). The prepend runs before the configuration is
+     * `log.map_entities` of the unprocessed configuration, resolved as {@see Configuration} does: the last literal
+     * value wins; unset, it follows `log.enabled` (2.0; default true). The prepend runs before the configuration is
      * processed; a non-literal value keeps the mapping and is rejected later ({@see self::assertLiteralBooleans()}).
      */
     private function mapEntitiesInRawConfig(ContainerBuilder $container): bool
     {
-        $map = true;
+        $map     = null;
+        $enabled = true;
         foreach ($container->getExtensionConfig(Configuration::ALIAS) as $config) {
-            if (is_array($config['log'] ?? null) && array_key_exists('map_entities', $config['log']) && is_bool($config['log']['map_entities'])) {
-                $map = $config['log']['map_entities'];
+            $log = is_array($config['log'] ?? null) ? $config['log'] : [];
+            if (($log['map_entities'] ?? null) !== null) {
+                $map = !is_bool($log['map_entities']) || $log['map_entities'];
+            }
+            if (array_key_exists('enabled', $log)) {
+                $enabled = !is_bool($log['enabled']) || $log['enabled'];
             }
         }
 
-        return $map;
+        return $map ?? $enabled;
     }
 
     /**
-     * 1.14 (REQ-ARCH-001, 2.0 deprecation layer): `log.map_entities` defaults to true in 1.x and to `log.enabled` in
-     * 2.0. The two differ only with `log.enabled: false` and DoctrineBundle present (without it nothing is mapped
-     * either way), so the build-time notice fires there, when the option is not set. Setting it, to either value,
-     * silences the notice: true keeps today's mapping, false opts in to the 2.0 behaviour now.
-     *
-     * @param array<array-key, mixed> $configs unprocessed configuration (to tell an unset option from its default)
+     * Whether a `doctrine` configuration (the host's or the log mapping prepended above) turns the ORM on.
      */
-    private function deprecateUnsetMapEntities(array $configs, bool $logEnabled, bool $hasDoctrine): void
+    private function ormConfigured(ContainerBuilder $container): bool
     {
-        if ($logEnabled || !$hasDoctrine) {
-            return;
-        }
-        foreach ($configs as $config) {
-            if (is_array($config) && is_array($config['log'] ?? null) && array_key_exists('map_entities', $config['log'])) {
-                return;
+        foreach ($container->getExtensionConfig('doctrine') as $config) {
+            if (array_key_exists('orm', $config)) {
+                return true;
             }
         }
 
-        trigger_deprecation('nowo-tech/mail-kit-bundle', '1.14', 'Not setting "nowo_mail_kit.log.map_entities" while "nowo_mail_kit.log.enabled" is false is deprecated: it keeps the log entities (SentMail, SentMailBody) mapped in your entity manager. In 2.0 the option defaults to "log.enabled" (false here), so they are no longer mapped and your schema tool proposes dropping their tables. Set "nowo_mail_kit.log.map_entities: true" to keep the mapping, or "nowo_mail_kit.log.map_entities: false" to opt in to the 2.0 behaviour now (see UPGRADING.md "To 1.14.0").');
+        return false;
     }
 
     /**
@@ -334,21 +344,30 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         }
         $this->registerValidation($container, $config['dsn']);
         $hasDoctrine = $this->hasBundle($container, 'DoctrineBundle') || $container->hasExtension('doctrine');
-        $this->deprecateUnsetMapEntities($configs, $config['log']['enabled'], $hasDoctrine);
-        $this->registerLog($container, $config['log'], $config['doctrine'], $hasDoctrine);
-        $this->registerPersonalData($container, $config['personal_data'], ($config['log']['enabled'] || $hasDoctrine) && $config['log']['map_entities']);
+        $hasOrm      = $hasDoctrine && $this->hasOrm($container);
+        $this->registerLog($container, $config['log'], $config['doctrine'], $hasOrm);
+        $this->registerPersonalData($container, $config['personal_data'], ($config['log']['enabled'] || $hasOrm) && $config['log']['map_entities']);
         $this->registerMailer($container, $config, $settings);
         $this->registerTestMail($container, $config, $settings);
         $this->registerWebUi($container, $config, $settings);
         $this->registerBrand($container, $config['brand']);
-        $this->registerGraph($container, $config['graph'], $config['doctrine']);
-        $this->registerTracking($container, $config['tracking'], $config['doctrine'], $config['personal_data']['enabled'], $hasDoctrine);
+        $this->registerGraph($container, $config['graph'], $config['doctrine'], $hasOrm);
+        $this->registerTracking($container, $config['tracking'], $config['doctrine'], $config['personal_data']['enabled'], $hasDoctrine, $hasOrm);
         $this->registerConflictResponse($container, $config['conflict_response']);
         $container->setParameter('nowo_mail_kit.graph.webhook_path', $config['graph']['inbound']['webhook']['path']);
         $container->setDefinition(GraphWebhookRouteLoader::class, (new Definition(GraphWebhookRouteLoader::class, [
             $config['graph']['inbound']['enabled'],
             $config['graph']['inbound']['webhook']['path'],
         ]))->addTag('routing.loader'));
+    }
+
+    /**
+     * 2.0 (rule 8): the Doctrine ORM is installed and, when the prepend ran, configured ({@see self::ORM_PARAMETER}).
+     */
+    private function hasOrm(ContainerBuilder $container): bool
+    {
+        return interface_exists(EntityManagerInterface::class)
+            && (!$container->hasParameter(self::ORM_PARAMETER) || $container->getParameter(self::ORM_PARAMETER) === true);
     }
 
     /**
@@ -370,8 +389,9 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
      *
      * @param array{enabled: bool, mailbox_provider: string|null, default_profile: string, profiles: array<string, array{tenant_id: string, client_id: string, client_secret: string, mailbox: string}>, http_client: string, token_cache: string, timeout: float, draft_cleanup: array{bus: string|null, delay_ms: int}, upload_hosts: list<string>, limits: array{max_attachments: int, max_attachment_bytes: int, max_message_bytes: int}, inbound: array{enabled: bool, webhook: array{path: string}}} $graph
      * @param array{table_prefix: string, entity_manager: string|null} $doctrine
+     * @param bool $hasOrm the Doctrine ORM is installed and configured (schema listener of the inbound tables)
      */
-    private function registerGraph(ContainerBuilder $container, array $graph, array $doctrine): void
+    private function registerGraph(ContainerBuilder $container, array $graph, array $doctrine, bool $hasOrm): void
     {
         if (!$graph['enabled']) {
             return;
@@ -419,7 +439,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             $logger,
         ]))->addTag('mailer.transport_factory'));
 
-        $this->registerGraphInbound($container, $graph['inbound'], $doctrine);
+        $this->registerGraphInbound($container, $graph['inbound'], $doctrine, $hasOrm);
     }
 
     /**
@@ -428,8 +448,9 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
      *
      * @param array<string, mixed> $inbound
      * @param array{table_prefix: string, entity_manager: string|null} $doctrine
+     * @param bool $hasOrm the Doctrine ORM is installed and configured (else `nowo:mail-kit:graph:schema` creates the tables)
      */
-    private function registerGraphInbound(ContainerBuilder $container, array $inbound, array $doctrine): void
+    private function registerGraphInbound(ContainerBuilder $container, array $inbound, array $doctrine, bool $hasOrm): void
     {
         /** @var array{enabled: bool, handler: string, profiles: list<string>, profiles_provider: string|null, bus: string, connection: string|null, folder: string, webhook: array{path: string, notification_url: string|null, max_body_bytes: int, max_notifications: int, rate_limit: int, client_rate_limit: int, allowed_ips: list<string>}, subscriptions: array{lifetime_minutes: int, renew_before_minutes: int}, sweep: array{initial_window: string, page_size: int, max_pages: int}, allow_remote_images: bool, retention_days: int, stale_claim_seconds: int, limits: array{max_message_bytes: int, max_attachments: int, max_attachment_bytes: int, max_total_attachment_bytes: int, max_html_bytes: int, allowed_types: list<string>}} $inbound */
         if (!$inbound['enabled']) {
@@ -447,8 +468,10 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $limits = $inbound['limits'];
 
         $container->setDefinition(GraphInboundStore::class, new Definition(GraphInboundStore::class, [new Reference('doctrine'), $inbound['connection'], $doctrine['table_prefix'], $clock, $logger]));
-        $container->setDefinition(GraphInboundSchemaListener::class, (new Definition(GraphInboundSchemaListener::class, [new Reference(GraphInboundStore::class), new Reference('doctrine'), $doctrine['entity_manager']]))
-            ->addTag('doctrine.event_listener', ['event' => 'postGenerateSchema']));
+        if ($hasOrm) {
+            $container->setDefinition(GraphInboundSchemaListener::class, (new Definition(GraphInboundSchemaListener::class, [new Reference(GraphInboundStore::class), new Reference('doctrine'), $doctrine['entity_manager']]))
+                ->addTag('doctrine.event_listener', ['event' => 'postGenerateSchema']));
+        }
 
         $profilesProvider = $inbound['profiles_provider'];
         if (is_string($profilesProvider) && $profilesProvider !== '') {
@@ -546,8 +569,9 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
      * @param array{table_prefix: string, entity_manager: string|null} $doctrine
      * @param bool $personalData `personal_data.enabled`
      * @param bool $hasDoctrine DoctrineBundle registered
+     * @param bool $hasOrm the Doctrine ORM is installed and configured (else `nowo:mail-kit:tracking:schema` creates the table)
      */
-    private function registerTracking(ContainerBuilder $container, array $tracking, array $doctrine, bool $personalData, bool $hasDoctrine): void
+    private function registerTracking(ContainerBuilder $container, array $tracking, array $doctrine, bool $personalData, bool $hasDoctrine, bool $hasOrm): void
     {
         /** @var array{enabled: bool, policy: string, link_rewriter: string|null, link_filter: string|null, recipient_resolver: string|null, public_base_url: string, path_prefix: string, secret: string|null, previous_secrets: list<string>, retention: string, purge_batch_size: int, connection: string|null, bus: string|null, extra_never_track_templates: list<string>, max_opens_per_send: int, skip_redacted: bool, max_html_bytes: int, links: array{allowed_hosts: list<string>, allowed_path_prefixes: list<string>, credential_query_parameters: list<string>, credential_path_segments: list<string>, essential_patterns: list<string>, max_links: int}, machine_opens: array{user_agents: list<string>, ip_ranges: list<string>}} $tracking */
         if (!$tracking['enabled']) {
@@ -572,8 +596,10 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $container->setDefinition(TrackingStore::class, new Definition(TrackingStore::class, [new Reference('doctrine'), $tracking['connection'], $doctrine['table_prefix'], $clock, $logger, $tracking['max_opens_per_send']]));
         $container->setAlias(EmailTrackingReaderInterface::class, TrackingStore::class)->setPublic(true);
         $container->setAlias(EmailTrackingPersonalDataInterface::class, TrackingStore::class)->setPublic(true);
-        $container->setDefinition(TrackingSchemaListener::class, (new Definition(TrackingSchemaListener::class, [new Reference(TrackingStore::class), new Reference('doctrine'), $doctrine['entity_manager']]))
-            ->addTag('doctrine.event_listener', ['event' => 'postGenerateSchema']));
+        if ($hasOrm) {
+            $container->setDefinition(TrackingSchemaListener::class, (new Definition(TrackingSchemaListener::class, [new Reference(TrackingStore::class), new Reference('doctrine'), $doctrine['entity_manager']]))
+                ->addTag('doctrine.event_listener', ['event' => 'postGenerateSchema']));
+        }
 
         // Literal secrets are checked now (audit NU-M1); %env()% values when the signer is first built — lazily, so a
         // bad secret leaves mail untracked (logged as critical) instead of breaking every send.
@@ -688,7 +714,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             }
         }
         if ($missing !== []) {
-            throw new LogicException(sprintf('NowoMailKitBundle reads its configuration from nowo-tech/instance-settings-bundle by default: register Nowo\InstanceSettingsBundle\NowoInstanceSettingsBundle in config/bundles.php, or set %s to your own service ids (configuration from host ports, no Instance Settings).', implode(' and ', $missing)));
+            throw new LogicException(sprintf('NowoMailKitBundle reads its configuration from nowo-tech/instance-settings-bundle by default, and since 2.0 that package is no longer installed with it: run "composer require nowo-tech/instance-settings-bundle" and register Nowo\InstanceSettingsBundle\NowoInstanceSettingsBundle in config/bundles.php, or set %s to your own service ids (configuration from host ports, no Instance Settings). See UPGRADING.md "To 2.0.0".', implode(' and ', $missing)));
         }
         if ($config['resend']['enabled']) {
             throw new LogicException('NowoMailKitBundle: nowo_mail_kit.resend.enabled requires nowo-tech/instance-settings-bundle (the Resend key and sender are fields of its "mailer" section). Register the bundle or set resend.enabled: false.');
@@ -824,20 +850,27 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
     }
 
     /**
-     * The recorder (erasure, retention and the forget / purge commands) is registered whenever Doctrine is: with
-     * `log.enabled: false` it records nothing but still erases and purges the rows written while the log was on (1.6,
-     * LL-MK-M1). Only without Doctrine is the erasure port a no-op.
+     * The recorder (erasure, retention and the forget / purge commands) is registered whenever the Doctrine ORM is:
+     * with `log.enabled: false` it records nothing but still erases and purges the rows written while the log was on
+     * (1.6, LL-MK-M1). Only without the ORM is the erasure port a no-op.
+     *
+     * 2.0 (rule 8): `doctrine/orm` is suggested, not required. A log turned on without it fails the build.
      *
      * @param array{enabled: bool, map_entities: bool, store_bodies: bool, retention_days: int, purge_batch_size: int} $log
      * @param array{table_prefix: string, entity_manager: string|null} $doctrine
-     * @param bool $hasDoctrine DoctrineBundle registered
+     * @param bool $hasOrm DoctrineBundle registered and the ORM installed and configured
      */
-    private function registerLog(ContainerBuilder $container, array $log, array $doctrine, bool $hasDoctrine): void
+    private function registerLog(ContainerBuilder $container, array $log, array $doctrine, bool $hasOrm): void
     {
-        $container->setDefinition(TablePrefixListener::class, (new Definition(TablePrefixListener::class, [$doctrine['table_prefix']]))
-            ->addTag('doctrine.event_listener', ['event' => 'loadClassMetadata']));
+        if ($log['enabled']) {
+            self::requireInterface(EntityManagerInterface::class, self::LOG_NEEDS_ORM);
+        }
+        if ($hasOrm) {
+            $container->setDefinition(TablePrefixListener::class, (new Definition(TablePrefixListener::class, [$doctrine['table_prefix']]))
+                ->addTag('doctrine.event_listener', ['event' => 'loadClassMetadata']));
+        }
 
-        if (!$log['enabled'] && !$hasDoctrine) {
+        if (!$log['enabled'] && !$hasOrm) {
             $container->setDefinition(NullSentMailErasure::class, new Definition(NullSentMailErasure::class));
             $container->setAlias(SentMailErasureInterface::class, NullSentMailErasure::class)->setPublic(true);
             $container->setAlias(SentMailPersonalDataEraserInterface::class, NullSentMailErasure::class)->setPublic(true);
@@ -924,8 +957,11 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $container->setAlias(MailerDsnProviderInterface::class, is_string($provider) && $provider !== '' ? $provider : SettingsMailerDsnProvider::class);
 
         $senderProvider = $mailer['sender_provider'];
-        $container->setAlias(SenderProviderInterface::class, is_string($senderProvider) && $senderProvider !== '' ? $senderProvider : MailSettings::class);
-        $container->setDefinition(SenderPolicy::class, new Definition(SenderPolicy::class, [new Reference(SenderProviderInterface::class)]));
+        $container->setAlias(SenderIdentityProviderInterface::class, is_string($senderProvider) && $senderProvider !== '' ? $senderProvider : MailSettings::class);
+        $container->setDefinition(SenderPolicy::class, new Definition(SenderPolicy::class, [
+            new Reference(SenderIdentityProviderInterface::class),
+            new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+        ]));
 
         $transport = (new Definition(RuntimeTransport::class, [
             new Reference($mailer['decorate'] ? RuntimeTransport::class . '.inner' : 'mailer.transports'),
@@ -991,7 +1027,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             $config['sender']['require_public_domain'],
             new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE),
             // The test e-mail uses the same sender as real mail (LL-MK-L2): the host port when one is set.
-            !$settings || $hostSender ? new Reference(SenderProviderInterface::class) : null,
+            !$settings || $hostSender ? new Reference(SenderIdentityProviderInterface::class) : null,
         ]))->setPublic(true));
 
         $container->setDefinition(self::LIMITER_ID, new Definition(RateLimiterFactory::class, [

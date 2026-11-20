@@ -79,7 +79,7 @@ abstract class KernelTestCase extends TestCase
         $this->kernels[] = $kernel;
         $kernel->boot();
 
-        if (in_array('doctrine', $without, true)) {
+        if (in_array('doctrine', $without, true) || in_array('orm', $without, true)) {
             return $kernel;
         }
         $doctrine = $kernel->getContainer()->get('doctrine');

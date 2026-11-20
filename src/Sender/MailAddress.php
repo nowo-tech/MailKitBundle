@@ -13,8 +13,7 @@ use function trim;
 
 /**
  * Framework-free e-mail address of the sender ports (1.12, REQ-ARCH-001 rule 3): the value object
- * {@see SenderIdentityProviderInterface} takes and returns instead of the Symfony Mime `Address` of the deprecated
- * {@see SenderProviderInterface}.
+ * {@see SenderIdentityProviderInterface} takes and returns instead of a Symfony Mime `Address`.
  *
  * Holds the address and an optional display name, nothing else: no validation beyond "there is an address", so a host
  * domain can build one without a mailer installed. MailKit validates deliverability where it matters

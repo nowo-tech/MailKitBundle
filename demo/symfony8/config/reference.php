@@ -1666,7 +1666,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *     mailer?: array{
  *         decorate?: bool|Param, // Decorate the framework mailer (mailer.mailer) and transports (mailer.transports) so every send resolves the DSN at runtime. false = only the MailKit services are available. // Default: true
  *         dsn_provider?: scalar|Param|null, // Service id implementing MailerDsnProviderInterface; null = the Instance Settings provider (mailer section). // Default: null
- *         sender_provider?: scalar|Param|null, // Service id implementing Sender\SenderIdentityProviderInterface (since 1.12) or the deprecated Sender\SenderProviderInterface (default From / Reply-To); null = the Instance Settings mailer section. Since 1.5. // Default: null
+ *         sender_provider?: scalar|Param|null, // Service id implementing Sender\SenderIdentityProviderInterface (default From / Reply-To; the Mime-typed SenderProviderInterface was removed in 2.0); null = the Instance Settings mailer section. Since 1.5. // Default: null
  *         fallback_counts_as_ready?: bool|Param, // Treat the framework transport (MAILER_DSN) as deliverable for isOutboundMailReady() when no runtime DSN is stored. // Default: false
  *     },
  *     dsn?: array{ // Validation of the DSNs stored from the admin UI (the framework MAILER_DSN fallback is trusted ops configuration).
@@ -1696,7 +1696,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *     },
  *     log?: array{ // Sent-mail log (one row per message: status, subject, sender, recipients, transport).
  *         enabled?: bool|Param, // Default: true
- *         map_entities?: bool|Param, // 1.6: add the Doctrine mapping of the log entities (SentMail, SentMailBody). false (only with enabled: false) keeps them out of your entity manager, e.g. on an XML-mapping-only DDD host; drop or purge existing log tables yourself first. Default true; planned to follow log.enabled in 2.0. // Default: true
+ *         map_entities?: bool|Param|null, // 1.6: add the Doctrine mapping of the log entities (SentMail, SentMailBody). false (only with enabled: false) keeps them out of your entity manager, e.g. on an XML-mapping-only DDD host; drop or purge existing log tables yourself first. Unset (null) follows log.enabled since 2.0 (it was true in 1.x): set true to keep the tables of a log you turned off mapped. // Default: null
  *         store_bodies?: bool|Param, // Also store the HTML / text bodies (personal data; secrets passed through the redact header are masked). Off by default (privacy / GDPR). // Default: false
  *         retention_days?: int|Param, // Rows older than this are deleted by nowo:mail-kit:log:purge (schedule it). // Default: 30
  *         purge_batch_size?: int|Param, // Rows deleted per statement by the purge (keyset batches). // Default: 1000

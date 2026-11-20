@@ -157,6 +157,7 @@ use function is_string;
 use function sprintf;
 use function str_contains;
 use function strlen;
+use function trigger_deprecation;
 
 /**
  * Loads `nowo_mail_kit`: the Instance Settings sections, DSN / sender validation, the runtime transport and mailer
@@ -256,6 +257,28 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
     }
 
     /**
+     * 1.14 (REQ-ARCH-001, 2.0 deprecation layer): `log.map_entities` defaults to true in 1.x and to `log.enabled` in
+     * 2.0. The two differ only with `log.enabled: false` and DoctrineBundle present (without it nothing is mapped
+     * either way), so the build-time notice fires there, when the option is not set. Setting it, to either value,
+     * silences the notice: true keeps today's mapping, false opts in to the 2.0 behaviour now.
+     *
+     * @param array<array-key, mixed> $configs unprocessed configuration (to tell an unset option from its default)
+     */
+    private function deprecateUnsetMapEntities(array $configs, bool $logEnabled, bool $hasDoctrine): void
+    {
+        if ($logEnabled || !$hasDoctrine) {
+            return;
+        }
+        foreach ($configs as $config) {
+            if (is_array($config) && is_array($config['log'] ?? null) && array_key_exists('map_entities', $config['log'])) {
+                return;
+            }
+        }
+
+        trigger_deprecation('nowo-tech/mail-kit-bundle', '1.14', 'Not setting "nowo_mail_kit.log.map_entities" while "nowo_mail_kit.log.enabled" is false is deprecated: it keeps the log entities (SentMail, SentMailBody) mapped in your entity manager. In 2.0 the option defaults to "log.enabled" (false here), so they are no longer mapped and your schema tool proposes dropping their tables. Set "nowo_mail_kit.log.map_entities: true" to keep the mapping, or "nowo_mail_kit.log.map_entities: false" to opt in to the 2.0 behaviour now (see UPGRADING.md "To 1.14.0").');
+    }
+
+    /**
      * Since 1.3 the Resend fields and actions belong to the `mailer` area: an Instance Settings
      * `security.area_roles.resend` entry would be silently ignored (audit CU-L1), so with `resend.enabled` the build
      * fails until the host merges it into `mailer` (or removes it).
@@ -312,6 +335,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         }
         $this->registerValidation($container, $config['dsn']);
         $hasDoctrine = $this->hasBundle($container, 'DoctrineBundle') || $container->hasExtension('doctrine');
+        $this->deprecateUnsetMapEntities($configs, $config['log']['enabled'], $hasDoctrine);
         $this->registerLog($container, $config['log'], $config['doctrine'], $hasDoctrine);
         $this->registerPersonalData($container, $config['personal_data'], ($config['log']['enabled'] || $hasDoctrine) && $config['log']['map_entities']);
         $this->registerMailer($container, $config, $settings);

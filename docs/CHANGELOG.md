@@ -6,24 +6,27 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+  - [Added](#added)
+  - [Changed](#changed)
+  - [Deprecated](#deprecated)
 - [[1.13.1] - 2026-11-19](#1131---2026-11-19)
   - [Fixed](#fixed)
 - [[1.13.0] - 2026-11-19](#1130---2026-11-19)
-  - [Added](#added)
-  - [Changed](#changed)
+  - [Added](#added-1)
+  - [Changed](#changed-1)
   - [Fixed](#fixed-1)
   - [Demo](#demo)
 - [[1.12.2] - 2026-11-14](#1122---2026-11-14)
   - [Fixed](#fixed-2)
 - [[1.12.1] - 2026-11-14](#1121---2026-11-14)
-  - [Added](#added-1)
+  - [Added](#added-2)
   - [Fixed](#fixed-3)
 - [[1.12.0] - 2026-11-14](#1120---2026-11-14)
-  - [Added](#added-2)
-  - [Changed](#changed-1)
+  - [Added](#added-3)
+  - [Changed](#changed-2)
   - [Tests](#tests)
 - [[1.11.0] - 2026-11-13](#1110---2026-11-13)
-  - [Changed](#changed-2)
+  - [Changed](#changed-3)
   - [Tests](#tests-1)
   - [Documentation](#documentation)
 - [[1.10.2] - 2026-11-12](#1102---2026-11-12)
@@ -31,21 +34,21 @@ All notable changes to this project are documented here. The format follows
 - [[1.10.1] - 2026-11-12](#1101---2026-11-12)
   - [Fixed](#fixed-5)
 - [[1.10.0] - 2026-11-12](#1100---2026-11-12)
-  - [Added](#added-3)
-  - [Changed](#changed-3)
+  - [Added](#added-4)
+  - [Changed](#changed-4)
   - [Tests](#tests-2)
 - [[1.9.1] - 2026-11-12](#191---2026-11-12)
   - [Fixed](#fixed-6)
   - [Security](#security)
 - [[1.9.0] - 2026-11-12](#190---2026-11-12)
-  - [Added](#added-4)
-  - [Changed](#changed-4)
+  - [Added](#added-5)
+  - [Changed](#changed-5)
   - [Audit NQ (before the 1.9.0 tag)](#audit-nq-before-the-190-tag)
   - [Audit NQ-v (verification, before the 1.9.0 tag)](#audit-nq-v-verification-before-the-190-tag)
   - [Security](#security-1)
   - [Tests](#tests-3)
 - [[1.8.0] - 2026-11-12](#180---2026-11-12)
-  - [Added](#added-5)
+  - [Added](#added-6)
   - [Security](#security-2)
   - [Tests](#tests-4)
 - [[1.7.1] - 2026-11-11](#171---2026-11-11)
@@ -53,42 +56,62 @@ All notable changes to this project are documented here. The format follows
   - [Tests](#tests-5)
   - [Documentation](#documentation-1)
 - [[1.7.0] - 2026-11-11](#170---2026-11-11)
-  - [Added](#added-6)
-  - [Changed](#changed-5)
-- [[1.6.0] - 2026-11-11](#160---2026-11-11)
   - [Added](#added-7)
   - [Changed](#changed-6)
-- [[1.5.0] - 2026-11-10](#150---2026-11-10)
+- [[1.6.0] - 2026-11-11](#160---2026-11-11)
   - [Added](#added-8)
   - [Changed](#changed-7)
-- [[1.4.0] - 2026-11-09](#140---2026-11-09)
+- [[1.5.0] - 2026-11-10](#150---2026-11-10)
   - [Added](#added-9)
+  - [Changed](#changed-8)
+- [[1.4.0] - 2026-11-09](#140---2026-11-09)
+  - [Added](#added-10)
   - [Security](#security-3)
 - [[1.3.0] - 2026-11-02](#130---2026-11-02)
-  - [Added](#added-10)
-  - [Changed](#changed-8)
-  - [Security](#security-4)
-- [[1.2.0] - 2026-11-02](#120---2026-11-02)
   - [Added](#added-11)
   - [Changed](#changed-9)
+  - [Security](#security-4)
+- [[1.2.0] - 2026-11-02](#120---2026-11-02)
+  - [Added](#added-12)
+  - [Changed](#changed-10)
   - [Fixed](#fixed-8)
 - [[1.1.1] - 2026-11-01](#111---2026-11-01)
   - [Security](#security-5)
-  - [Changed](#changed-10)
+  - [Changed](#changed-11)
   - [Fixed](#fixed-9)
 - [[1.1.0] - 2026-11-01](#110---2026-11-01)
-  - [Added](#added-12)
-  - [Changed](#changed-11)
-- [[1.0.0] - 2026-10-31](#100---2026-10-31)
   - [Added](#added-13)
+  - [Changed](#changed-12)
+- [[1.0.0] - 2026-10-31](#100---2026-10-31)
+  - [Added](#added-14)
   - [Security (independent audit, Appendix CA)](#security-independent-audit-appendix-ca)
   - [Security (re-verification follow-ups)](#security-re-verification-follow-ups)
 
 ## [Unreleased]
 
+### Added
+
+- **2.0 deprecation layer (REQ-ARCH-001, last 1.x minor).** Build-time deprecation notices for everything 2.0 changes,
+  raised once per container build, so the application's deprecation log lists what to migrate (UPGRADING
+  "To 1.14.0"). UPGRADING gains "Preparing for 2.0" (Composer moves, removed port, 1.x security support).
+
 ### Changed
 
-- Requires `nowo-tech/transaction-doctrine` ^1.8.1 (fixes GHSA-9wh3-m3m5-jffx and GHSA-65w2-9r4h-848g).
+- Requires `nowo-tech/transaction-doctrine` ^1.9 (was ^1.8.1, which fixed GHSA-9wh3-m3m5-jffx and
+  GHSA-65w2-9r4h-848g). MailKit never flushes the application's entity manager, so it uses no host-flush probe.
+
+### Deprecated
+
+- **`log.map_entities` unset while `log.enabled` is false** (with DoctrineBundle installed): the log entities stay
+  mapped in 1.x, but in 2.0 the option defaults to `log.enabled` and they are no longer mapped. Set
+  `log.map_entities` explicitly (`true` keeps the mapping, `false` is the 2.0 behaviour). With the log on, or without
+  DoctrineBundle, nothing changes and there is no notice.
+- **Host classes on `Sender\SenderProviderInterface`** (deprecated since 1.12, removed in 2.0) now get a build-time
+  notice: the `mailer.sender_provider` service and every decorator of the sender that implements it. Before, only
+  the `@deprecated` tag reported them, in debug mode.
+- **Composer moves announced for 2.0:** `nowo-tech/instance-settings-bundle`, `nowo-tech/doctrine-encrypt-bundle` and
+  `doctrine/orm` move from `require` to `suggest`. No runtime notice is possible; require them directly if your
+  application uses them.
 
 ## [1.13.1] - 2026-11-19
 

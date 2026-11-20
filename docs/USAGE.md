@@ -758,7 +758,8 @@ in `doctrine.entity_manager`.
 **Known limitations**
 
 - Instance Settings, DoctrineEncrypt and the ORM stay in composer `require` in 1.x (installed, not registered); 2.0
-  moves them to `suggest`.
+  moves them to `suggest`. If your application uses any of them itself, require it directly now (see
+  [UPGRADING "Preparing for 2.0"](UPGRADING.md#preparing-for-20)).
 - `SentMailRepository` returns the `SentMail` entity (admin read model): wrap it in your own query port if your
   application layer must not depend on it.
 

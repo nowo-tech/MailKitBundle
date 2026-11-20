@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.14.1](#to-1141)
 - [To 1.14.0](#to-1140)
 - [To 1.14.0](#to-1140-1)
   - [`log.map_entities` unset with the log off](#logmap_entities-unset-with-the-log-off)
@@ -53,6 +54,14 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+## To 1.14.1
+
+From **1.14.0**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
 
 ## To 1.14.0
 

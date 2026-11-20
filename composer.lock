@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "15150d963a698e6f6ce6681661d94857",
+    "content-hash": "6c3fcf59ec9647c273371edbd385f03b",
     "packages": [
         {
             "name": "doctrine/collections",
@@ -1625,16 +1625,16 @@
         },
         {
             "name": "nowo-tech/transaction-doctrine",
-            "version": "v1.6.1",
+            "version": "v1.8.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/transaction-doctrine.git",
-                "reference": "2508e7689c0051c28ca8532a4cdf31ca7bfff311"
+                "reference": "887fc325ef20787bc108cbfea6a267dfd4e938fe"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/transaction-doctrine/zipball/2508e7689c0051c28ca8532a4cdf31ca7bfff311",
-                "reference": "2508e7689c0051c28ca8532a4cdf31ca7bfff311",
+                "url": "https://api.github.com/repos/nowo-tech/transaction-doctrine/zipball/887fc325ef20787bc108cbfea6a267dfd4e938fe",
+                "reference": "887fc325ef20787bc108cbfea6a267dfd4e938fe",
                 "shasum": ""
             },
             "require": {
@@ -1692,7 +1692,8 @@
             },
             "autoload": {
                 "psr-4": {
-                    "Nowo\\TransactionDoctrine\\": "src/"
+                    "Nowo\\TransactionDoctrine\\": "src/",
+                    "Nowo\\TransactionDoctrine\\WriteUnit\\Dbal\\Dbal3\\": "compat/dbal3/"
                 }
             },
             "notification-url": "https://packagist.org/downloads/",
@@ -1730,8 +1731,8 @@
                 "issues": "https://github.com/nowo-tech/transaction-doctrine/issues",
                 "source": "https://github.com/nowo-tech/transaction-doctrine"
             },
-            "time": "2026-11-18T23:35:00+00:00",
-            "published-time": "2026-11-18T23:37:46+00:00"
+            "time": "2026-11-20T06:09:11+00:00",
+            "published-time": "2026-11-20T06:14:34+00:00"
         },
         {
             "name": "nowo-tech/ui-kit-bundle",

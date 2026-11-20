@@ -90,6 +90,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The Doctrine mapping the bundle prepends (`NowoMailKitBundle`) no longer sets the ORM mapping `alias` option, deprecated in DoctrineBundle 3.4 (removed in 4.0, ORM has no entity namespace aliases). The alias was not used anywhere (the bundle needs ORM 3); a test pins that booting raises no such deprecation and the entities stay mapped.
+
 ## [1.14.0] - 2026-11-20
 
 ### Added

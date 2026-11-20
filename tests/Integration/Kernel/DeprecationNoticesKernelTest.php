@@ -4,10 +4,16 @@ declare(strict_types=1);
 
 namespace Nowo\MailKitBundle\Tests\Integration\Kernel;
 
+use Doctrine\Bundle\DoctrineBundle\DependencyInjection\DoctrineExtension;
+use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\Persistence\ManagerRegistry;
+use Nowo\MailKitBundle\DependencyInjection\NowoMailKitExtension;
+use Nowo\MailKitBundle\Entity\SentMail;
 use Nowo\MailKitBundle\Tests\Support\DeprecationRecorder;
 use Nowo\MailKitBundle\Tests\Support\StaticSenderIdentityProvider;
 use Nowo\MailKitBundle\Tests\Support\StaticSenderProvider;
 use Nowo\MailKitBundle\Tests\Unit\DependencyInjection\MapEntitiesDeprecationTest;
+use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 
 use function array_filter;
@@ -46,6 +52,46 @@ final class DeprecationNoticesKernelTest extends KernelTestCase
 
         self::assertCount(1, $notices);
         self::assertStringContainsString('The sender service "' . StaticSenderProvider::class . '"', $notices[0]);
+    }
+
+    /**
+     * DoctrineBundle 3.4 deprecates the ORM mapping `alias` option; the prepended mapping must not set it and must
+     * still load.
+     */
+    public function testThePrependedDoctrineMappingSetsNoDeprecatedAlias(): void
+    {
+        $kernel  = null;
+        $notices = DeprecationRecorder::record(function () use (&$kernel): void {
+            $kernel = $this->bootKernel();
+        });
+        $aliasHits = array_values(array_filter($notices, static fn (string $message): bool => str_contains($message, 'alias option')));
+
+        self::assertSame([], $aliasHits);
+        self::assertInstanceOf(MailKitTestKernel::class, $kernel);
+        $manager = $this->service($kernel, ManagerRegistry::class)->getManager();
+        self::assertInstanceOf(EntityManagerInterface::class, $manager);
+        self::assertTrue($manager->getMetadataFactory()->hasMetadataFor(SentMail::class));
+        self::assertSame([], $this->prependedAliases());
+    }
+
+    /**
+     * @return list<string> mapping names of the prepended Doctrine config that set an `alias`
+     */
+    private function prependedAliases(): array
+    {
+        $container = new ContainerBuilder();
+        $container->registerExtension(new DoctrineExtension());
+        (new NowoMailKitExtension())->prepend($container);
+        $names = [];
+        foreach ($container->getExtensionConfig('doctrine') as $config) {
+            foreach ($config['orm']['mappings'] ?? [] as $name => $mapping) {
+                if (isset($mapping['alias'])) {
+                    $names[] = $name;
+                }
+            }
+        }
+
+        return $names;
     }
 
     /**

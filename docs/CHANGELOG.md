@@ -45,7 +45,9 @@ last 1.x minor (1.14) without MailKit deprecation notices upgrades without code 
   `Nowo\MailKitBundle\Sender\SenderProviderInterface` alias. A `mailer.sender_provider` service or a sender decorator
   that does not implement `SenderIdentityProviderInterface` (including a class that still implements the removed
   interface, which can no longer be loaded) fails the container build with a message naming the service and its class;
-  so does a service that still decorates the removed id.
+  so does a service that still decorates the removed id, and a class registered by resource autodiscovery that
+  still implements the removed interface (Symfony keeps only a loading error on its definition and would otherwise
+  drop it silently, `#[AsDecorator]` / `#[AsAlias]` unread).
 - **BREAKING (API):** **`Settings\ResendSettingsSection`** (constant holder, deprecated since 1.3). Use `MailerSettingsSection::NAME` or
   `LegacyResendSettings::SECTION`.
 - **BREAKING (deprecation layer):** **The 1.14 build-time deprecation notices** (`log.map_entities` unset with the log off, host classes on

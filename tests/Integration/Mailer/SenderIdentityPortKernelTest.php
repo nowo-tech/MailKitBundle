@@ -9,6 +9,7 @@ use Nowo\MailKitBundle\Sender\SenderIdentityProviderInterface;
 use Nowo\MailKitBundle\Settings\MailSettings;
 use Nowo\MailKitBundle\TestMail\TestMailOutcome;
 use Nowo\MailKitBundle\TestMail\TestMailSender;
+use Nowo\MailKitBundle\Tests\Fixtures\RemovedPort\Autodiscovered\AutodiscoveredLegacySenderDecorator;
 use Nowo\MailKitBundle\Tests\Fixtures\RemovedPort\RemovedPortSenderDecorator;
 use Nowo\MailKitBundle\Tests\Fixtures\RemovedPort\RemovedPortSenderProvider;
 use Nowo\MailKitBundle\Tests\Integration\Kernel\KernelTestCase;
@@ -95,6 +96,25 @@ final class SenderIdentityPortKernelTest extends KernelTestCase
             self::fail('A sender on the removed port must fail the build.');
         } catch (LogicException $e) {
             self::assertStringContainsString('the service "app.sender" (' . RemovedPortSenderProvider::class . ') must implement "' . SenderIdentityProviderInterface::class . '"', $e->getMessage());
+            self::assertStringContainsString('UPGRADING.md "To 1.12.0" and "To 2.0.0"', $e->getMessage());
+        }
+    }
+
+    /**
+     * Resource autodiscovery (`services.load()`) cannot load a class on the removed port: Symfony keeps a definition
+     * with only an error and would drop it unused, so its `#[AsDecorator]` would be lost silently. The build fails.
+     */
+    public function testAnAutodiscoveredHostClassStillOnTheRemovedPortFailsTheBuild(): void
+    {
+        try {
+            $this->bootKernel(extra: static function (ContainerConfigurator $container): void {
+                $container->services()->defaults()->autowire()->autoconfigure()
+                    ->load('Nowo\\MailKitBundle\\Tests\\Fixtures\\RemovedPort\\Autodiscovered\\', __DIR__ . '/../../Fixtures/RemovedPort/Autodiscovered/');
+            });
+            self::fail('An autodiscovered class on the removed port must fail the build.');
+        } catch (LogicException $e) {
+            self::assertStringContainsString('The service "' . AutodiscoveredLegacySenderDecorator::class . '" cannot be loaded', $e->getMessage());
+            self::assertStringContainsString('Nowo\MailKitBundle\Sender\SenderProviderInterface', $e->getMessage());
             self::assertStringContainsString('UPGRADING.md "To 1.12.0" and "To 2.0.0"', $e->getMessage());
         }
     }

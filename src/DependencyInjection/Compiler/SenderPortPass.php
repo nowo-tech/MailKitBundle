@@ -13,6 +13,7 @@ use function array_pop;
 use function in_array;
 use function is_string;
 use function sprintf;
+use function str_contains;
 
 /**
  * Refuses, when the container is built, a sender service that does not implement {@see SenderIdentityProviderInterface}
@@ -23,7 +24,11 @@ use function sprintf;
  *
  * - the configured service implements the port;
  * - every decorator of the port id, of the configured service and of the aliases on the way to it implements it too;
- * - nothing decorates the id of the Mime-typed `SenderProviderInterface`, removed in 2.0 ({@see self::REMOVED_PORT}).
+ * - nothing decorates the id of the Mime-typed `SenderProviderInterface`, removed in 2.0 ({@see self::REMOVED_PORT});
+ * - no service definition carries a loading error about that interface. A host class registered by resource
+ *   autodiscovery that still implements it cannot be loaded, so Symfony keeps the definition with only an error
+ *   ("… not found while loading …") and its `#[AsDecorator]` / `#[AsAlias]` attributes are never read; unused, the
+ *   definition would later be removed without a word and the host's sender change would be lost silently.
  *
  * A class that still implements the removed interface cannot even be loaded, so the classes are read through
  * {@see ContainerBuilder::getReflectionClass()} without throwing, and each failure names the service, its class and
@@ -47,6 +52,11 @@ final class SenderPortPass implements CompilerPassInterface
     public function process(ContainerBuilder $container): void
     {
         foreach ($container->getDefinitions() as $id => $definition) {
+            foreach ($definition->getErrors() as $error) {
+                if (str_contains((string) $error, self::REMOVED_PORT)) {
+                    throw new LogicException(sprintf('The service "%s" cannot be loaded: %s %s', $id, (string) $error, $this->removedPortHint()));
+                }
+            }
             if (($definition->getDecoratedService()[0] ?? null) === self::REMOVED_PORT) {
                 throw new LogicException(sprintf('The service "%s" decorates "%s", which was removed in MailKit 2.0. Decorate "%s" instead and implement it (see UPGRADING.md "To 1.12.0" and "To 2.0.0").', $id, self::REMOVED_PORT, SenderIdentityProviderInterface::class));
             }

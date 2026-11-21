@@ -160,6 +160,17 @@ final class SenderPortPassTest extends TestCase
         (new SenderPortPass())->process($container);
     }
 
+    public function testADefinitionThatCouldNotLoadBecauseOfTheRemovedPortIsRefused(): void
+    {
+        $container = $this->host(MailSettings::class, MailSettings::class);
+        $container->setDefinition('App\Mail\Other', (new Definition('App\Mail\Other'))->addError('Class "App\Mail\Other" not found while loading "App\".'));
+        $container->setDefinition('App\Mail\LegacySender', (new Definition('App\Mail\LegacySender'))->addError('Interface "Nowo\MailKitBundle\Sender\SenderProviderInterface" not found while loading "App\Mail\LegacySender".'));
+
+        $this->expectException(LogicException::class);
+        $this->expectExceptionMessage('The service "App\Mail\LegacySender" cannot be loaded: Interface "Nowo\MailKitBundle\Sender\SenderProviderInterface" not found while loading "App\Mail\LegacySender". "Nowo\MailKitBundle\Sender\SenderProviderInterface" was removed in 2.0');
+        (new SenderPortPass())->process($container);
+    }
+
     public function testADecoratorOfTheRemovedPortIdIsRefusedWithoutASenderAlias(): void
     {
         $container = new ContainerBuilder();

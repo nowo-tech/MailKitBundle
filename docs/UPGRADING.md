@@ -152,7 +152,10 @@ PHP fatal error or a `TypeError` on the first send:
 
 - a `mailer.sender_provider` service, or a decorator of the sender, that does not implement
   `SenderIdentityProviderInterface` (a class that still implements the removed interface included);
-- a service that still decorates `Nowo\MailKitBundle\Sender\SenderProviderInterface`.
+- a service that still decorates `Nowo\MailKitBundle\Sender\SenderProviderInterface`;
+- a class registered by resource autodiscovery (`services: App\: resource: ...`) that still implements the removed
+  interface, for example with `#[AsDecorator]` or `#[AsAlias]`. Symfony cannot load it and would otherwise drop the
+  definition without a word, losing your sender change.
 
 `MailSettings` (the built-in sender) implements `SenderIdentityProviderInterface`; its `from()` / `replyTo()` methods
 stay and return the same addresses as Symfony Mime values. `SenderPolicy` and `TestMailSender` now take

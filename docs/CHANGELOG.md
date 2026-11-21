@@ -74,6 +74,7 @@ last 1.x minor (1.14) without MailKit deprecation notices upgrades without code 
   mailer refuses is still left out with the same warning, now logged by `SenderPolicy`
   (`SenderPolicy::REFUSED_ADDRESS_MESSAGE`).
 - CI: new job "Without Instance Settings, DoctrineEncrypt and the ORM"; the workflows also run on the `1.x` branch.
+- demo: the demo runs inside UiKit's demo platform shell (`@NowoUiKit/demo_platform/layout.html.twig`, UiKit ^2.60): shared top bar, aside navigation and section cards, no demo masthead markup; the Web Debug Toolbar and the CDN hot-reload scripts are off in the demo and its README screenshots. Demo only, no release.
 
 ### Security
 

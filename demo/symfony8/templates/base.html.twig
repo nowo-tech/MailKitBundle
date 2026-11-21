@@ -1,25 +1,21 @@
-{#- REQ-DEMO-014: the demo shell is UiKit's admin layout with UiKit's default theme (nowo-ui.css from the bundle's own
-    asset package, no CSS framework, no CDN). The Instance Settings and MailKit pages render in it too
-    (nowo_ui_kit.layouts.admin). -#}
-{% extends '@NowoUiKit/layout/admin.html.twig' %}
+{#- REQ-DEMO-014: the demo runs inside UiKit's shared demo platform shell (@NowoUiKit/demo_platform/layout.html.twig):
+    the same top bar, aside, content width, theme and footer as every other nowo-tech bundle demo. This file only
+    declares the demo (nowo_ui_demo_platform). The Instance Settings and MailKit pages render in it too
+    (nowo_ui_kit.layouts). -#}
+{% extends '@NowoUiKit/demo_platform/layout.html.twig' %}
+{% set nowo_ui_demo_platform = {
+    bundle: 'Mail Kit',
+    home_route: 'demo_home',
+    repository: 'https://github.com/nowo-tech/MailKitBundle',
+    translation_domain: false,
+    nav: [
+        {label: 'Home', route: 'demo_home', section: 'Demo'},
+        {label: 'Mailer settings', route: 'nowo_instance_settings_section', params: {section: 'mailer'}, active: ['nowo_instance_settings_*'], section: 'Mail Kit admin'},
+        {label: 'Sent mail', route: 'nowo_mail_kit_log', active: ['nowo_mail_kit_*'], section: 'Mail Kit admin'},
+    ],
+} %}
 
-{% block nowo_ui_document_title %}{% block title %}Mail Kit Demo{% endblock %}{% endblock %}
-
-{% block nowo_ui_navigation %}
-    {% set _route = app.request.attributes.get('_route') %}
-    <header class="nowo-ui-header" data-testid="demo-masthead">
-        <a class="nowo-ui-brand" href="{{ path('demo_home') }}">Mail Kit Bundle Demo</a>
-        <nav class="nowo-ui-menu" aria-label="Mail Kit Bundle">
-            <a class="nowo-ui-link" href="{{ path('nowo_instance_settings_section', {section: 'mailer'}) }}"{% if _route starts with 'nowo_instance_settings' %} aria-current="page"{% endif %}>Mailer settings</a>
-            <a class="nowo-ui-link" href="{{ path('nowo_mail_kit_log') }}"{% if _route starts with 'nowo_mail_kit' %} aria-current="page"{% endif %}>Sent mail</a>
-        </nav>
-        <div class="nowo-ui-header__end">
-            {{ include('@NowoUiKitBundle/partials/_theme_toggle.html.twig', { compact: true }, false) }}
-        </div>
-    </header>
-{% endblock %}
-
-{% block nowo_ui_content %}{% block body %}{% endblock %}{% endblock %}
+{% block nowo_ui_document_title %}{% block title %}Mail Kit Demo{% endblock %} — Symfony 8{% endblock %}
 
 {% block nowo_ui_scripts %}
     {{ parent() }}

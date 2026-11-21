@@ -76,6 +76,15 @@ last 1.x minor (1.14) without MailKit deprecation notices upgrades without code 
 - CI: new job "Without Instance Settings, DoctrineEncrypt and the ORM"; the workflows also run on the `1.x` branch.
 - demo: the demo runs inside UiKit's demo platform shell (`@NowoUiKit/demo_platform/layout.html.twig`, UiKit ^2.60): shared top bar, aside navigation and section cards, no demo masthead markup; the Web Debug Toolbar and the CDN hot-reload scripts are off in the demo and its README screenshots. Demo only, no release.
 
+### Fixed
+
+- **A host entity holding a log row survives the CSV export.** `SentMailRepository::iterateFiltered()` (the streamed
+  export) and `findBodies()` detached every `SentMail` / `SentMailBody` they returned, including one the host had
+  already loaded on the same entity manager, for example through its own `ManyToOne` to `SentMail`. The host's next
+  flush then failed with "A new entity was found through the relationship …". They now detach only the rows they
+  loaded themselves. MailKit still never persists, flushes, clears, resets or closes the host's entity manager, and its
+  log entities have no association to host classes.
+
 ### Security
 
 - 1.x receives security fixes for 6 months after 2.0.0 is released: fixes rated Moderate and above are backported to

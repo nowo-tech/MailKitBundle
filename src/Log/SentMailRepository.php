@@ -17,6 +17,7 @@ use function array_keys;
 use function implode;
 use function in_array;
 use function mb_strtolower;
+use function spl_object_id;
 use function sprintf;
 
 /**
@@ -99,10 +100,13 @@ final readonly class SentMailRepository
     {
         $query   = $this->sorted($this->filtered($filters), $sort, $direction)->setMaxResults($limit)->getQuery();
         $manager = $this->manager();
+        $held    = $this->managed($manager, SentMail::class);
         /** @var SentMail $row */
         foreach ($query->toIterable() as $row) {
             yield $row;
-            $manager->detach($row);
+            if (!isset($held[spl_object_id($row)])) {
+                $manager->detach($row);
+            }
         }
     }
 
@@ -119,6 +123,7 @@ final readonly class SentMailRepository
             return [];
         }
         $manager = $this->manager();
+        $held    = $this->managed($manager, SentMailBody::class);
         /** @var list<SentMailBody> $bodies */
         $bodies = $manager->createQueryBuilder()->select('b')->from(SentMailBody::class, 'b')
             ->where('b.id IN (:ids)')->setParameter('ids', $ids)
@@ -126,7 +131,9 @@ final readonly class SentMailRepository
         $byId = [];
         foreach ($bodies as $body) {
             $byId[$body->getId()] = $body;
-            $manager->detach($body);
+            if (!isset($held[spl_object_id($body)])) {
+                $manager->detach($body);
+            }
         }
 
         return $byId;
@@ -207,6 +214,25 @@ final readonly class SentMailRepository
         }
 
         return $qb->addOrderBy('m.id', $direction);
+    }
+
+    /**
+     * The log entities of a class the manager already holds before a read (by object id). The streamed export and the
+     * body lookup detach only the rows they loaded themselves: a row the host loaded on the same manager (for example
+     * through its own association to `SentMail`) stays managed, so the host's next flush never meets a detached entity.
+     *
+     * @param class-string $class
+     *
+     * @return array<int, true>
+     */
+    private function managed(EntityManagerInterface $manager, string $class): array
+    {
+        $held = [];
+        foreach ($manager->getUnitOfWork()->getIdentityMap()[$class] ?? [] as $entity) {
+            $held[spl_object_id($entity)] = true;
+        }
+
+        return $held;
     }
 
     private function manager(): EntityManagerInterface

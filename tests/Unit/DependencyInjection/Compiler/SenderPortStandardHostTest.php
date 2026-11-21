@@ -7,12 +7,9 @@ namespace Nowo\MailKitBundle\Tests\Unit\DependencyInjection\Compiler;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\SenderPortPass;
 use Nowo\MailKitBundle\Sender\SenderIdentityProviderInterface;
 use Nowo\MailKitBundle\Sender\SenderPolicy;
-use Nowo\MailKitBundle\Sender\SenderProviderInterface;
 use Nowo\MailKitBundle\Settings\MailSettings;
 use Nowo\MailKitBundle\TestMail\TestMailSender;
-use Nowo\MailKitBundle\Tests\Support\DualSenderProvider;
 use Nowo\MailKitBundle\Tests\Support\StaticSenderIdentityProvider;
-use Nowo\MailKitBundle\Tests\Support\StaticSenderProvider;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use stdClass;
@@ -31,11 +28,13 @@ use function ksort;
 use const JSON_THROW_ON_ERROR;
 
 /**
- * 1.12.2: a host that decorates neither sender port gets the same compiled wiring as in 1.12.1.
+ * 2.0: the pass only checks the sender service; it never rewires it. A host that decorates nothing gets the compiled
+ * wiring the extension asked for: the bundle's two sender consumers on the configured service.
  *
- * The fixture `sender-port-standard-hosts.json` was recorded with the 1.12.1 pass. Each case compiles a container with
- * the pass, the bundle's two sender consumers (wired as the extension wires them) and a host provider of each kind,
- * and compares every compiled definition (class, factory, arguments, inlined gates) and alias with that record.
+ * The fixture `sender-port-standard-hosts.json` was recorded with the 2.0 pass (the 1.12.1 records of the rows of the
+ * removed `SenderProviderInterface` and of its gate were dropped). Each case compiles a container with the pass, the
+ * two consumers (wired as the extension wires them) and a host provider of each kind, and compares every compiled
+ * definition (class, factory, arguments) and alias with that record.
  */
 final class SenderPortStandardHostTest extends TestCase
 {
@@ -44,13 +43,13 @@ final class SenderPortStandardHostTest extends TestCase
      */
     public static function hosts(): iterable
     {
-        foreach (['settings', 'deprecated', 'identity', 'dual', 'unknowable'] as $host) {
+        foreach (['settings', 'identity', 'unknowable'] as $host) {
             yield $host => [$host];
         }
     }
 
     #[DataProvider('hosts')]
-    public function testTheCompiledWiringOfAStandardHostIsThatOf1121(string $host): void
+    public function testTheCompiledWiringOfAStandardHostIsUnchangedByThePass(string $host): void
     {
         $recorded = json_decode((string) file_get_contents(__DIR__ . '/../../../Fixtures/sender-port-standard-hosts.json'), true, 512, JSON_THROW_ON_ERROR);
         self::assertIsArray($recorded);
@@ -67,29 +66,26 @@ final class SenderPortStandardHostTest extends TestCase
     {
         $container = new ContainerBuilder();
         $sender    = match ($host) {
-            'settings'   => MailSettings::class,
-            'deprecated' => StaticSenderProvider::class,
-            'identity'   => StaticSenderIdentityProvider::class,
-            'dual'       => DualSenderProvider::class,
-            default      => 'app.sender',
+            'settings' => MailSettings::class,
+            'identity' => StaticSenderIdentityProvider::class,
+            default    => 'app.sender',
         };
         if ($host === 'unknowable') {
-            $container->setDefinition($sender, (new Definition(stdClass::class))->setFactory([StaticSenderProvider::class, 'create']));
+            $container->setDefinition($sender, (new Definition(stdClass::class))->setFactory([StaticSenderIdentityProvider::class, 'create']));
         } else {
             $container->setDefinition($sender, new Definition($sender));
         }
-        $container->setAlias(SenderProviderInterface::class, $sender);
-        $container->setDefinition(SenderPolicy::class, (new Definition(SenderPolicy::class, [new Reference(SenderProviderInterface::class)]))->setPublic(true));
+        $container->setAlias(SenderIdentityProviderInterface::class, $sender);
+        $container->setDefinition(SenderPolicy::class, (new Definition(SenderPolicy::class, [new Reference(SenderIdentityProviderInterface::class), null]))->setPublic(true));
         $container->setDefinition(TestMailSender::class, (new Definition(TestMailSender::class, [
             null,
             null,
             null,
             true,
             null,
-            $host === 'settings' ? null : new Reference(SenderProviderInterface::class),
+            $host === 'settings' ? null : new Reference(SenderIdentityProviderInterface::class),
         ]))->setPublic(true));
-        $container->setAlias('test.old', SenderProviderInterface::class)->setPublic(true);
-        $container->setAlias('test.new', SenderIdentityProviderInterface::class)->setPublic(true);
+        $container->setAlias('test.sender', SenderIdentityProviderInterface::class)->setPublic(true);
         $container->addCompilerPass(new SenderPortPass(), PassConfig::TYPE_BEFORE_OPTIMIZATION);
         $container->compile(true);
 

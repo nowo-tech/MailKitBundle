@@ -9,14 +9,10 @@ use Nowo\MailKitBundle\Sender\MailAddress;
 use Nowo\MailKitBundle\Sender\MimeAddressMapper;
 use Nowo\MailKitBundle\Sender\SenderIdentityProviderInterface;
 use Nowo\MailKitBundle\Sender\SenderPolicy;
-use Nowo\MailKitBundle\Sender\SenderProviderGate;
-use Nowo\MailKitBundle\Sender\SenderProviderInterface;
 use Nowo\MailKitBundle\Settings\MailSettings;
-use Nowo\MailKitBundle\Tests\Support\DualSenderProvider;
 use Nowo\MailKitBundle\Tests\Support\FakeSettings;
 use Nowo\MailKitBundle\Tests\Support\RecordingLogger;
 use Nowo\MailKitBundle\Tests\Support\StaticSenderIdentityProvider;
-use Nowo\MailKitBundle\Tests\Support\StaticSenderProvider;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Mime\Address;
@@ -27,7 +23,7 @@ use function json_encode;
 use function var_export;
 
 /**
- * 1.12: the framework-free sender port, its value object and the gate that serves the deprecated port from it.
+ * The framework-free sender port (1.12; the only one since 2.0), its value object and the sender policy that reads it.
  */
 final class SenderIdentityTest extends TestCase
 {
@@ -84,94 +80,16 @@ final class SenderIdentityTest extends TestCase
         self::assertNull(MimeAddressMapper::toMimeAddress(new MailAddress('not-an-address')));
     }
 
-    public function testTheGateServesTheDeprecatedPortFromTheNewOne(): void
+    public function testThePolicyFillsTheSenderFromThePort(): void
     {
-        $gate = new SenderProviderGate(new class implements SenderIdentityProviderInterface {
-            public function defaultFrom(): MailAddress
-            {
-                return new MailAddress('tenant@example.com', 'Tenant');
-            }
-
-            public function defaultReplyTo(): ?MailAddress
-            {
-                return null;
-            }
-        });
-
         $email = new Email();
-        (new SenderPolicy($gate))->apply($email);
+        (new SenderPolicy(new StaticSenderIdentityProvider()))->apply($email);
 
         self::assertSame('"Tenant" <tenant@example.com>', $email->getFrom()[0]->toString());
-        self::assertSame([], $email->getReplyTo());
+        self::assertSame('tenant-help@example.com', $email->getReplyTo()[0]->getAddress());
     }
 
-    public function testTheGateAsksADeprecatedPortImplementationDirectly(): void
-    {
-        $gate = new SenderProviderGate(new class implements SenderProviderInterface {
-            public function from(): Address
-            {
-                return new Address('legacy@example.com');
-            }
-
-            public function replyTo(): Address
-            {
-                return new Address('legacy-help@example.com');
-            }
-        });
-
-        self::assertSame('legacy@example.com', $gate->from()?->getAddress());
-        self::assertSame('legacy-help@example.com', $gate->replyTo()?->getAddress());
-    }
-
-    public function testTheNewPortWinsWhenAClassImplementsBoth(): void
-    {
-        $gate = new SenderProviderGate(new DualSenderProvider());
-
-        self::assertSame('"Identity" <identity@example.com>', $gate->from()?->toString());
-        self::assertSame('identity-help@example.com', $gate->replyTo()?->getAddress());
-
-        $from = $gate->defaultFrom();
-        self::assertInstanceOf(MailAddress::class, $from);
-        self::assertSame(['identity@example.com', 'Identity'], [$from->email, $from->name]);
-        self::assertSame('identity-help@example.com', $gate->defaultReplyTo()?->email);
-    }
-
-    public function testTheGateServesTheNewPortFromADeprecatedPortImplementation(): void
-    {
-        $gate = new SenderProviderGate(new StaticSenderProvider());
-
-        $from = $gate->defaultFrom();
-        self::assertInstanceOf(MailAddress::class, $from);
-        self::assertSame(['tenant@example.com', 'Tenant'], [$from->email, $from->name]);
-        $replyTo = $gate->defaultReplyTo();
-        self::assertInstanceOf(MailAddress::class, $replyTo);
-        self::assertSame(['tenant-help@example.com', null], [$replyTo->email, $replyTo->name]);
-    }
-
-    public function testTheGateServesTheNewPortFromANewPortImplementationUnchanged(): void
-    {
-        $address = new MailAddress('tenant@example.com', 'Tenant');
-        $gate    = new SenderProviderGate(new class($address) implements SenderIdentityProviderInterface {
-            public function __construct(private readonly MailAddress $address)
-            {
-            }
-
-            public function defaultFrom(): MailAddress
-            {
-                return $this->address;
-            }
-
-            public function defaultReplyTo(): ?MailAddress
-            {
-                return null;
-            }
-        });
-
-        self::assertSame($address, $gate->defaultFrom());
-        self::assertNull($gate->defaultReplyTo());
-    }
-
-    public function testTheSettingsServeBothPorts(): void
+    public function testTheSettingsServeThePort(): void
     {
         $settings = new MailSettings(new FakeSettings(['mailer.from' => 'noreply@example.com', 'mailer.from_name' => 'Acme', 'mailer.reply_to' => 'help@example.com']));
 
@@ -190,13 +108,13 @@ final class SenderIdentityTest extends TestCase
     }
 
     /**
-     * PI-L1: an address the mailer refuses is still left out (tolerant, like the settings sender), and the gate now
-     * says so in a warning that names the provider class and the field, never the address.
+     * PI-L1: an address the mailer refuses is left out (tolerant, like the settings sender), with a warning that names
+     * the provider class and the field, never the address.
      */
     public function testARefusedAddressIsLeftOutWithAWarningThatHoldsNoAddress(): void
     {
         $logger = new RecordingLogger();
-        $gate   = new SenderProviderGate(new class implements SenderIdentityProviderInterface {
+        $policy = new SenderPolicy(new class implements SenderIdentityProviderInterface {
             public function defaultFrom(): MailAddress
             {
                 return new MailAddress('tenant@@secret-tenant.example', 'Secret Name');
@@ -209,7 +127,7 @@ final class SenderIdentityTest extends TestCase
         }, $logger);
 
         $email = (new Email())->to('a@example.com')->text('Hi');
-        (new SenderPolicy($gate))->apply($email);
+        $policy->apply($email);
 
         self::assertFalse($email->getHeaders()->has('From'));
         self::assertFalse($email->getHeaders()->has('Reply-To'));
@@ -217,7 +135,7 @@ final class SenderIdentityTest extends TestCase
         self::assertSame(['from', 'replyTo'], [$logger->records[0]['context']['field'], $logger->records[1]['context']['field']]);
         foreach ($logger->records as $record) {
             self::assertSame('warning', $record['level']);
-            self::assertSame(SenderProviderGate::REFUSED_ADDRESS_MESSAGE, $record['message']);
+            self::assertSame(SenderPolicy::REFUSED_ADDRESS_MESSAGE, $record['message']);
             self::assertSame(['provider', 'field'], array_keys($record['context']));
             self::assertStringContainsString('@anonymous', (string) $record['context']['provider']);
             $dump = $record['message'] . json_encode($record['context']) . var_export($record['context'], true);
@@ -229,11 +147,11 @@ final class SenderIdentityTest extends TestCase
     public function testAnAcceptedOrMissingAddressLogsNothing(): void
     {
         $logger = new RecordingLogger();
-        $gate   = new SenderProviderGate(new StaticSenderIdentityProvider(), $logger);
-        self::assertSame('tenant@example.com', $gate->from()?->getAddress());
-        self::assertSame('tenant-help@example.com', $gate->replyTo()?->getAddress());
+        $email  = new Email();
+        (new SenderPolicy(new StaticSenderIdentityProvider(), $logger))->apply($email);
+        self::assertSame('tenant@example.com', $email->getFrom()[0]->getAddress());
 
-        $none = new SenderProviderGate(new class implements SenderIdentityProviderInterface {
+        $none = new class implements SenderIdentityProviderInterface {
             public function defaultFrom(): ?MailAddress
             {
                 return null;
@@ -243,16 +161,18 @@ final class SenderIdentityTest extends TestCase
             {
                 return null;
             }
-        }, $logger);
-        self::assertNull($none->from());
-        self::assertNull($none->replyTo());
+        };
+        $empty = new Email();
+        (new SenderPolicy($none, $logger))->apply($empty);
+        self::assertSame([], $empty->getFrom());
+        self::assertNull(SenderPolicy::toMime($none, null, 'from', $logger));
 
         self::assertSame([], $logger->records);
     }
 
     public function testARefusedAddressWithoutALoggerIsStillLeftOut(): void
     {
-        $gate = new SenderProviderGate(new class implements SenderIdentityProviderInterface {
+        $provider = new class implements SenderIdentityProviderInterface {
             public function defaultFrom(): MailAddress
             {
                 return new MailAddress('tenant@@bad');
@@ -262,9 +182,11 @@ final class SenderIdentityTest extends TestCase
             {
                 return null;
             }
-        });
+        };
 
-        self::assertNull($gate->from());
-        self::assertNull($gate->replyTo());
+        self::assertNull(SenderPolicy::toMime($provider, $provider->defaultFrom(), 'from', null));
+        $email = new Email();
+        (new SenderPolicy($provider))->apply($email);
+        self::assertSame([], $email->getFrom());
     }
 }

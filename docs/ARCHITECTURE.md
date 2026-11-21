@@ -7,6 +7,7 @@
 - [Admin flow](#admin-flow)
 - [Components](#components)
 - [Container wiring](#container-wiring)
+- [Optional packages (2.0)](#optional-packages-20)
 - [Worker safety](#worker-safety)
 - [Extension points](#extension-points)
 
@@ -58,7 +59,7 @@ OutboundMailReadiness ──► Twig functions, AuthKit OutboundMailReadyChecker
 | `Dsn\MailerDsnValidator`, `DsnHostGuard`, `MailerDsnAudit` | Validation, SSRF guard, redaction |
 | `Validator\MailerDsn`, `DeliverableSender` (+ validators) | Field constraints |
 | `Sender\SenderAddress`, `SenderPolicy` | Sender rules and defaults |
-| `Sender\SenderIdentityProviderInterface`, `Sender\MailAddress` | Framework-free sender port and its value object (1.12); `Sender\MimeAddressMapper` and `Sender\SenderProviderGate` adapt it to the deprecated Mime-typed port |
+| `Sender\SenderIdentityProviderInterface`, `Sender\MailAddress` | Framework-free sender port and its value object (1.12; the only sender port since 2.0); `Sender\MimeAddressMapper` turns its values into the Mime addresses of the headers |
 | `Mailer\RuntimeTransport`, `MailKitMailer`, `MailHeaders` | Runtime delivery and internal headers |
 | `Log\SentMailRecorder`, `SentMailRepository`, `SentMailFilters`, `SentMailStatus`, `ErrorScrubber`, `Entity\*` | Sent-mail log |
 | `TestMail\TestMailSender`, `TestMailGuard`, `TestMailResult`, `TestMailOutcome` | Test e-mail |
@@ -78,9 +79,25 @@ OutboundMailReadiness ──► Twig functions, AuthKit OutboundMailReadyChecker
 
 Services are registered explicitly by `NowoMailKitExtension` (no autoconfiguration of bundle classes). `mailer.decorate`
 adds the two decorators; `MailerIntegrationPass` (before optimization) checks Instance Settings and the framework mailer
-and tells `MailKitMailer` whether the mailer has a bus. `CsrfProtectionPass` and `UnauthenticatedAccessPass` fail closed
+and tells `MailKitMailer` whether the mailer has a bus. `SenderPortPass` fails the build when the sender service or a
+decorator of the sender does not implement `SenderIdentityProviderInterface`. `CsrfProtectionPass` and `UnauthenticatedAccessPass` fail closed
 for the admin UI; `TwigPathsPass` registers `@NowoMailKitBundle`. The extension prepends the Doctrine mapping, the
 FormKit profile `mail_kit` and, with AuthKit, `nowo_auth_kit.outbound_mail_ready_checker`.
+
+## Optional packages (2.0)
+
+Since 2.0 (REQ-ARCH-001 rule 8) `nowo-tech/instance-settings-bundle`, `nowo-tech/doctrine-encrypt-bundle` and
+`doctrine/orm` are in composer `suggest`; each service that uses one of them is registered only when it is installed.
+
+| Package | What depends on it | Without it |
+| --- | --- | --- |
+| Instance Settings (brings DoctrineEncrypt and the ORM) | `MailSettings`, `MailerSettingsSection`, `SettingsMailerDsnProvider`, `SettingsChangedListener`, the settings actions, the 1.2 Resend migration (`LegacyResendSettings`, its form extension, purge command and key validator) | `mailer.dsn_provider` and `mailer.sender_provider` are required, otherwise the build fails and asks for the package; `resend.enabled` fails the build |
+| `doctrine/orm` | `Entity\SentMail*`, `SentMailRecorder` (erasure, retention), `SentMailRepository` (log pages), `TablePrefixListener`, the `postGenerateSchema` listeners of the tracking and Graph inbound tables, the log mapping | `log.enabled: true` fails the build; erasure is the no-op `NullSentMailErasure`; the tracking and Graph inbound tables are created with their `nowo:mail-kit:*:schema` commands |
+| DoctrineEncrypt | the encrypted settings fields and the Resend key form handling (only with Instance Settings, which requires it) | nothing to do: Instance Settings brings it |
+
+`doctrine/dbal`, `doctrine/doctrine-bundle` and `doctrine/persistence` stay required: the tracking and Graph inbound
+stores work on a DBAL connection taken from the Doctrine registry. CI runs the DDD host tests with the three packages
+removed.
 
 ## Worker safety
 
@@ -90,6 +107,7 @@ and settings changes; every other service is stateless and reads the settings pe
 ## Extension points
 
 - `nowo_mail_kit.mailer.dsn_provider` — your `MailerDsnProviderInterface`.
+- `nowo_mail_kit.mailer.sender_provider` — your `Sender\SenderIdentityProviderInterface`.
 - `nowo_mail_kit.security.access_checker` — your `MailKitAccessCheckerInterface`.
 - `MailHeaders::tag()` / `redact()` — log category and body masking per message.
 - `nowo_mail_kit.graph.mailbox_provider` — your `Graph\GraphMailboxProviderInterface` (1.8).

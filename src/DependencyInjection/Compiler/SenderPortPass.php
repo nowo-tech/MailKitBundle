@@ -5,191 +5,91 @@ declare(strict_types=1);
 namespace Nowo\MailKitBundle\DependencyInjection\Compiler;
 
 use LogicException;
-use Nowo\MailKitBundle\Sender\MailAddress;
 use Nowo\MailKitBundle\Sender\SenderIdentityProviderInterface;
-use Nowo\MailKitBundle\Sender\SenderPolicy;
-use Nowo\MailKitBundle\Sender\SenderProviderGate;
-use Nowo\MailKitBundle\Sender\SenderProviderInterface;
-use Nowo\MailKitBundle\Settings\MailSettings;
-use Nowo\MailKitBundle\TestMail\TestMailSender;
 use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
-use Symfony\Component\DependencyInjection\ContainerInterface;
-use Symfony\Component\DependencyInjection\Reference;
 
 use function array_pop;
-use function class_exists;
 use function in_array;
-use function is_a;
 use function is_string;
 use function sprintf;
-use function trigger_deprecation;
+use function str_contains;
 
 /**
- * Wires the framework-free 1.12 twin of the sender port (REQ-ARCH-001 rule 3) and refuses a
- * `nowo_mail_kit.mailer.sender_provider` service that implements neither interface.
+ * Refuses, when the container is built, a sender service that does not implement {@see SenderIdentityProviderInterface}
+ * (REQ-ARCH-001 rule 3, the only sender port since 2.0).
  *
- * `nowo_mail_kit.mailer.sender_provider` takes a service implementing {@see SenderIdentityProviderInterface} (the twin,
- * `MailAddress`), the deprecated {@see SenderProviderInterface} (Symfony Mime `Address`), or both; it stays the single
- * source of which provider is used. The extension points `SenderProviderInterface` at that service (or at
- * `MailSettings`); this pass then:
+ * The extension points `SenderIdentityProviderInterface` at the service of `nowo_mail_kit.mailer.sender_provider` (or
+ * at the built-in `MailSettings`). This pass then checks, before the decorators are resolved:
  *
- * - leaves that alias untouched when the service implements only the deprecated port (today's wiring), and points
- *   `SenderIdentityProviderInterface` at an internal {@see SenderProviderGate} over it, so the new port can always be
- *   autowired;
- * - points both aliases straight at `MailSettings`, the built-in default, which implements both ports with the same
- *   values (no gate, no change for a standard host);
- * - otherwise — the service implements the new port, alone or next to the deprecated one — points
- *   `SenderProviderInterface` at the gate (the new port wins: the gate reads `defaultFrom()` / `defaultReplyTo()`) and
- *   `SenderIdentityProviderInterface` straight at the service.
+ * - the configured service implements the port;
+ * - every decorator of the port id, of the configured service and of the aliases on the way to it implements it too;
+ * - nothing decorates the id of the Mime-typed `SenderProviderInterface`, removed in 2.0 ({@see self::REMOVED_PORT});
+ * - no service definition carries a loading error about that interface. A host class registered by resource
+ *   autodiscovery that still implements it cannot be loaded, so Symfony keeps the definition with only an error
+ *   ("… not found while loading …") and its `#[AsDecorator]` / `#[AsAlias]` attributes are never read; unused, the
+ *   definition would later be removed without a word and the host's sender change would be lost silently.
  *
- * When the class cannot be known before the container is compiled (a factory or a synthetic service), both aliases
- * point at the gate, which adapts whichever port the object implements, per call. A service id with no definition at
- * all is left alone, so the container keeps reporting the unknown service itself. No autoconfiguration: implementing
- * a port does not select a provider, the configuration does.
- *
- * The deprecation of the old interface reaches the application through its `@deprecated` tag (Symfony's
- * DebugClassLoader, in debug mode) and, since 1.14 (2.0 deprecation layer), through one build-time notice per host
- * class that implements it: the configured service and every decorator of the sender (the deprecated port id or the
- * configured chain). MailKit's own classes ({@see MailSettings}, the gate) are not reported.
- *
- * Host decorators (1.12.1): when the deprecated port id or the configured service is decorated, the new port follows
- * the decorated service — straight when every decorator implements the new port, through a gate otherwise — so it
- * never skips a decorator nor fails with a `TypeError` on a decorator that implements only the deprecated port.
- * Since 1.12.2 (D-L1, D-I1) MailKit's own consumers of the deprecated port ({@see SenderPolicy} and
- * {@see TestMailSender}) then read the decorated service through a gate too, so the new port wins on real mail as
- * well: a decorator that implements both ports is asked `defaultFrom()` / `defaultReplyTo()`, and one that implements
- * only the new port no longer fails real mail with a `TypeError`. Host services that inject the deprecated id keep
- * the decorator they asked for. Without any decorator nothing of this applies and the wiring is that of 1.12.1.
- *
- * Runs before optimization, so the decorators of the aliased id are resolved afterwards.
+ * A class that still implements the removed interface cannot even be loaded, so the classes are read through
+ * {@see ContainerBuilder::getReflectionClass()} without throwing, and each failure names the service, its class and
+ * UPGRADING "To 1.12.0" (the migration table) instead of failing later with a PHP fatal error or a `TypeError`. A service
+ * whose class is only known at runtime (a factory or a synthetic service) cannot be checked here, and a service id with
+ * no definition at all is left to the container, which reports the unknown service itself.
  *
  * @internal
  */
 final class SenderPortPass implements CompilerPassInterface
 {
-    /** Service id of the gate this pass registers when one of the two ports has to be adapted. */
-    public const GATE_ID = 'nowo_mail_kit.sender.provider_gate';
+    /** Id (and class name) of the Mime-typed sender port, deprecated since 1.12 and removed in 2.0. */
+    public const REMOVED_PORT = 'Nowo\\MailKitBundle\\Sender\\SenderProviderInterface';
 
     /**
-     * Service id of the gate over a host-decorated deprecated port id: it serves the new port when a decorator
-     * implements only the deprecated one (1.12.1) and MailKit's own mail path (1.12.2).
-     */
-    public const IDENTITY_GATE_ID = 'nowo_mail_kit.sender.identity_gate';
-
-    /**
-     * Points both sender port aliases at the configured service, through the gate where it is needed.
+     * Checks the configured sender service and every decorator of the sender.
      *
-     * @throws LogicException when the configured sender service implements neither port
+     * @throws LogicException when the sender service or a decorator does not implement the port, or a service still
+     *                        decorates the removed port id
      */
     public function process(ContainerBuilder $container): void
     {
-        if (!$container->hasAlias(SenderProviderInterface::class)) {
+        foreach ($container->getDefinitions() as $id => $definition) {
+            foreach ($definition->getErrors() as $error) {
+                if (str_contains((string) $error, self::REMOVED_PORT)) {
+                    throw new LogicException(sprintf('The service "%s" cannot be loaded: %s %s', $id, (string) $error, $this->removedPortHint()));
+                }
+            }
+            if (($definition->getDecoratedService()[0] ?? null) === self::REMOVED_PORT) {
+                throw new LogicException(sprintf('The service "%s" decorates "%s", which was removed in MailKit 2.0. Decorate "%s" instead and implement it (see UPGRADING.md "To 1.12.0" and "To 2.0.0").', $id, self::REMOVED_PORT, SenderIdentityProviderInterface::class));
+            }
+        }
+        if (!$container->hasAlias(SenderIdentityProviderInterface::class)) {
             return;
         }
 
-        $alias      = $container->getAlias(SenderProviderInterface::class);
-        $public     = $alias->isPublic();
-        $configured = (string) $alias;
-        $target     = $this->resolve($container, SenderProviderInterface::class);
+        $configured = (string) $container->getAlias(SenderIdentityProviderInterface::class);
+        $chain      = [SenderIdentityProviderInterface::class, $configured];
+        $target     = $configured;
+        while ($container->hasAlias($target) && !in_array((string) $container->getAlias($target), $chain, true)) {
+            $target  = (string) $container->getAlias($target);
+            $chain[] = $target;
+        }
         if (!$container->hasDefinition($target)) {
-            return; // No definition to look at: the container reports the unknown service itself, as before.
+            return; // No definition to look at: the container reports the unknown service itself.
+        }
+        if (!$this->implementsPort($container, $target)) {
+            throw new LogicException(sprintf('nowo_mail_kit.mailer.sender_provider: the service "%s" (%s) must implement "%s". %s', $target, $this->className($container, $target), SenderIdentityProviderInterface::class, $this->removedPortHint()));
         }
 
-        $class   = $this->classOf($container, $target);
-        $newPort = $class !== null && is_a($class, SenderIdentityProviderInterface::class, true);
-        $oldPort = $class !== null && is_a($class, SenderProviderInterface::class, true);
-        if ($class !== null && !$newPort && !$oldPort) {
-            throw new LogicException(sprintf('nowo_mail_kit.mailer.sender_provider: the service "%s" (%s) must implement "%s" (or the deprecated "%s").', $target, $class, SenderIdentityProviderInterface::class, SenderProviderInterface::class));
-        }
-        $this->deprecateLegacyPort($container, $configured, $target, $oldPort ? $class : null);
-
-        if ($class === MailSettings::class) {
-            // Built-in default: both ports return the same values, so the deprecated alias keeps today's wiring.
-            $identity = $target;
-        } else {
-            // The gate reads the configured id, so a decorator of an alias on the way to the service applies too.
-            $this->registerGate($container, self::GATE_ID, $configured);
-            if (!$oldPort || $newPort) {
-                $container->setAlias(SenderProviderInterface::class, self::GATE_ID)->setPublic($public);
-            }
-            $identity = $newPort ? $target : self::GATE_ID;
-        }
-
-        $container->setAlias(SenderIdentityProviderInterface::class, $this->decoratedIdentity($container, $configured, $target) ?? $identity)->setPublic($public);
+        $this->assertDecorators($container, $chain);
     }
 
     /**
-     * Where the new port points when a host decorates the deprecated port id or the configured service (1.12.1,
-     * PI-L2), so its consumers get the same decorated sender as MailKit's own path; null when nothing is decorated.
-     *
-     * - The deprecated port id is decorated: that id when every decorator implements the new port, otherwise a second
-     *   gate over that id ({@see self::IDENTITY_GATE_ID}).
-     * - The configured service (or an alias on the way to it) is decorated: the configured id when every decorator
-     *   implements the new port, otherwise the gate over it ({@see self::GATE_ID}).
-     *
-     * Decorator ordering (priorities) is left to the container: the outermost decorator is one of the decorators, so
-     * the straight alias is used only when all of them implement the new port, and the gate (which adapts whichever
-     * port the object implements, per call) otherwise.
-     *
-     * In both cases MailKit's own mail path reads the decorated sender through that gate (1.12.2), whichever port the
-     * decorators implement, so the new port wins there too.
-     */
-    private function decoratedIdentity(ContainerBuilder $container, string $configured, string $target): ?string
-    {
-        $port = $this->decoratorsImplementNewPort($container, [SenderProviderInterface::class]);
-        if ($port !== null) {
-            $this->registerGate($container, self::IDENTITY_GATE_ID, SenderProviderInterface::class);
-            $this->readMailThrough($container, self::IDENTITY_GATE_ID);
-
-            return $port ? SenderProviderInterface::class : self::IDENTITY_GATE_ID;
-        }
-
-        $chain = [$configured];
-        for ($id = $configured; $id !== $target && $container->hasAlias($id); $chain[] = $id) {
-            $id = (string) $container->getAlias($id);
-        }
-        $port = $this->decoratorsImplementNewPort($container, $chain);
-        if ($port === null) {
-            return null;
-        }
-        if (!$container->hasDefinition(self::GATE_ID)) {
-            $this->registerGate($container, self::GATE_ID, $configured);
-        }
-        $this->readMailThrough($container, self::GATE_ID);
-
-        return $port ? $configured : self::GATE_ID;
-    }
-
-    /**
-     * Points MailKit's own consumers of the deprecated port ({@see SenderPolicy}, {@see TestMailSender}) at a gate over
-     * the decorated sender (1.12.2, D-L1 / D-I1), so real mail asks the new port first, like new-port consumers do.
-     * Only arguments that reference the deprecated port id change; any other service keeps what it injects.
-     */
-    private function readMailThrough(ContainerBuilder $container, string $gateId): void
-    {
-        foreach ($container->getDefinitions() as $definition) {
-            if (!in_array($definition->getClass(), [SenderPolicy::class, TestMailSender::class], true)) {
-                continue;
-            }
-            foreach ($definition->getArguments() as $key => $argument) {
-                if ($argument instanceof Reference && (string) $argument === SenderProviderInterface::class) {
-                    $definition->replaceArgument($key, new Reference($gateId, $argument->getInvalidBehavior()));
-                }
-            }
-        }
-    }
-
-    /**
-     * Whether every decorator of the given ids (and of their decorators) implements the new port; null for none.
+     * Fails on the first decorator of the given ids (and of their decorators) that does not implement the port.
      *
      * @param list<string> $ids
      */
-    private function decoratorsImplementNewPort(ContainerBuilder $container, array $ids): ?bool
+    private function assertDecorators(ContainerBuilder $container, array $ids): void
     {
-        $found = false;
-        $all   = true;
-        $seen  = [];
+        $seen = [];
         while ($ids !== []) {
             $decorated = array_pop($ids);
             if (isset($seen[$decorated])) {
@@ -200,104 +100,43 @@ final class SenderPortPass implements CompilerPassInterface
                 if (($definition->getDecoratedService()[0] ?? null) !== $decorated) {
                     continue;
                 }
-                $found = true;
-                $class = $this->classOf($container, $id);
-                $all   = $all && $class !== null && is_a($class, SenderIdentityProviderInterface::class, true);
-                $ids[] = $id;
-            }
-        }
-
-        return $found ? $all : null;
-    }
-
-    /**
-     * 1.14: one build-time deprecation per host class behind the sender that implements the deprecated
-     * {@see SenderProviderInterface} (removed in 2.0, so such a class no longer loads): the configured service, then
-     * every decorator of the deprecated port id and of the configured chain. MailKit's own implementations
-     * ({@see MailSettings}, {@see SenderProviderGate}) are skipped; a
-     * service whose class is only known at runtime (factory, synthetic) cannot be checked here.
-     *
-     * @param class-string|null $configuredClass class of the configured service when it implements the deprecated port
-     */
-    private function deprecateLegacyPort(ContainerBuilder $container, string $configured, string $target, ?string $configuredClass): void
-    {
-        $reported = [];
-        if ($configuredClass !== null && !$this->ownClass($configuredClass)) {
-            $reported[$configuredClass] = true;
-            trigger_deprecation('nowo-tech/mail-kit-bundle', '1.14', 'The sender service "%s" (%s) set in "nowo_mail_kit.mailer.sender_provider" implements "%s", which is deprecated and removed in 2.0. Implement "%s" instead (it returns "%s" rather than a Symfony Mime Address; see UPGRADING.md "To 1.12.0").', $target, $configuredClass, SenderProviderInterface::class, SenderIdentityProviderInterface::class, MailAddress::class);
-        }
-
-        $ids  = [SenderProviderInterface::class, $configured];
-        $seen = [];
-        while ($ids !== []) {
-            $decorated = array_pop($ids);
-            if (isset($seen[$decorated])) {
-                continue;
-            }
-            $seen[$decorated] = true;
-            if ($container->hasAlias($decorated)) {
-                $ids[] = (string) $container->getAlias($decorated);
-            }
-            foreach ($container->getDefinitions() as $id => $definition) {
-                if (($definition->getDecoratedService()[0] ?? null) !== $decorated) {
-                    continue;
+                if (!$this->implementsPort($container, $id)) {
+                    throw new LogicException(sprintf('The service "%s" (%s) decorates the MailKit sender but does not implement "%s". %s', $id, $this->className($container, $id), SenderIdentityProviderInterface::class, $this->removedPortHint()));
                 }
                 $ids[] = $id;
-                $class = $this->classOf($container, $id);
-                if ($class === null || isset($reported[$class]) || $this->ownClass($class) || !is_a($class, SenderProviderInterface::class, true)) {
-                    continue;
-                }
-                $reported[$class] = true;
-                trigger_deprecation('nowo-tech/mail-kit-bundle', '1.14', 'The service "%s" (%s) decorates the MailKit sender and implements "%s", which is deprecated and removed in 2.0. Implement "%s" instead (see UPGRADING.md "To 1.12.0").', $id, $class, SenderProviderInterface::class, SenderIdentityProviderInterface::class);
             }
         }
     }
 
     /**
-     * Whether the class belongs to MailKit itself (never reported by {@see self::deprecateLegacyPort()}).
+     * Second sentence of every message of this pass.
      */
-    private function ownClass(string $class): bool
+    private function removedPortHint(): string
     {
-        return in_array($class, [MailSettings::class, SenderProviderGate::class], true);
+        return sprintf('"%s" was removed in 2.0, so a class that still implements it no longer loads: implement "%s" (it returns "Nowo\MailKitBundle\Sender\MailAddress"; see UPGRADING.md "To 1.12.0" and "To 2.0.0").', self::REMOVED_PORT, SenderIdentityProviderInterface::class);
     }
 
     /**
-     * Registers a gate over the given service id, with the logger for refused addresses when there is one.
+     * Whether the service implements the port; true when its class is only known at runtime (factory, synthetic).
      */
-    private function registerGate(ContainerBuilder $container, string $gateId, string $over): void
-    {
-        $container->register($gateId, SenderProviderGate::class)->setArguments([
-            new Reference($over),
-            new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE),
-        ]);
-    }
-
-    /**
-     * The service id an alias chain ends on (the id itself when it is no alias).
-     */
-    private function resolve(ContainerBuilder $container, string $id): string
-    {
-        $seen = [];
-        while ($container->hasAlias($id) && !isset($seen[$id])) {
-            $seen[$id] = true;
-            $id        = (string) $container->getAlias($id);
-        }
-
-        return $id;
-    }
-
-    /**
-     * @return class-string|null null when the class cannot be known before the container is compiled
-     */
-    private function classOf(ContainerBuilder $container, string $service): ?string
+    private function implementsPort(ContainerBuilder $container, string $service): bool
     {
         $definition = $container->getDefinition($service);
         if ($definition->getFactory() !== null || $definition->isSynthetic()) {
-            return null;
+            return true;
         }
+        $class = $this->className($container, $service);
 
-        $class = $container->getParameterBag()->resolveValue($definition->getClass() ?? $service);
+        return $container->getReflectionClass($class, false)?->implementsInterface(SenderIdentityProviderInterface::class) ?? false;
+    }
 
-        return is_string($class) && class_exists($class) ? $class : null;
+    /**
+     * The class of a service definition (its id when no class is set), with parameters resolved.
+     */
+    private function className(ContainerBuilder $container, string $service): string
+    {
+        $class = $container->getParameterBag()->resolveValue($container->getDefinition($service)->getClass() ?? $service);
+
+        return is_string($class) ? $class : $service;
     }
 }

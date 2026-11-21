@@ -9,6 +9,8 @@ parameters:
     excludePaths:
         - demo/*
         - vendor/*
+        # 1.x host classes on the sender port removed in 2.0 (build-error tests): the interface no longer exists.
+        - tests/Fixtures/RemovedPort/*
     reportUnmatchedIgnoredErrors: false
     treatPhpDocTypesAsCertain: false
     ignoreErrors: []

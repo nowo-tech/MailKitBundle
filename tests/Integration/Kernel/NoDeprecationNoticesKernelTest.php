@@ -11,47 +11,63 @@ use Nowo\MailKitBundle\DependencyInjection\NowoMailKitExtension;
 use Nowo\MailKitBundle\Entity\SentMail;
 use Nowo\MailKitBundle\Tests\Support\DeprecationRecorder;
 use Nowo\MailKitBundle\Tests\Support\StaticSenderIdentityProvider;
-use Nowo\MailKitBundle\Tests\Support\StaticSenderProvider;
-use Nowo\MailKitBundle\Tests\Unit\DependencyInjection\MapEntitiesDeprecationTest;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 
 use function array_filter;
 use function array_values;
+use function in_array;
 use function str_contains;
 
 /**
- * 1.14 (2.0 deprecation layer) in a real kernel: the notices fire once, when the container is built, and a standard
- * host (default configuration, built-in sender) builds without any MailKit notice.
+ * 2.0 in a real kernel: the 1.14 build-time notices are gone with what they announced. No configuration raises a
+ * MailKit deprecation, and `log.map_entities` follows `log.enabled` when it is not set.
  */
-final class DeprecationNoticesKernelTest extends KernelTestCase
+final class NoDeprecationNoticesKernelTest extends KernelTestCase
 {
     public function testTheDefaultConfigurationBuildsWithoutAMailKitNotice(): void
     {
         self::assertSame([], $this->mailKitNotices(fn (): MailKitTestKernel => $this->bootKernel()));
     }
 
-    public function testANewPortHostSenderBuildsWithoutANotice(): void
+    public function testAHostSenderBuildsWithoutANotice(): void
     {
         self::assertSame([], $this->mailKitNotices(fn (): MailKitTestKernel => $this->bootKernel(['mailer' => ['sender_provider' => StaticSenderIdentityProvider::class]], extra: static function (ContainerConfigurator $container): void {
             $container->services()->set(StaticSenderIdentityProvider::class);
         })));
     }
 
-    public function testTheLogOffWithMapEntitiesUnsetWarnsOnceAtBuildTime(): void
+    /**
+     * @return iterable<string, array{0: array<string, mixed>, 1: bool}>
+     */
+    public static function logConfigurations(): iterable
     {
-        self::assertSame([MapEntitiesDeprecationTest::NOTICE], $this->mailKitNotices(fn (): MailKitTestKernel => $this->bootKernel(['log' => ['enabled' => false]])));
-        self::assertSame([], $this->mailKitNotices(fn (): MailKitTestKernel => $this->bootKernel(['log' => ['enabled' => false, 'map_entities' => true]])));
+        yield 'log on' => [[], true];
+        yield 'log on, map_entities true' => [['map_entities' => true], true];
+        yield 'log off, map_entities unset' => [['enabled' => false], false];
+        yield 'log off, map_entities null' => [['enabled' => false, 'map_entities' => null], false];
+        yield 'log off, map_entities true' => [['enabled' => false, 'map_entities' => true], true];
+        yield 'log off, map_entities false' => [['enabled' => false, 'map_entities' => false], false];
     }
 
-    public function testADeprecatedPortHostSenderWarnsOnceAtBuildTime(): void
+    /**
+     * @param array<string, mixed> $log
+     */
+    #[DataProvider('logConfigurations')]
+    public function testMapEntitiesFollowsTheLogWhenUnsetAndNoNoticeFires(array $log, bool $mapped): void
     {
-        $notices = $this->mailKitNotices(fn (): MailKitTestKernel => $this->bootKernel(['mailer' => ['sender_provider' => StaticSenderProvider::class]], extra: static function (ContainerConfigurator $container): void {
-            $container->services()->set(StaticSenderProvider::class);
-        }));
+        $kernel  = null;
+        $notices = $this->mailKitNotices(function () use (&$kernel, $log): MailKitTestKernel {
+            return $kernel = $this->bootKernel(['log' => $log]);
+        });
 
-        self::assertCount(1, $notices);
-        self::assertStringContainsString('The sender service "' . StaticSenderProvider::class . '"', $notices[0]);
+        self::assertSame([], $notices);
+        self::assertInstanceOf(MailKitTestKernel::class, $kernel);
+        $manager = $this->service($kernel, ManagerRegistry::class)->getManager();
+        self::assertInstanceOf(EntityManagerInterface::class, $manager);
+        $tables = $this->connection($kernel)->createSchemaManager()->listTableNames();
+        self::assertSame($mapped, $manager->getMetadataFactory()->isTransient(SentMail::class) === false && in_array('mail_kit_sent_mail', $tables, true));
     }
 
     /**

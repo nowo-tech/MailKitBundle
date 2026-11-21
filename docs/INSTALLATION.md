@@ -16,18 +16,24 @@
 
 - PHP `>=8.2 <8.6`; Symfony **7.4**, **8.0** or **8.1** (8.x requires PHP 8.4+)
 - `symfony/mailer` with `framework.mailer` configured (the fallback transport)
-- `nowo-tech/instance-settings-bundle` ^1.0 — installed as a dependency; it needs `nowo-tech/doctrine-encrypt-bundle`
-  configured (the DSN and the API key are encrypted secrets) and brings UiKit / FormKit
-- Doctrine ORM 3.3+ with DoctrineBundle, `nowo-tech/outbound-url-guard-bundle` ^1.3 (host rules, no bundle registration
-  needed), `twig/extra-bundle` + `twig/string-extra` — installed as dependencies
+- `nowo-tech/instance-settings-bundle` ^1.3.1 — **suggested since 2.0, require it yourself** for the default setup (the
+  `mailer` settings section); it needs `nowo-tech/doctrine-encrypt-bundle` configured (the DSN and the API key are
+  encrypted secrets). Without it, set `mailer.dsn_provider` and `mailer.sender_provider` to your own services.
+- Doctrine ORM 3.3+ — **suggested since 2.0, require it yourself** for the sent-mail log (`log.enabled: true`, the
+  default); without it set `log.enabled: false`
+- DoctrineBundle, `nowo-tech/outbound-url-guard-bundle` ^1.3 (host rules, no bundle registration needed), UiKit,
+  FormKit, `twig/extra-bundle` + `twig/string-extra` — installed as dependencies
 - Optional: `symfony/resend-mailer` (Resend section), `nowo-tech/auth-kit-bundle` (readiness adapter),
   `symfony/messenger` (async mail)
 
 ## Install with Composer
 
 ```bash
-composer require nowo-tech/mail-kit-bundle
+composer require nowo-tech/mail-kit-bundle nowo-tech/instance-settings-bundle doctrine/orm
 ```
+
+A configuration that needs a package you did not install fails the container build and names it (UPGRADING
+"To 2.0.0", "Composer moves").
 
 ## Symfony Flex recipe
 

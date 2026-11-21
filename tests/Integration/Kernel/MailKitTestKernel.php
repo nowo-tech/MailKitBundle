@@ -41,7 +41,8 @@ final class MailKitTestKernel extends Kernel
      * @param Closure(ContainerConfigurator): void $services extension configs and services
      * @param Closure(RoutingConfigurator): void $routes routes
      * @param list<string> $without bundles / features to leave out (security, instance_settings, mailer, messenger,
-     *                              doctrine: DoctrineBundle and DoctrineEncrypt, i.e. no ORM)
+     *                              doctrine: DoctrineBundle and DoctrineEncrypt; orm: DoctrineBundle with the DBAL only,
+     *                              no DoctrineEncrypt — the 2.0 host without the suggested packages)
      */
     public function __construct(
         private readonly string $id,
@@ -63,6 +64,8 @@ final class MailKitTestKernel extends Kernel
         yield new TwigExtraBundle();
         if (!in_array('doctrine', $this->without, true)) {
             yield new DoctrineBundle();
+        }
+        if (!in_array('doctrine', $this->without, true) && !in_array('orm', $this->without, true)) {
             yield new NowoDoctrineEncryptBundle();
         }
         yield new NowoFormKitBundle();
@@ -141,7 +144,10 @@ final class MailKitTestKernel extends Kernel
         }
         $container->extension('framework', $framework);
         $container->extension('twig', ['strict_variables' => true]);
-        if (!in_array('doctrine', $this->without, true)) {
+        if (in_array('orm', $this->without, true) && !in_array('doctrine', $this->without, true)) {
+            $container->extension('doctrine', ['dbal' => ['url' => self::databaseUrl()]]);
+        }
+        if (!in_array('doctrine', $this->without, true) && !in_array('orm', $this->without, true)) {
             $container->extension('doctrine', [
                 // CI runs the log tests on MySQL, MariaDB and PostgreSQL too (CA L2): MAIL_KIT_TEST_DATABASE_URL.
                 'dbal' => ['url' => self::databaseUrl()],

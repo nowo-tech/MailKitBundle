@@ -4,14 +4,14 @@ declare(strict_types=1);
 
 namespace Nowo\MailKitBundle\Tests\Unit\Sender;
 
+use Nowo\MailKitBundle\Sender\MailAddress;
 use Nowo\MailKitBundle\Sender\SenderAddress;
+use Nowo\MailKitBundle\Sender\SenderIdentityProviderInterface;
 use Nowo\MailKitBundle\Sender\SenderPolicy;
-use Nowo\MailKitBundle\Sender\SenderProviderInterface;
 use Nowo\MailKitBundle\Settings\MailSettings;
 use Nowo\MailKitBundle\Tests\Support\FakeSettings;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
-use Symfony\Component\Mime\Address;
 use Symfony\Component\Mime\Email;
 use Symfony\Component\Mime\RawMessage;
 
@@ -42,13 +42,13 @@ final class SenderTest extends TestCase
 
     public function testAHostSenderProviderReplacesTheSettings(): void
     {
-        $provider = new class implements SenderProviderInterface {
-            public function from(): Address
+        $provider = new class implements SenderIdentityProviderInterface {
+            public function defaultFrom(): MailAddress
             {
-                return new Address('tenant@example.com', 'Tenant');
+                return new MailAddress('tenant@example.com', 'Tenant');
             }
 
-            public function replyTo(): ?Address
+            public function defaultReplyTo(): ?MailAddress
             {
                 return null;
             }

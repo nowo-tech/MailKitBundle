@@ -3,6 +3,12 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+  - [Before you upgrade](#before-you-upgrade)
+  - [`log.map_entities` follows `log.enabled`](#logmap_entities-follows-logenabled)
+  - [Sender: `SenderIdentityProviderInterface` only](#sender-senderidentityproviderinterface-only)
+  - [Removed](#removed)
+  - [Composer moves](#composer-moves)
+  - [1.x support](#1x-support)
 - [To 1.14.1](#to-1141)
 - [To 1.14.0](#to-1140)
 - [To 1.14.0](#to-1140-1)
@@ -54,6 +60,160 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+Target **2.0.0** (major), from **1.14.x**:
+
+```bash
+composer require nowo-tech/mail-kit-bundle:^2.0 -W
+```
+
+2.0 contains only changes that 1.x announced through deprecation notices: an application that runs the last 1.x
+minor without deprecation notices from this bundle upgrades without code changes. After 2.0.0 is released, the 1.x
+line receives security fixes for 6 months: fixes rated Moderate and above are backported to the last 1.x minor;
+Low ones are fixed in 2.x only.
+
+The PHP, Symfony and database requirements are unchanged.
+
+### Before you upgrade
+
+On 1.14, build the container and clear every MailKit deprecation notice. They are build-time notices: they show in
+`bin/console debug:container --deprecations` (and the profiler's "Deprecations" tab or a test run with deprecations
+reported), never per request. 1.14 raises:
+
+> Since nowo-tech/mail-kit-bundle 1.14: Not setting "nowo_mail_kit.log.map_entities" while "nowo_mail_kit.log.enabled"
+> is false is deprecated: it keeps the log entities (SentMail, SentMailBody) mapped in your entity manager. In 2.0 the
+> option defaults to "log.enabled" (false here), so they are no longer mapped and your schema tool proposes dropping
+> their tables. Set "nowo_mail_kit.log.map_entities: true" to keep the mapping, or "nowo_mail_kit.log.map_entities:
+> false" to opt in to the 2.0 behaviour now (see UPGRADING.md "To 1.14.0").
+
+> Since nowo-tech/mail-kit-bundle 1.14: The sender service "app.sender" (App\Mail\TenantSender) set in
+> "nowo_mail_kit.mailer.sender_provider" implements "Nowo\MailKitBundle\Sender\SenderProviderInterface", which is
+> deprecated and removed in 2.0. Implement "Nowo\MailKitBundle\Sender\SenderIdentityProviderInterface" instead (it
+> returns "Nowo\MailKitBundle\Sender\MailAddress" rather than a Symfony Mime Address; see UPGRADING.md "To 1.12.0").
+
+> Since nowo-tech/mail-kit-bundle 1.14: The service "app.sender_decorator" (App\Mail\SenderDecorator) decorates the
+> MailKit sender and implements "Nowo\MailKitBundle\Sender\SenderProviderInterface", which is deprecated and removed
+> in 2.0. Implement "Nowo\MailKitBundle\Sender\SenderIdentityProviderInterface" instead (see UPGRADING.md "To
+> 1.12.0").
+
+Also check what no notice can report:
+
+- services of yours that **inject** `SenderProviderInterface` (inject `SenderIdentityProviderInterface`);
+- sender services built by a factory (their class is only known at runtime);
+- the packages your application uses itself but got through MailKit (see [Composer moves](#composer-moves)).
+
+### `log.map_entities` follows `log.enabled`
+
+| `log.enabled` | `log.map_entities` | 1.x | 2.0 |
+| --- | --- | --- | --- |
+| `true` (default) | unset | mapped | mapped (unchanged) |
+| `false` | unset | mapped | **not mapped** |
+| `false` | `true` | mapped | mapped (unchanged) |
+| `false` | `false` | not mapped | not mapped (unchanged) |
+
+When the mapping leaves your entity manager, the schema tool proposes dropping `<prefix>mail_kit_sent_mail` and
+`<prefix>mail_kit_sent_mail_body`. Purge or erase the rows first (`nowo:mail-kit:log:purge`,
+`nowo:mail-kit:log:forget`), then let the tables go; or keep them mapped:
+
+```yaml
+nowo_mail_kit:
+    log:
+        enabled: false
+        map_entities: true # keeps the 1.x behaviour
+```
+
+What still works on the rows written while the log was on, once the mapping leaves your entity manager (log off,
+`log.map_entities` unset) while the old tables are still in the database:
+
+- `nowo:mail-kit:log:purge`, `nowo:mail-kit:log:forget` and `SentMailErasureInterface` still delete and redact them
+  (with the Doctrine ORM installed and configured in your application);
+- the UserKit GDPR integration (`personal_data.enabled`: the `emails_received` eraser and export section) is **no
+  longer registered**, so a UserKit erasure or export request no longer covers those leftover rows.
+
+So purge (or forget) and drop the old log tables before you upgrade, or keep `log.map_entities: true` until you have.
+Without the ORM (installed and configured) nothing is erased: the erasure port is a no-op.
+
+### Sender: `SenderIdentityProviderInterface` only
+
+`Sender\SenderProviderInterface` is removed, so a class that still implements it **no longer loads**. Move every host
+sender service and every decorator of the sender to `Sender\SenderIdentityProviderInterface`, as shown in
+[To 1.12.0](#sender-identity-without-symfony-mime-senderidentityproviderinterface):
+
+| Removed | Implement instead |
+| --- | --- |
+| `SenderProviderInterface::from(): ?Symfony\Component\Mime\Address` | `SenderIdentityProviderInterface::defaultFrom(): ?Sender\MailAddress` |
+| `SenderProviderInterface::replyTo(): ?Symfony\Component\Mime\Address` | `SenderIdentityProviderInterface::defaultReplyTo(): ?Sender\MailAddress` |
+
+The configuration does not change: `nowo_mail_kit.mailer.sender_provider` keeps your service id. Decorate
+`Nowo\MailKitBundle\Sender\SenderIdentityProviderInterface` (or your service) instead of the removed id.
+
+If something was missed, the container build fails with a message that names the service and its class, never with a
+PHP fatal error or a `TypeError` on the first send:
+
+- a `mailer.sender_provider` service, or a decorator of the sender, that does not implement
+  `SenderIdentityProviderInterface` (a class that still implements the removed interface included);
+- a service that still decorates `Nowo\MailKitBundle\Sender\SenderProviderInterface`;
+- a class registered by resource autodiscovery (`services: App\: resource: ...`) that still implements the removed
+  interface, for example with `#[AsDecorator]` or `#[AsAlias]`. Symfony cannot load it and would otherwise drop the
+  definition without a word, losing your sender change.
+
+`MailSettings` (the built-in sender) implements `SenderIdentityProviderInterface`; its `from()` / `replyTo()` methods
+stay and return the same addresses as Symfony Mime values. `SenderPolicy` and `TestMailSender` now take
+`SenderIdentityProviderInterface` in their constructors (only relevant if you build them yourself).
+
+### Removed
+
+| Removed | Deprecated since | Replacement |
+| --- | --- | --- |
+| `Sender\SenderProviderInterface` | 1.12 ([To 1.12.0](#sender-identity-without-symfony-mime-senderidentityproviderinterface)) | `Sender\SenderIdentityProviderInterface` + `Sender\MailAddress` |
+| `Sender\SenderProviderGate` (internal) and the services `nowo_mail_kit.sender.provider_gate` / `nowo_mail_kit.sender.identity_gate` | 1.12 (wiring of the removed port) | none: the port is wired straight to your service |
+| The `Nowo\MailKitBundle\Sender\SenderProviderInterface` service alias | 1.12 | `Nowo\MailKitBundle\Sender\SenderIdentityProviderInterface` |
+| `Settings\ResendSettingsSection` (constant holder) | 1.3 ([To 1.3.0](#to-130-1)) | `Settings\MailerSettingsSection::NAME` or `Settings\LegacyResendSettings::SECTION` |
+| `log.map_entities` defaulting to `true` | 1.14 ([To 1.14.0](#logmap_entities-unset-with-the-log-off)) | the option follows `log.enabled`; set `true` to keep the mapping |
+| The 1.14 build-time deprecation notices | 1.14 | none (what they announced is done) |
+
+`SenderPolicy::REFUSED_ADDRESS_MESSAGE` replaces `SenderProviderGate::REFUSED_ADDRESS_MESSAGE` (same text) for the
+warning logged when the mailer refuses an address of the sender port.
+
+### Composer moves
+
+`nowo-tech/instance-settings-bundle`, `nowo-tech/doctrine-encrypt-bundle` and `doctrine/orm` move from `require` to
+`suggest`. A host that got them through MailKit loses them on the next `composer update`, and Symfony Flex then
+removes their bundle lines and configuration. Require what you use **before or with** the update:
+
+| Package | Needed for |
+| --- | --- |
+| `nowo-tech/instance-settings-bundle` (^1.3.1) | the default configuration source: the `mailer` settings section, the test e-mail and the Resend actions. It installs `nowo-tech/doctrine-encrypt-bundle` and `doctrine/orm` itself. |
+| `doctrine/orm` (^3.3) | the sent-mail log (`log.enabled: true`, the default) and its admin pages, and erasure / retention of log rows |
+| `nowo-tech/doctrine-encrypt-bundle` (^2.10) | the encrypted settings fields (through Instance Settings) and your own encrypted fields |
+
+The default setup (the `mailer` settings section and the sent-mail log) therefore needs:
+
+```bash
+composer require nowo-tech/instance-settings-bundle doctrine/orm
+composer require nowo-tech/mail-kit-bundle:^2.0 -W
+```
+
+`conflict` refuses versions below the old floors (`nowo-tech/instance-settings-bundle` <1.3.1,
+`nowo-tech/doctrine-encrypt-bundle` <2.10, `doctrine/orm` <3.3). `symfony/mime`, `doctrine/dbal`,
+`doctrine/doctrine-bundle` and `doctrine/persistence` stay required.
+
+A configuration that needs a missing package fails the build instead of degrading silently:
+
+- **No Instance Settings and no host ports.** Without `mailer.dsn_provider` and `mailer.sender_provider`, the build
+  fails and asks you to run `composer require nowo-tech/instance-settings-bundle` (or to set both ports). Mail never
+  falls back silently to the framework transport.
+- **The log without the ORM.** `log.enabled: true` (the default) without `doctrine/orm` fails the build: run
+  `composer require doctrine/orm`, or set `log.enabled: false`.
+
+A host that provides both ports and turns the log off runs with none of the three packages (the setup of
+USAGE.md, "Without Instance Settings and without the ORM"), as in 1.x.
+
+### 1.x support
+
+1.x receives security fixes for 6 months after 2.0.0 is released. Fixes rated Moderate and above are backported to
+the last 1.x minor as a 1.x patch; Low ones are fixed in 2.x only, with the advice to upgrade. Advisories name both
+lines.
 
 ## To 1.14.1
 

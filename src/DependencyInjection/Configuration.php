@@ -100,7 +100,7 @@ final class Configuration implements ConfigurationInterface
                             ->defaultNull()
                         ->end()
                         ->scalarNode('sender_provider')
-                            ->info('Service id implementing Sender\\SenderIdentityProviderInterface (since 1.12) or the deprecated Sender\\SenderProviderInterface (default From / Reply-To); null = the Instance Settings mailer section. Since 1.5.')
+                            ->info('Service id implementing Sender\\SenderIdentityProviderInterface (default From / Reply-To; the Mime-typed SenderProviderInterface was removed in 2.0); null = the Instance Settings mailer section. Since 1.5.')
                             ->defaultNull()
                         ->end()
                         ->booleanNode('fallback_counts_as_ready')
@@ -224,8 +224,8 @@ final class Configuration implements ConfigurationInterface
                     ->children()
                         ->booleanNode('enabled')->defaultTrue()->end()
                         ->booleanNode('map_entities')
-                            ->info('1.6: add the Doctrine mapping of the log entities (SentMail, SentMailBody). false (only with enabled: false) keeps them out of your entity manager, e.g. on an XML-mapping-only DDD host; drop or purge existing log tables yourself first. Default true; follows log.enabled in 2.0 (since 1.14 a deprecation notice asks to set it when the log is off).')
-                            ->defaultTrue()
+                            ->info('1.6: add the Doctrine mapping of the log entities (SentMail, SentMailBody). false (only with enabled: false) keeps them out of your entity manager, e.g. on an XML-mapping-only DDD host; drop or purge existing log tables yourself first. Unset (null) follows log.enabled since 2.0 (it was true in 1.x): set true to keep the tables of a log you turned off mapped.')
+                            ->defaultNull()
                         ->end()
                         ->booleanNode('store_bodies')
                             ->info('Also store the HTML / text bodies (personal data; secrets passed through the redact header are masked). Off by default (privacy / GDPR).')
@@ -396,6 +396,14 @@ final class Configuration implements ConfigurationInterface
                         ->thenInvalid('nowo_mail_kit.security.access_roles must contain at least one non-empty role when no access_checker is set and allow_unauthenticated is false (an empty list would deny everybody).')
                     ->end()
                 ->end()
+            ->end()
+            ->validate()
+                // 2.0: an unset log.map_entities follows log.enabled (1.x defaulted to true).
+                ->always(static function (array $v): array {
+                    $v['log']['map_entities'] ??= $v['log']['enabled'];
+
+                    return $v;
+                })
             ->end()
             ->validate()
                 ->ifTrue(static fn (array $v): bool => ($v['log']['enabled'] ?? true) === true && ($v['log']['map_entities'] ?? true) === false)

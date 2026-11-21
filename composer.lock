@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "b9ed72f916550a0c72852e0b182ce712",
+    "content-hash": "2d83ecf6367f4b82fa98d6377d2590f8",
     "packages": [
         {
             "name": "doctrine/collections",
@@ -9027,7 +9027,8 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-11-15T19:58:26+00:00"
+            "time": "2026-11-15T19:58:26+00:00",
+            "published-time": "2026-11-15T19:58:39+00:00"
         },
         {
             "name": "phpstan/phpstan-phpunit",

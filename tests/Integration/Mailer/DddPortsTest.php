@@ -9,7 +9,7 @@ use Nowo\MailKitBundle\Event\MailDeliveryFailedEvent;
 use Nowo\MailKitBundle\Mailer\DeliveryFailedException;
 use Nowo\MailKitBundle\Mailer\MailHeaders;
 use Nowo\MailKitBundle\Tests\Integration\Kernel\KernelTestCase;
-use Nowo\MailKitBundle\Tests\Support\StaticSenderProvider;
+use Nowo\MailKitBundle\Tests\Support\StaticSenderIdentityProvider;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\Mime\Email;
@@ -22,8 +22,8 @@ final class DddPortsTest extends KernelTestCase
 {
     public function testAHostSenderProviderAndDeliveryEvents(): void
     {
-        $kernel = $this->bootKernel(['mailer' => ['sender_provider' => StaticSenderProvider::class]], extra: static function (ContainerConfigurator $container): void {
-            $container->services()->set(StaticSenderProvider::class);
+        $kernel = $this->bootKernel(['mailer' => ['sender_provider' => StaticSenderIdentityProvider::class]], extra: static function (ContainerConfigurator $container): void {
+            $container->services()->set(StaticSenderIdentityProvider::class);
         });
         $this->settings($kernel)->save('mailer', ['dsn' => 'memory://default', 'from' => 'settings@example.com']);
         /** @var list<object> $events */

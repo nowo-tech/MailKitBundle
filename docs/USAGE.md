@@ -4,59 +4,22 @@
 
 - [How a message is sent](#how-a-message-is-sent)
 - [The mailer settings section](#the-mailer-settings-section)
-  - [Fields](#fields)
-  - [DSN validation](#dsn-validation)
-  - [Sender rules](#sender-rules)
 - [Runtime DSN and fallback](#runtime-dsn-and-fallback)
-  - [Your own DSN provider](#your-own-dsn-provider)
-  - [Named transports](#named-transports)
-  - [Messenger (async mail)](#messenger-async-mail)
 - [Sender and Reply-To](#sender-and-reply-to)
 - [Tags and redaction](#tags-and-redaction)
 - [Test e-mail](#test-e-mail)
 - [Resend](#resend)
-  - [Migrating the 1.2 `resend` section](#migrating-the-12-resend-section)
 - [DB-only mode](#db-only-mode)
 - [Branded e-mails](#branded-e-mails)
 - [Readiness and AuthKit](#readiness-and-authkit)
 - [Sent-mail log](#sent-mail-log)
-  - [Admin pages](#admin-pages)
-  - [Sorting](#sorting)
-  - [CSV export](#csv-export)
-  - [Retention and erasure](#retention-and-erasure)
 - [GDPR erasure and export](#gdpr-erasure-and-export)
-  - [Ports](#ports)
-  - [Matching rule](#matching-rule)
-  - [What is and is not erased](#what-is-and-is-not-erased)
-  - [Transactions and the erased event](#transactions-and-the-erased-event)
-  - [UserKit bridge](#userkit-bridge)
 - [Reacting to changes and auditing](#reacting-to-changes-and-auditing)
 - [Using it from a DDD / hexagonal application](#using-it-from-a-ddd--hexagonal-application)
 - [Microsoft Graph (shared mailbox)](#microsoft-graph-shared-mailbox)
-  - [How a Graph send works](#how-a-graph-send-works)
-  - [Standard Symfony host: the mailer transport](#standard-symfony-host-the-mailer-transport)
-  - [Getting the Graph id back: `GraphMailSender`](#getting-the-graph-id-back-graphmailsender)
-  - [Threading and plus addressing](#threading-and-plus-addressing)
-  - [Errors](#errors)
-  - [DDD / hexagonal host: your own mailbox port](#ddd--hexagonal-host-your-own-mailbox-port)
-  - [Worker mode](#worker-mode)
 - [Inbound mail from a Graph mailbox](#inbound-mail-from-a-graph-mailbox)
-  - [How a message comes in](#how-a-message-comes-in)
-  - [Standard Symfony host](#standard-symfony-host)
-  - [The normalised message](#the-normalised-message)
-  - [DDD / hexagonal host](#ddd--hexagonal-host)
-  - [Worker mode and limits](#worker-mode-and-limits)
 - [Open and click tracking](#open-and-click-tracking)
-  - [What happens to a tracked e-mail](#what-happens-to-a-tracked-e-mail)
-  - [What is never tracked](#what-is-never-tracked)
-  - [Standard Symfony host](#standard-symfony-host-1)
-  - [Beacon example: policy and short-link rewriter](#beacon-example-policy-and-short-link-rewriter)
-  - [The pixel endpoint](#the-pixel-endpoint)
-  - [Reading the results](#reading-the-results)
-  - [Retention, GDPR and worker mode](#retention-gdpr-and-worker-mode)
 - [Admin UI](#admin-ui)
-  - [Forms (FormKit)](#forms-formkit)
-  - [Overriding templates (REQ-TWIG-001)](#overriding-templates-req-twig-001)
 - [Translations](#translations)
 - [Doctrine schema and migrations](#doctrine-schema-and-migrations)
 
@@ -633,15 +596,15 @@ final readonly class SymfonyInvitationNotifier implements InvitationNotifier
 | --- | --- | --- |
 | `Nowo\MailKitBundle\Dsn\MailerDsnProviderInterface` | Where the DSN comes from (vault, per-tenant table…); `getDsn(): ?RuntimeDsn`, null = framework transport | `nowo_mail_kit.mailer.dsn_provider` |
 | `Nowo\MailKitBundle\Sender\SenderIdentityProviderInterface` (1.12) | Default `From` / `Reply-To` of messages without one (tenant, brand, your config), framework-free; `defaultFrom(): ?MailAddress`, `defaultReplyTo(): ?MailAddress` | `nowo_mail_kit.mailer.sender_provider` |
-| `Nowo\MailKitBundle\Sender\SenderProviderInterface` (1.5, **deprecated** since 1.12, removed in 2.0) | The same, with the Symfony Mime `Address`; `from(): ?Address`, `replyTo(): ?Address` | `nowo_mail_kit.mailer.sender_provider` |
 | `Nowo\MailKitBundle\Security\MailKitAccessCheckerInterface` | Who opens the admin UI; `canAccess(?object $user): bool` | `nowo_mail_kit.security.access_checker` |
 | `Nowo\Brand\Contract\BrandProviderInterface` / `BrandAssetReaderInterface` (optional) | Brand of the branded layout | `nowo_mail_kit.brand: auto` |
 
 **Without Instance Settings and without the ORM (1.6)**
 
-Standard path (default): register `NowoInstanceSettingsBundle`; the DSN, sender, test recipient and Resend key are
-fields of its `mailer` section, edited at runtime. DDD path (opt-in): give MailKit its configuration through the two
-ports and leave Instance Settings (and, with the log off, Doctrine) out of the kernel:
+Standard path (default): require and register `nowo-tech/instance-settings-bundle` (since 2.0 it is suggested, not
+installed with MailKit); the DSN, sender, test recipient and Resend key are fields of its `mailer` section, edited at
+runtime. DDD path (opt-in): give MailKit its configuration through the two ports and leave Instance Settings (and,
+with the log off, the ORM or Doctrine altogether) out of the application:
 
 ```yaml
 # config/packages/nowo_mail_kit.yaml — config/bundles.php has no NowoInstanceSettingsBundle
@@ -654,9 +617,8 @@ nowo_mail_kit:
 ```
 
 The sender port is framework-free since 1.12: `SenderIdentityProviderInterface` takes and returns the bundle value
-object `Sender\MailAddress`, so the host domain needs no Symfony Mime type. `nowo_mail_kit.mailer.sender_provider`
-also still accepts a service implementing the deprecated `Sender\SenderProviderInterface` (Mime `Address`); MailKit
-wraps whichever it gets, and `SenderIdentityProviderInterface` can be autowired in your own services either way.
+object `Sender\MailAddress`, so the host domain needs no Symfony Mime type. It is the only sender port since 2.0 (the
+Mime-typed `SenderProviderInterface` was removed; see UPGRADING "To 2.0.0").
 
 ```php
 use Nowo\MailKitBundle\Sender\MailAddress;
@@ -680,30 +642,16 @@ final readonly class TenantSenderProvider implements SenderIdentityProviderInter
 }
 ```
 
-| 1.12 port (implement) | Replaces (deprecated, removed in 2.0) | Wiring |
-|---|---|---|
-| `Sender\SenderIdentityProviderInterface` | `Sender\SenderProviderInterface` | `mailer.sender_provider` |
+You can decorate the sender (the `SenderIdentityProviderInterface` id or the `mailer.sender_provider` service): real
+mail, the test e-mail and every service that autowires the port then see the decorated sender. A decorator takes the
+decorated sender through `.inner` (or `#[AutowireDecorated]`); injecting the sender port into it is a circular
+reference.
 
-When you decorate the sender (the `SenderProviderInterface` id or the `mailer.sender_provider` service), both ports
-and real mail see the decorated sender, and the new port wins everywhere (1.12.2):
-
-| Decorator implements | New port (`SenderIdentityProviderInterface`) | Real mail and the test e-mail |
-|---|---|---|
-| only `SenderProviderInterface` | the decorator, through an internal gate (`from()` / `replyTo()`) | the decorator, through the gate (`from()` / `replyTo()`) |
-| both interfaces | the decorator (`defaultFrom()` / `defaultReplyTo()`) | the decorator, through the gate (`defaultFrom()` / `defaultReplyTo()`) |
-| only `SenderIdentityProviderInterface` | the decorator (`defaultFrom()` / `defaultReplyTo()`) | the decorator, through the gate (`defaultFrom()` / `defaultReplyTo()`) |
-
-Your own services that inject `SenderProviderInterface` keep getting the decorator itself. A decorator takes the
-decorated sender through `.inner` (or `#[AutowireDecorated]`); injecting either sender port into it is a circular
-reference. Without a decorator the wiring is unchanged.
-
-`mailer.sender_provider` stays the single source of the provider (no autoconfiguration). Both interfaces are always
-aliased to it, so either can be autowired: a service implementing only the deprecated interface is asked through it
-exactly as in 1.11 (the new port reaches it through an internal gate); one implementing the 1.12 port is asked through
-that port — also when it implements both, where `defaultFrom()` / `defaultReplyTo()` win and `from()` / `replyTo()`
-are never called. The default `MailSettings` implements both with the same values. The build fails when the service
-implements neither interface. The suite boots such a host end to end:
-`tests/Integration/Ddd/SenderIdentityPortKernelTest.php`.
+`mailer.sender_provider` stays the single source of the provider (no autoconfiguration); `SenderIdentityProviderInterface`
+is aliased to it (or to the default `MailSettings`), so it can be autowired. The build fails, naming the service and
+its class, when the configured service or a decorator of the sender does not implement the port (a class still on the
+removed `SenderProviderInterface` cannot even be loaded). The suite boots such hosts end to end:
+`tests/Integration/Mailer/SenderIdentityPortKernelTest.php`.
 
 Both providers are read on every send, so per-tenant or per-request values work in a kept-alive worker (keep no
 state in them). Without either provider the build fails and names the missing option; `resend.enabled` needs
@@ -741,25 +689,26 @@ about a failing transport cannot recurse through the same transport.
   `OutboundMailReadiness`; scalars only: source, redacted label, ready, error key, missing fields). AuthKit gets it
   automatically through `OutboundMailReadyCheckerInterface`.
 - `SentMailErasureInterface::forgetAddress($email)` (`['deleted' => n, 'redacted' => n]`) and `purgeBefore()` (1.6)
-  from your account-deletion / retention use case; always registered. With Doctrine it really erases, also with
-  `log.enabled: false` (rows from when the log was on); it is a no-op only without Doctrine (nothing can be stored). A missing log table (wrong `doctrine.table_prefix` /
-  entity manager, unmigrated schema) throws `SentMailLogTableMissingException` instead of reporting zero rows, except
-  with `log.map_entities: false`.
+  from your account-deletion / retention use case; always registered. With the Doctrine ORM it really erases, also
+  with `log.enabled: false` (rows from when the log was on, while `log.map_entities: true` keeps them mapped); it is a
+  no-op only without the ORM (nothing can be stored). A missing log table (wrong `doctrine.table_prefix` / entity
+  manager, unmigrated schema) throws `SentMailLogTableMissingException` instead of reporting zero rows, except when
+  the log entities are not mapped (`log.map_entities` false, or unset with the log off).
 - `RuntimeDsn`, `MailStatus`, `TestMailResult`, `SentMailFilters` are immutable value objects.
 
 **Persistence**
 
 `SentMail` and `SentMailBody` are bundle-owned, read-only mapped entities with no relations: no
-`resolve_target_entities`, nothing to extend. Their mapping is added to the default ORM mapping list (also with
-`log.enabled: false`, so existing tables are not dropped by your schema tooling; set `log.map_entities: false`, only
-with the log off, to keep them out of an XML-only entity manager); with several entity managers, add the `NowoMailKitBundle` mapping to the manager you name
-in `doctrine.entity_manager`.
+`resolve_target_entities`, nothing to extend. Their mapping is added to the default ORM mapping list when
+`log.map_entities` resolves to true: by default it follows `log.enabled` (2.0). With the log off, set
+`log.map_entities: true` to keep existing tables mapped (so your schema tooling does not drop them), or leave it unset
+(or `false`) to keep the entities out of the entity manager, e.g. an XML-only one. With several entity managers, add
+the `NowoMailKitBundle` mapping to the manager you name in `doctrine.entity_manager`.
 
 **Known limitations**
 
-- Instance Settings, DoctrineEncrypt and the ORM stay in composer `require` in 1.x (installed, not registered); 2.0
-  moves them to `suggest`. If your application uses any of them itself, require it directly now (see
-  [UPGRADING "Preparing for 2.0"](UPGRADING.md#preparing-for-20)).
+- Since 2.0 Instance Settings, DoctrineEncrypt and the ORM are in composer `suggest`, not `require`. Require what you
+  use directly (see UPGRADING "To 2.0.0", "Composer moves"); a configuration that needs a missing one fails the build.
 - `SentMailRepository` returns the `SentMail` entity (admin read model): wrap it in your own query port if your
   application layer must not depend on it.
 

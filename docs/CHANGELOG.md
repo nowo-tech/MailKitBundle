@@ -7,94 +7,88 @@ All notable changes to this project are documented here. The format follows
 
 - [[Unreleased]](#unreleased)
 - [[1.14.1] - 2026-11-20](#1141---2026-11-20)
-  - [Fixed](#fixed)
 - [[1.14.0] - 2026-11-20](#1140---2026-11-20)
-  - [Added](#added)
-  - [Changed](#changed)
-  - [Deprecated](#deprecated)
 - [[1.13.1] - 2026-11-19](#1131---2026-11-19)
-  - [Fixed](#fixed-1)
 - [[1.13.0] - 2026-11-19](#1130---2026-11-19)
-  - [Added](#added-1)
-  - [Changed](#changed-1)
-  - [Fixed](#fixed-2)
-  - [Demo](#demo)
 - [[1.12.2] - 2026-11-14](#1122---2026-11-14)
-  - [Fixed](#fixed-3)
 - [[1.12.1] - 2026-11-14](#1121---2026-11-14)
-  - [Added](#added-2)
-  - [Fixed](#fixed-4)
 - [[1.12.0] - 2026-11-14](#1120---2026-11-14)
-  - [Added](#added-3)
-  - [Changed](#changed-2)
-  - [Tests](#tests)
 - [[1.11.0] - 2026-11-13](#1110---2026-11-13)
-  - [Changed](#changed-3)
-  - [Tests](#tests-1)
-  - [Documentation](#documentation)
 - [[1.10.2] - 2026-11-12](#1102---2026-11-12)
-  - [Fixed](#fixed-5)
 - [[1.10.1] - 2026-11-12](#1101---2026-11-12)
-  - [Fixed](#fixed-6)
 - [[1.10.0] - 2026-11-12](#1100---2026-11-12)
-  - [Added](#added-4)
-  - [Changed](#changed-4)
-  - [Tests](#tests-2)
 - [[1.9.1] - 2026-11-12](#191---2026-11-12)
-  - [Fixed](#fixed-7)
-  - [Security](#security)
 - [[1.9.0] - 2026-11-12](#190---2026-11-12)
-  - [Added](#added-5)
-  - [Changed](#changed-5)
-  - [Audit NQ (before the 1.9.0 tag)](#audit-nq-before-the-190-tag)
-  - [Audit NQ-v (verification, before the 1.9.0 tag)](#audit-nq-v-verification-before-the-190-tag)
-  - [Security](#security-1)
-  - [Tests](#tests-3)
 - [[1.8.0] - 2026-11-12](#180---2026-11-12)
-  - [Added](#added-6)
-  - [Security](#security-2)
-  - [Tests](#tests-4)
 - [[1.7.1] - 2026-11-11](#171---2026-11-11)
-  - [Fixed](#fixed-8)
-  - [Tests](#tests-5)
-  - [Documentation](#documentation-1)
 - [[1.7.0] - 2026-11-11](#170---2026-11-11)
-  - [Added](#added-7)
-  - [Changed](#changed-6)
 - [[1.6.0] - 2026-11-11](#160---2026-11-11)
-  - [Added](#added-8)
-  - [Changed](#changed-7)
 - [[1.5.0] - 2026-11-10](#150---2026-11-10)
-  - [Added](#added-9)
-  - [Changed](#changed-8)
 - [[1.4.0] - 2026-11-09](#140---2026-11-09)
-  - [Added](#added-10)
-  - [Security](#security-3)
 - [[1.3.0] - 2026-11-02](#130---2026-11-02)
-  - [Added](#added-11)
-  - [Changed](#changed-9)
-  - [Security](#security-4)
 - [[1.2.0] - 2026-11-02](#120---2026-11-02)
-  - [Added](#added-12)
-  - [Changed](#changed-10)
-  - [Fixed](#fixed-9)
 - [[1.1.1] - 2026-11-01](#111---2026-11-01)
-  - [Security](#security-5)
-  - [Changed](#changed-11)
-  - [Fixed](#fixed-10)
 - [[1.1.0] - 2026-11-01](#110---2026-11-01)
-  - [Added](#added-13)
-  - [Changed](#changed-12)
 - [[1.0.0] - 2026-10-31](#100---2026-10-31)
-  - [Added](#added-14)
-  - [Security (independent audit, Appendix CA)](#security-independent-audit-appendix-ca)
-  - [Security (re-verification follow-ups)](#security-re-verification-follow-ups)
 
 ## [Unreleased]
 
+**2.0.0 (major, REQ-ARCH-001).** It removes only what 1.x announced as deprecated; an application that builds on the
+last 1.x minor (1.14) without MailKit deprecation notices upgrades without code changes. See UPGRADING "To 2.0.0".
+
+### Removed
+
+- **BREAKING (API):** **`Sender\SenderProviderInterface`** (the Mime-typed sender port, deprecated since 1.12, announced for removal in
+  UPGRADING "To 1.12.0" and "Preparing for 2.0"). Implement `Sender\SenderIdentityProviderInterface` (returns
+  `Sender\MailAddress`). Its wiring goes with it: the internal gate `Sender\SenderProviderGate`, the services
+  `nowo_mail_kit.sender.provider_gate` / `nowo_mail_kit.sender.identity_gate` and the
+  `Nowo\MailKitBundle\Sender\SenderProviderInterface` alias. A `mailer.sender_provider` service or a sender decorator
+  that does not implement `SenderIdentityProviderInterface` (including a class that still implements the removed
+  interface, which can no longer be loaded) fails the container build with a message naming the service and its class;
+  so does a service that still decorates the removed id, and a class registered by resource autodiscovery that
+  still implements the removed interface (Symfony keeps only a loading error on its definition and would otherwise
+  drop it silently, `#[AsDecorator]` / `#[AsAlias]` unread).
+- **BREAKING (API):** **`Settings\ResendSettingsSection`** (constant holder, deprecated since 1.3). Use `MailerSettingsSection::NAME` or
+  `LegacyResendSettings::SECTION`.
+- **BREAKING (deprecation layer):** **The 1.14 build-time deprecation notices** (`log.map_entities` unset with the log off, host classes on
+  `SenderProviderInterface`), together with what they announced.
+
 ### Changed
 
+- **BREAKING (default):** **`log.map_entities` follows `log.enabled` when it is not set** (it defaulted to `true` in 1.x; announced in
+  UPGRADING "To 1.14.0"). With the log on nothing changes. With `log.enabled: false` and the option unset, the
+  `SentMail` / `SentMailBody` mapping leaves your entity manager and the schema tool proposes dropping both tables:
+  purge or erase them first, or set `log.map_entities: true`.
+- **BREAKING (Composer, REQ-ARCH-001 rule 8):** `nowo-tech/instance-settings-bundle`, `nowo-tech/doctrine-encrypt-bundle` and
+  `doctrine/orm` move from `require` to `suggest` (announced in UPGRADING "To 1.14.0" / "Preparing for 2.0").
+  `conflict` refuses their versions below the old floors (`<1.3.1`, `<2.10`, `<3.3`). `doctrine/dbal`,
+  `doctrine/doctrine-bundle`, `doctrine/persistence` (the tracking and Graph stores use its registry) and
+  `symfony/mime` stay required.
+- **BREAKING (build errors):** services that use one of the three packages are registered only when it is installed: the Doctrine ORM listeners
+  (table prefix, the tracking and Graph inbound schema listeners) and the log mapping need the ORM, and the
+  erasure / retention recorder falls back to the no-op one without it. `log.enabled: true` (the default) without
+  `doctrine/orm` fails the build with what to install; without Instance Settings and without both host ports the
+  build error now says to run `composer require nowo-tech/instance-settings-bundle`, so mail never falls back silently
+  to the framework transport.
+- **BREAKING (API):** `SenderPolicy` and `TestMailSender` read `SenderIdentityProviderInterface` (constructor type change). An address the
+  mailer refuses is still left out with the same warning, now logged by `SenderPolicy`
+  (`SenderPolicy::REFUSED_ADDRESS_MESSAGE`).
+- CI: new job "Without Instance Settings, DoctrineEncrypt and the ORM"; the workflows also run on the `1.x` branch.
 - demo: the demo runs inside UiKit's demo platform shell (`@NowoUiKit/demo_platform/layout.html.twig`, UiKit ^2.60): shared top bar, aside navigation and section cards, no demo masthead markup; the Web Debug Toolbar and the CDN hot-reload scripts are off in the demo and its README screenshots. Demo only, no release.
+
+### Fixed
+
+- **A host entity holding a log row survives the CSV export.** `SentMailRepository::iterateFiltered()` (the streamed
+  export) and `findBodies()` detached every `SentMail` / `SentMailBody` they returned, including one the host had
+  already loaded on the same entity manager, for example through its own `ManyToOne` to `SentMail`. The host's next
+  flush then failed with "A new entity was found through the relationship …". They now detach only the rows they
+  loaded themselves. MailKit still never persists, flushes, clears, resets or closes the host's entity manager, and its
+  log entities have no association to host classes.
+
+### Security
+
+- 1.x receives security fixes for 6 months after 2.0.0 is released: fixes rated Moderate and above are backported to
+  the last 1.x minor, Low ones are fixed in 2.x only (`.github/SECURITY.md`).
 
 ## [1.14.1] - 2026-11-20
 

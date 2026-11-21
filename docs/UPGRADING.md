@@ -122,8 +122,16 @@ nowo_mail_kit:
         map_entities: true # keeps the 1.x behaviour
 ```
 
-Erasure and retention keep working on rows written while the log was on as long as the tables are mapped. Without the
-mapping (or without the ORM) there is nothing to erase.
+What still works on the rows written while the log was on, once the mapping leaves your entity manager (log off,
+`log.map_entities` unset) while the old tables are still in the database:
+
+- `nowo:mail-kit:log:purge`, `nowo:mail-kit:log:forget` and `SentMailErasureInterface` still delete and redact them
+  (with the Doctrine ORM installed and configured in your application);
+- the UserKit GDPR integration (`personal_data.enabled`: the `emails_received` eraser and export section) is **no
+  longer registered**, so a UserKit erasure or export request no longer covers those leftover rows.
+
+So purge (or forget) and drop the old log tables before you upgrade, or keep `log.map_entities: true` until you have.
+Without the ORM (installed and configured) nothing is erased: the erasure port is a no-op.
 
 ### Sender: `SenderIdentityProviderInterface` only
 

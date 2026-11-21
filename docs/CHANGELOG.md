@@ -38,7 +38,7 @@ last 1.x minor (1.14) without MailKit deprecation notices upgrades without code 
 
 ### Removed
 
-- **`Sender\SenderProviderInterface`** (the Mime-typed sender port, deprecated since 1.12, announced for removal in
+- **BREAKING (API):** **`Sender\SenderProviderInterface`** (the Mime-typed sender port, deprecated since 1.12, announced for removal in
   UPGRADING "To 1.12.0" and "Preparing for 2.0"). Implement `Sender\SenderIdentityProviderInterface` (returns
   `Sender\MailAddress`). Its wiring goes with it: the internal gate `Sender\SenderProviderGate`, the services
   `nowo_mail_kit.sender.provider_gate` / `nowo_mail_kit.sender.identity_gate` and the
@@ -46,29 +46,29 @@ last 1.x minor (1.14) without MailKit deprecation notices upgrades without code 
   that does not implement `SenderIdentityProviderInterface` (including a class that still implements the removed
   interface, which can no longer be loaded) fails the container build with a message naming the service and its class;
   so does a service that still decorates the removed id.
-- **`Settings\ResendSettingsSection`** (constant holder, deprecated since 1.3). Use `MailerSettingsSection::NAME` or
+- **BREAKING (API):** **`Settings\ResendSettingsSection`** (constant holder, deprecated since 1.3). Use `MailerSettingsSection::NAME` or
   `LegacyResendSettings::SECTION`.
-- **The 1.14 build-time deprecation notices** (`log.map_entities` unset with the log off, host classes on
+- **BREAKING (deprecation layer):** **The 1.14 build-time deprecation notices** (`log.map_entities` unset with the log off, host classes on
   `SenderProviderInterface`), together with what they announced.
 
 ### Changed
 
-- **`log.map_entities` follows `log.enabled` when it is not set** (it defaulted to `true` in 1.x; announced in
+- **BREAKING (default):** **`log.map_entities` follows `log.enabled` when it is not set** (it defaulted to `true` in 1.x; announced in
   UPGRADING "To 1.14.0"). With the log on nothing changes. With `log.enabled: false` and the option unset, the
   `SentMail` / `SentMailBody` mapping leaves your entity manager and the schema tool proposes dropping both tables:
   purge or erase them first, or set `log.map_entities: true`.
-- **Composer (REQ-ARCH-001 rule 8):** `nowo-tech/instance-settings-bundle`, `nowo-tech/doctrine-encrypt-bundle` and
+- **BREAKING (Composer, REQ-ARCH-001 rule 8):** `nowo-tech/instance-settings-bundle`, `nowo-tech/doctrine-encrypt-bundle` and
   `doctrine/orm` move from `require` to `suggest` (announced in UPGRADING "To 1.14.0" / "Preparing for 2.0").
   `conflict` refuses their versions below the old floors (`<1.3.1`, `<2.10`, `<3.3`). `doctrine/dbal`,
   `doctrine/doctrine-bundle`, `doctrine/persistence` (the tracking and Graph stores use its registry) and
   `symfony/mime` stay required.
-- Services that use one of the three packages are registered only when it is installed: the Doctrine ORM listeners
+- **BREAKING (build errors):** services that use one of the three packages are registered only when it is installed: the Doctrine ORM listeners
   (table prefix, the tracking and Graph inbound schema listeners) and the log mapping need the ORM, and the
   erasure / retention recorder falls back to the no-op one without it. `log.enabled: true` (the default) without
   `doctrine/orm` fails the build with what to install; without Instance Settings and without both host ports the
   build error now says to run `composer require nowo-tech/instance-settings-bundle`, so mail never falls back silently
   to the framework transport.
-- `SenderPolicy` and `TestMailSender` read `SenderIdentityProviderInterface` (constructor type change). An address the
+- **BREAKING (API):** `SenderPolicy` and `TestMailSender` read `SenderIdentityProviderInterface` (constructor type change). An address the
   mailer refuses is still left out with the same warning, now logged by `SenderPolicy`
   (`SenderPolicy::REFUSED_ADDRESS_MESSAGE`).
 - CI: new job "Without Instance Settings, DoctrineEncrypt and the ORM"; the workflows also run on the `1.x` branch.

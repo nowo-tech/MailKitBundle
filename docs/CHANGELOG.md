@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[2.0.0] - 2026-11-21](#200---2026-11-21)
 - [[1.14.1] - 2026-11-20](#1141---2026-11-20)
 - [[1.14.0] - 2026-11-20](#1140---2026-11-20)
 - [[1.13.1] - 2026-11-19](#1131---2026-11-19)
@@ -32,6 +33,8 @@ All notable changes to this project are documented here. The format follows
 - [[1.0.0] - 2026-10-31](#100---2026-10-31)
 
 ## [Unreleased]
+
+## [2.0.0] - 2026-11-21
 
 **2.0.0 (major, REQ-ARCH-001).** It removes only what 1.x announced as deprecated; an application that builds on the
 last 1.x minor (1.14) without MailKit deprecation notices upgrades without code changes. See UPGRADING "To 2.0.0".

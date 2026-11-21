@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 2.0.0](#to-200)
   - [Before you upgrade](#before-you-upgrade)
   - [`log.map_entities` follows `log.enabled`](#logmap_entities-follows-logenabled)
   - [Sender: `SenderIdentityProviderInterface` only](#sender-senderidentityproviderinterface-only)
@@ -60,6 +61,14 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+## To 2.0.0
+
+From **1.14.1**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
 
 Target **2.0.0** (major), from **1.14.x**:
 

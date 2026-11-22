@@ -97,6 +97,7 @@ log:
         html_body: Apri il corpo HTML
         export: 'Esporta CSV'
         export_limited: 'Esporta CSV (prime %max% righe)'
+        clear_filters: 'Rimuovi i filtri'
         export_bodies: 'Esporta CSV con i corpi'
     export:
         truncated: 'Esportazione troncata: le prime %max% di %total% righe. Restringi i filtri per esportare il resto.'

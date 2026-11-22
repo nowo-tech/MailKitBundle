@@ -97,6 +97,7 @@ log:
         html_body: HTML-inhoud openen
         export: 'CSV exporteren'
         export_limited: 'CSV exporteren (eerste %max% rijen)'
+        clear_filters: 'Filters wissen'
         export_bodies: 'CSV met inhoud exporteren'
     export:
         truncated: 'Export ingekort: de eerste %max% van %total% rijen. Verfijn de filters om de rest te exporteren.'

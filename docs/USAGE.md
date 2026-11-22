@@ -371,6 +371,7 @@ Switch the log off with `log.enabled: false` (no table writes, no log pages, no 
 ### Admin pages
 
 - `GET /admin/mail/log` — UiKit list: search (subject or recipient, ≥ 3 characters), status, period (24 h / 7 d / 30 d / all), sortable columns, `web_ui.page_size` rows per page, the current transport and the "Export CSV" action in the header.
+- Empty log: the UiKit `empty` partial with one sentence (*No e-mail has been sent yet.*); when filters are set, *No e-mail matches these filters.* plus a *Clear filters* link.
 - `GET /admin/mail/log/export` — CSV of the current filters and sort (see [CSV export](#csv-export)).
 - `GET /admin/mail/log/{id}` — envelope and delivery details; the stored text body (escaped).
 - `GET /admin/mail/log/{id}/body` — stored HTML body as its own response with `Content-Security-Policy: default-src 'none'; …; sandbox` (no script, no remote loads, no forms), `nosniff`, `no-store` (only with `log.store_bodies`).

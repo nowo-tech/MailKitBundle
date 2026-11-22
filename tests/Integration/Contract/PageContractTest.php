@@ -21,8 +21,30 @@ final class PageContractTest extends PageContractTestCase
     {
         yield 'log list' => new PageFixture('@NowoMailKitBundle/log/index.html.twig', PageFixtures::index());
         yield 'log list (empty, not ready)' => new PageFixture('@NowoMailKitBundle/log/index.html.twig', PageFixtures::index(false, false));
+        yield 'log list (empty, filtered)' => new PageFixture('@NowoMailKitBundle/log/index.html.twig', PageFixtures::index(false, true, true));
         yield 'log entry (bodies stored)' => new PageFixture('@NowoMailKitBundle/log/show.html.twig', PageFixtures::show());
         yield 'log entry (no body)' => new PageFixture('@NowoMailKitBundle/log/show.html.twig', PageFixtures::show(false));
+    }
+
+    public function testAnEmptyLogIsOneSentenceThroughTheUiKitEmptyState(): void
+    {
+        $html = $this->renderPage(new PageFixture('@NowoMailKitBundle/log/index.html.twig', PageFixtures::index(false, true, false)))->html;
+
+        self::assertSame(1, substr_count($html, 'nowo-ui-empty__message'), 'One message.');
+        self::assertStringContainsString('nowo-ui-empty__message">No e-mail has been sent yet.</p>', $html);
+        self::assertStringNotContainsString('nowo-ui-empty__title', $html, 'No title line next to the sentence.');
+        self::assertStringNotContainsString('No items found', $html, 'No second default line.');
+        self::assertStringNotContainsString('nowo-ui-empty__action', $html, 'Nothing to offer on an empty, unfiltered log.');
+    }
+
+    public function testAnEmptyFilteredLogOffersToClearTheFilters(): void
+    {
+        $html = $this->renderPage(new PageFixture('@NowoMailKitBundle/log/index.html.twig', PageFixtures::index(false, true, true)))->html;
+
+        self::assertStringContainsString('nowo-ui-empty__message">No e-mail matches these filters.</p>', $html);
+        self::assertStringNotContainsString('No items found', $html);
+        self::assertMatchesRegularExpression('#nowo-ui-empty__action.*data-testid="mail-kit-clear-filters"#s', $html);
+        self::assertStringContainsString('Clear filters', $html);
     }
 
     public function testTheStoredTextBodyIsEscaped(): void

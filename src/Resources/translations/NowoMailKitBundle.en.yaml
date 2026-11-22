@@ -97,6 +97,7 @@ log:
         html_body: Open the HTML body
         export: 'Export CSV'
         export_limited: 'Export CSV (first %max% rows)'
+        clear_filters: 'Clear filters'
         export_bodies: 'Export CSV with bodies'
     export:
         truncated: 'Export truncated: the first %max% of %total% rows. Narrow the filters to export the rest.'

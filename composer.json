@@ -82,7 +82,7 @@
         "doctrine/orm": "^3.3",
         "friendsofphp/php-cs-fixer": "^3.0",
         "igor-php/igor-php": "^0.10.1",
-        "nowo-tech/auth-kit-bundle": "^1.31",
+        "nowo-tech/auth-kit-bundle": "^1.31 || ^2.0",
         "nowo-tech/brand-contracts": "^1.0",
         "nowo-tech/doctrine-encrypt-bundle": "^2.10",
         "nowo-tech/instance-settings-bundle": "^1.3.1",

@@ -25,6 +25,7 @@ use Nowo\MailKitBundle\Command\PurgeSentMailLogCommand;
 use Nowo\MailKitBundle\Command\SendTestMailCommand;
 use Nowo\MailKitBundle\Controller\MailKitController;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\MailerIntegrationPass;
+use Nowo\MailKitBundle\Doctrine\MailKitExactKeyColumns;
 use Nowo\MailKitBundle\Doctrine\TablePrefixListener;
 use Nowo\MailKitBundle\Dsn\DsnHostGuard;
 use Nowo\MailKitBundle\Dsn\MailerDsnProviderInterface;
@@ -354,6 +355,15 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $this->registerGraph($container, $config['graph'], $config['doctrine'], $hasOrm);
         $this->registerTracking($container, $config['tracking'], $config['doctrine'], $config['personal_data']['enabled'], $hasDoctrine, $hasOrm);
         $this->registerConflictResponse($container, $config['conflict_response']);
+        // REQ-SEC-006: the bundle's own declaration of its identity / access-key columns. Autoconfigured so that
+        // MigrationsKit tags it (nowo:migrations:check-key-collations) without the host registering anything; the
+        // features that are off declare their columns inactive rather than omitting them.
+        $container->setDefinition(MailKitExactKeyColumns::class, (new Definition(MailKitExactKeyColumns::class, [
+            $config['doctrine']['table_prefix'],
+            $config['tracking']['enabled'] === true,
+            $config['graph']['inbound']['enabled'],
+        ]))->setAutoconfigured(true));
+
         $container->setParameter('nowo_mail_kit.graph.webhook_path', $config['graph']['inbound']['webhook']['path']);
         $container->setDefinition(GraphWebhookRouteLoader::class, (new Definition(GraphWebhookRouteLoader::class, [
             $config['graph']['inbound']['enabled'],

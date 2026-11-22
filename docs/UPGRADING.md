@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+  - [The bundle declares its own identity / access-key columns (REQ-SEC-006)](#the-bundle-declares-its-own-identity--access-key-columns-req-sec-006)
 - [To 2.1.0](#to-210)
 - [To 2.0.0](#to-200)
   - [Before you upgrade](#before-you-upgrade)
@@ -62,6 +63,36 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+### The bundle declares its own identity / access-key columns (REQ-SEC-006)
+
+Nothing to do: the declaration is discovered by autoconfiguration, and a host that does not install
+`nowo-tech/migrations-kit-bundle` is unaffected.
+
+What you can **remove**: if you excused this bundle's key columns by hand so the uniform collation gate would pass,
+those entries are now redundant — a declared exact-key column is exempt from the uniform gate by construction, and
+`nowo:migrations:check-key-collations` checks it under its real owner (`nowo-tech/mail-kit-bundle`) instead of yours.
+Delete them:
+
+```diff
+ nowo_migrations_kit:
+     collation_check:
+         ignore_columns:
+-            'mail_kit_tracking_send.send_id': 'MailKit tracking send id'
+-            'mail_kit_tracking_send.recipient_id': 'MailKit tracking recipient'
+-            'mail_kit_tracking_send.tenant': 'MailKit tracking tenant'
+```
+
+The Graph inbound tables (`mail_kit_graph_subscription`, `mail_kit_graph_delta`, `mail_kit_graph_inbound`) go the same
+way, prefixed tables included: the declaration resolves `nowo_mail_kit.doctrine.table_prefix` itself. Keeping an entry
+is not an error, but it outlives the declaration and goes on excusing a column nothing checks any more, so drop it.
+
+If the gate now *fails* on one of these columns, it is telling the truth: that table predates 1.11.0, or it was
+restored from a dump or created by hand, and it still has the host's folding default collation. The check prints the
+`ALTER TABLE … MODIFY … COLLATE …` to run.
+
+With `tracking.enabled: false` or `graph.inbound.enabled: false` the columns of that feature are reported as
+**skipped** with their setting, never as a failure: there is no table to check.
 
 ## To 2.1.0
 

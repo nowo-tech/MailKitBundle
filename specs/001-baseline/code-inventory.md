@@ -2,9 +2,9 @@
 
 **Baseline spec**: [`spec.md`](spec.md)  
 **Package**: `nowo-tech/mail-kit-bundle`  
-**Last audited**: 2026-11-16
+**Last audited**: 2026-11-22
 
-Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **188** (1.12.2).
+Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **187** (2.1.0).
 
 ## Bundle and dependency injection
 
@@ -261,13 +261,20 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 | `src/Tracking/TrackingRecipientResolverInterface.php` | Open and click tracking | FR-TRK-001 |
 | `src/Tracking/TrackingTokenSigner.php` | Open and click tracking | FR-TRK-003 |
 
+## Concurrency
+
+| Source file | Spec section | Requirement IDs |
+| --- | --- | --- |
+| `src/Concurrency/StorageConflicts.php` | Storage-conflict classifier on top of transaction-doctrine's (deadlock, lock wait, serialization, transient runner failure, lost savepoint; never unique violations or lost connections) | FR-CONC-001 |
+| `src/EventListener/MailKitConflictListener.php` | Conflict answer (409 / 503 + `X-Conflict-Code` `CONFLICT_001` / `CONFLICT_002`) on the bundle's own routes | FR-CONC-001 |
+
 ## Coverage summary
 
 | Category | Files | Mapped |
 | --- | ---: | ---: |
 | Bundle and dependency injection | 8 | 8 |
-| Settings | 7 | 7 |
-| DSN and sender | 20 | 20 |
+| Settings | 6 | 6 |
+| DSN and sender | 18 | 18 |
 | Delivery | 5 | 5 |
 | Test e-mail and Resend | 7 | 7 |
 | Sent-mail log | 13 | 13 |
@@ -279,4 +286,5 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 | Microsoft Graph sending | 20 | 20 |
 | Microsoft Graph inbound | 27 | 27 |
 | Open and click tracking | 30 | 30 |
-| **Total** | **188** | **188** |
+| Concurrency | 2 | 2 |
+| **Total** | **187** | **187** |

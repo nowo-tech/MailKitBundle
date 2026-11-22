@@ -158,6 +158,10 @@ to compile with a message naming the fix; routes exist only through the `nowo_ma
 - **FR-WRK-001** — `LegacyResendSettingsResetListener` forgets the legacy `resend` memo at request, Messenger and
   console boundaries (worker mode without services resetter, REQ-RUNTIME-002).
 
+### Concurrency (1.13, REQ-RUNTIME-003)
+
+- **FR-CONC-001** — `StorageConflicts` classifies a storage conflict of the bundle's writes on top of transaction-doctrine (deadlock, lock wait timeout, serialization failure, a transient runner failure, a lost savepoint of unknown outcome; unique violations and lost connections are never conflicts). `MailKitConflictListener` (priority -64, stateless) answers a conflict on the bundle's own routes (admin pages and actions, Graph webhook, tracking pixel) with 409 (or 503, `conflict_response.status`) and `X-Conflict-Code`: `CONFLICT_001` with `Retry-After` when nothing was committed, `CONFLICT_002` without it when part of the request was. Host routes are never answered.
+
 ### Branded e-mail
 
 - **FR-BRAND-001** — `BrandedEmailHelper`, `BrandedEmailImage`, `BrandedEmailPart`, `BrandedEmailText` and the

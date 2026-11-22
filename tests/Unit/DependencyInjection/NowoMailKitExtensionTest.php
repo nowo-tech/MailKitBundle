@@ -48,6 +48,8 @@ final class NowoMailKitExtensionTest extends TestCase
         self::assertSame(NowoMailKitExtension::formKitProfile(), $container->getExtensionConfig('nowo_form_kit')[0]['profiles'][NowoMailKitBundle::FORM_KIT_PROFILE]);
         self::assertSame(['outbound_mail_ready_checker' => NowoMailKitExtension::AUTH_KIT_CHECKER_ID], $container->getExtensionConfig('nowo_auth_kit')[0]);
         self::assertArrayHasKey('NowoMailKitBundle', $container->getExtensionConfig('doctrine')[0]['orm']['mappings']);
+        // DoctrineBundle 3.4 deprecates the mapping `alias`: the prepended mapping has none.
+        self::assertArrayNotHasKey('alias', $container->getExtensionConfig('doctrine')[0]['orm']['mappings']['NowoMailKitBundle']);
 
         $own = $this->container(['nowo_form_kit']);
         $own->prependExtensionConfig('nowo_form_kit', ['profiles' => [NowoMailKitBundle::FORM_KIT_PROFILE => ['translation_domain' => 'app']]]);

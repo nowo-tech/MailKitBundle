@@ -30,14 +30,14 @@ final class PageFixtures
     /**
      * @return array<string, mixed>
      */
-    public static function index(bool $rows = true, bool $ready = true): array
+    public static function index(bool $rows = true, bool $ready = true, ?bool $filtered = null): array
     {
         $filters = new SentMailFilters();
         $list    = $rows ? [self::row(SentMailStatus::Sent), self::row(SentMailStatus::Failed, 'otp'), self::row(SentMailStatus::Queued)] : [];
         $form    = FormFactorySupport::factory()->create(SentMailFilterType::class, $filters->formData(), ['action' => '/log'])->createView();
 
         return [
-            'page'    => self::pages()->listPage($list, new Pagination(1, 25, count($list), route: AdminPages::ROUTE_INDEX), $form, new MailStatus($ready ? DsnSource::Settings : DsnSource::Fallback, $ready ? 'smtp://smtp.example.com:587' : 'default', $ready), !$rows),
+            'page'    => self::pages()->listPage($list, new Pagination(1, 25, count($list), route: AdminPages::ROUTE_INDEX), $form, new MailStatus($ready ? DsnSource::Settings : DsnSource::Fallback, $ready ? 'smtp://smtp.example.com:587' : 'default', $ready), $filtered ?? !$rows),
             'filters' => $filters,
         ];
     }

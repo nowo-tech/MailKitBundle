@@ -34,6 +34,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Sent-mail log, empty state: one sentence through UiKit's `empty` partial. The sentence was passed as the empty state's *title*, so UiKit printed its default "No items found." as a second line under it; it is now the message, alone. A filtered, empty list also offers a *Clear filters* link (`log.action.clear_filters`, translated in the seven shipped locales); an empty, unfiltered log offers no action. Texts and routes are unchanged.
+
 ## [2.0.0] - 2026-11-21
 
 **2.0.0 (major, REQ-ARCH-001).** It removes only what 1.x announced as deprecated; an application that builds on the

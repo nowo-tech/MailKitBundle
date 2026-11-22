@@ -135,7 +135,10 @@ final readonly class AdminPages
                 Action::view($this->urls->generate(self::ROUTE_SHOW, ['id' => $row->getId()]), MailKitPages::label('log.action.view')),
             ],
             $pagination,
-            new EmptyState(MailKitPages::label($filtered ? 'log.index.empty_filtered' : 'log.index.empty')),
+            new EmptyState(
+                message: MailKitPages::label($filtered ? 'log.index.empty_filtered' : 'log.index.empty'),
+                action: $filtered ? new Action('cancel', MailKitPages::label('log.action.clear_filters'), href: $this->urls->generate(self::ROUTE_INDEX), variant: 'link', attributes: ['data-testid' => 'mail-kit-clear-filters']) : null,
+            ),
             $filtered ? $this->urls->generate(self::ROUTE_INDEX) : null,
             bundle: MailKitPages::BUNDLE,
             layout: $this->pages->layout(),

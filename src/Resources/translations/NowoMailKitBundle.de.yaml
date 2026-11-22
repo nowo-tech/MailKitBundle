@@ -97,6 +97,7 @@ log:
         html_body: HTML-Inhalt öffnen
         export: 'CSV exportieren'
         export_limited: 'CSV exportieren (erste %max% Zeilen)'
+        clear_filters: 'Filter zurücksetzen'
         export_bodies: 'CSV mit Inhalten exportieren'
     export:
         truncated: 'Export gekürzt: die ersten %max% von %total% Zeilen. Grenzen Sie die Filter ein, um den Rest zu exportieren.'

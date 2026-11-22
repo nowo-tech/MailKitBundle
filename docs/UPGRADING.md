@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 2.1.0](#to-210)
 - [To 2.0.0](#to-200)
   - [Before you upgrade](#before-you-upgrade)
   - [`log.map_entities` follows `log.enabled`](#logmap_entities-follows-logenabled)
@@ -61,6 +62,14 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+## To 2.1.0
+
+From **2.0.0**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
 
 ## To 2.0.0
 

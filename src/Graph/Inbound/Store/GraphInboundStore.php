@@ -45,6 +45,13 @@ final class GraphInboundStore
     /** Claim being processed. */
     public const STATUS_PROCESSING = 'processing';
 
+    /** Unprefixed names of the three tables ({@see MailKitExactKeyColumns} declares their key columns). */
+    public const SUBSCRIPTION_TABLE = 'mail_kit_graph_subscription';
+
+    public const DELTA_TABLE = 'mail_kit_graph_delta';
+
+    public const INBOUND_TABLE = 'mail_kit_graph_inbound';
+
     private const SAVEPOINT = 'nowo_mail_kit_graph_claim';
 
     private const DELTA_SAVEPOINT = 'nowo_mail_kit_graph_delta';
@@ -69,7 +76,7 @@ final class GraphInboundStore
      */
     public function subscriptionTable(): string
     {
-        return $this->tablePrefix . 'mail_kit_graph_subscription';
+        return $this->tablePrefix . self::SUBSCRIPTION_TABLE;
     }
 
     /**
@@ -77,7 +84,7 @@ final class GraphInboundStore
      */
     public function deltaTable(): string
     {
-        return $this->tablePrefix . 'mail_kit_graph_delta';
+        return $this->tablePrefix . self::DELTA_TABLE;
     }
 
     /**
@@ -85,7 +92,7 @@ final class GraphInboundStore
      */
     public function inboundTable(): string
     {
-        return $this->tablePrefix . 'mail_kit_graph_inbound';
+        return $this->tablePrefix . self::INBOUND_TABLE;
     }
 
     /**

@@ -1493,17 +1493,15 @@
             "dist": {
                 "type": "path",
                 "url": "/var/mail-kit-bundle",
-                "reference": "a6309611d8644835130543543777f6462f8ef6e1"
+                "reference": "6d460b5f4c731671901a9bdd03f2533e5abf7b0a"
             },
             "require": {
                 "doctrine/dbal": "^3.8 || ^4.0",
                 "doctrine/doctrine-bundle": "^2.13 || ^3.0",
-                "doctrine/orm": "^3.3",
                 "doctrine/persistence": "^3.1 || ^4.0",
                 "nowo-tech/controller-kit-bundle": "^2.3.1",
-                "nowo-tech/doctrine-encrypt-bundle": "^2.10",
                 "nowo-tech/form-kit-bundle": "^2.17",
-                "nowo-tech/instance-settings-bundle": "^1.3.1",
+                "nowo-tech/migrations-kit-contracts": "^1.0",
                 "nowo-tech/outbound-url-guard-bundle": "^1.3",
                 "nowo-tech/transaction-contract": "^1.0",
                 "nowo-tech/transaction-doctrine": "^1.9",
@@ -1540,14 +1538,21 @@
                 "twig/twig": "^3.12"
             },
             "conflict": {
+                "doctrine/orm": "<3.3",
                 "nowo-tech/brand-contracts": "<1.0 || >=2.0",
+                "nowo-tech/doctrine-encrypt-bundle": "<2.10",
+                "nowo-tech/instance-settings-bundle": "<1.3.1",
                 "nowo-tech/user-kit-bundle": "<1.12"
             },
             "require-dev": {
+                "doctrine/orm": "^3.3",
                 "friendsofphp/php-cs-fixer": "^3.0",
                 "igor-php/igor-php": "^0.10.1",
-                "nowo-tech/auth-kit-bundle": "^1.31",
+                "nowo-tech/auth-kit-bundle": "^1.31 || ^2.0",
                 "nowo-tech/brand-contracts": "^1.0",
+                "nowo-tech/doctrine-encrypt-bundle": "^2.10",
+                "nowo-tech/instance-settings-bundle": "^1.3.1",
+                "nowo-tech/migrations-kit-bundle": "^2.8",
                 "nowo-tech/phpstan-frankenphp": "^1.0",
                 "nowo-tech/user-kit-bundle": "^1.14",
                 "phpstan/extension-installer": "^1.4",
@@ -1571,9 +1576,12 @@
                 "symfony/yaml": "^7.4 || ^8.0"
             },
             "suggest": {
+                "doctrine/orm": "^3.3 — the sent-mail log (log.enabled, the default) and its admin pages; without it set log.enabled: false (since 2.0 no longer required)",
                 "ext-fileinfo": "Required for the Microsoft Graph inbound pipeline (graph.inbound, 1.9): attachment types are detected from the bytes",
                 "nowo-tech/auth-kit-bundle": "Gate magic-login / password-reset UI on a deliverable mailer (OutboundMailReadyCheckerInterface adapter)",
                 "nowo-tech/brand-contracts": "^1.0 — brand name, colours and logo (CID) of the optional branded e-mail layout from a BrandProviderInterface service (nowo_mail_kit.brand, spec 220)",
+                "nowo-tech/doctrine-encrypt-bundle": "^2.10 — encrypted secret fields of the `mailer` settings section (DSN, Resend key) and the 1.2 Resend settings migration (since 2.0 no longer required)",
+                "nowo-tech/instance-settings-bundle": "^1.3.1 — the default configuration source: the `mailer` settings section, the test e-mail and Resend actions; without it set mailer.dsn_provider and mailer.sender_provider (since 2.0 no longer required)",
                 "nowo-tech/user-kit-bundle": "GDPR export / erasure: registers the emails_received eraser and export section (personal_data.enabled, 1.7)",
                 "symfony/flex": "For automatic recipe installation",
                 "symfony/html-sanitizer": "Required for the Microsoft Graph inbound pipeline (graph.inbound, 1.9): inbound HTML is sanitised",
@@ -1688,6 +1696,72 @@
                 "symlink": true,
                 "relative": false
             }
+        },
+        {
+            "name": "nowo-tech/migrations-kit-contracts",
+            "version": "v1.0.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/nowo-tech/MigrationsKitContracts.git",
+                "reference": "4e8bac5d985aa177c38b72b80ebf9d87dbb3eb8e"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/nowo-tech/MigrationsKitContracts/zipball/4e8bac5d985aa177c38b72b80ebf9d87dbb3eb8e",
+                "reference": "4e8bac5d985aa177c38b72b80ebf9d87dbb3eb8e",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=8.2 <8.6"
+            },
+            "require-dev": {
+                "friendsofphp/php-cs-fixer": "^3.0",
+                "phpstan/phpstan": "^2.0",
+                "phpstan/phpstan-phpunit": "^2.0",
+                "phpunit/phpunit": "^10.0 || ^11.0",
+                "rector/rector": "^2.0"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Nowo\\MigrationsKitContracts\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Héctor Franco Aceituno",
+                    "email": "hectorfranco@nowo.tech",
+                    "homepage": "https://github.com/HecFranco",
+                    "role": "Developer"
+                },
+                {
+                    "name": "Nowo.tech",
+                    "homepage": "https://nowo.tech"
+                }
+            ],
+            "description": "Contracts a bundle implements to declare its identity and access-key columns, so a host can assert they are in a binary NO PAD collation (REQ-SEC-006). Interfaces and value objects only, no dependencies beyond PHP.",
+            "homepage": "https://github.com/nowo-tech/MigrationsKitContracts",
+            "keywords": [
+                "collation",
+                "contracts",
+                "database",
+                "identity",
+                "mariadb",
+                "mysql",
+                "no-pad",
+                "security",
+                "utf8mb4"
+            ],
+            "support": {
+                "issues": "https://github.com/nowo-tech/MigrationsKitContracts/issues",
+                "source": "https://github.com/nowo-tech/MigrationsKitContracts"
+            },
+            "time": "2026-11-13T16:29:59+00:00",
+            "published-time": "2026-11-13T16:41:39+00:00"
         },
         {
             "name": "nowo-tech/outbound-url-guard-bundle",

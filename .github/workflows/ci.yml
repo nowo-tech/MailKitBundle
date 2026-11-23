@@ -203,6 +203,12 @@ jobs:
           export MAIL_KIT_TEST_DATABASE_URL="${{ matrix.db.scheme }}://${{ matrix.db.user }}:${DB_CI_PASSWORD}@127.0.0.1:${{ matrix.db.port }}/mailkit?${{ matrix.db.query }}"
           vendor/bin/phpunit --no-coverage tests/Integration/Log
 
+      - name: Identity / access-key column collations (REQ-SEC-006)
+        if: env.HEAVY == 'true'
+        run: |
+          export MAIL_KIT_TEST_DATABASE_URL="${{ matrix.db.scheme }}://${{ matrix.db.user }}:${DB_CI_PASSWORD}@127.0.0.1:${{ matrix.db.port }}/mailkit?${{ matrix.db.query }}"
+          vendor/bin/phpunit --no-coverage tests/Integration/Collation
+
       - name: Concurrency race tests (two connections, REQ-RUNTIME-003)
         if: env.HEAVY == 'true'
         timeout-minutes: 10

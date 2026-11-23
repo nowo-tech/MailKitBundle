@@ -45,6 +45,9 @@ use const DATE_ATOM;
  */
 final class TrackingStore implements EmailTrackingReaderInterface, EmailTrackingPersonalDataInterface
 {
+    /** Unprefixed name of the tracked-sends table ({@see MailKitExactKeyColumns} declares its key columns). */
+    public const TABLE = 'mail_kit_tracking_send';
+
     private const SAVEPOINT = 'nowo_mail_kit_tracking';
 
     private const COLUMNS = 'send_id, log_id, template_id, recipient_id, tenant, sent_at, open_count, first_open_at, last_open_at, machine_open_count, machine_first_open_at, machine_last_open_at, last_open_ip, last_open_ua';
@@ -69,7 +72,7 @@ final class TrackingStore implements EmailTrackingReaderInterface, EmailTracking
      */
     public function table(): string
     {
-        return $this->tablePrefix . 'mail_kit_tracking_send';
+        return $this->tablePrefix . self::TABLE;
     }
 
     /**

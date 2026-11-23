@@ -35,6 +35,31 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- REQ-SEC-006: the bundle now declares its own identity / access-key columns, so the knowledge of which columns are
+  exact keys lives in the bundle that owns the tables instead of in every host.
+  `Nowo\MailKitBundle\Doctrine\MailKitExactKeyColumns` implements
+  `Nowo\MigrationsKitContracts\Collation\ExactKeyColumnsInterface` (new runtime dependency
+  `nowo-tech/migrations-kit-contracts` ^1.0: interfaces and value objects only, no dependency beyond PHP) and declares
+  eight columns — `mail_kit_tracking_send.{send_id,recipient_id,tenant}`,
+  `mail_kit_graph_subscription.{subscription_id,profile}`, `mail_kit_graph_delta.profile` and
+  `mail_kit_graph_inbound.{message_key,profile}`. The bundle already gave them the server's binary NO PAD collation
+  when it builds the schema (1.11.0); the declaration is what makes `nowo:migrations:check-key-collations` *assert*
+  it, so a table created before 1.11.0, restored from a dump or imported by hand is reported instead of trusted.
+  MigrationsKit discovers the declaration by autoconfiguration, so a host registers **nothing** and can delete the
+  `nowo_migrations_kit.collation_check.ignore_columns` entries it kept for those columns (see UPGRADING). Table names
+  are resolved from `nowo_mail_kit.doctrine.table_prefix`, never literals, and the columns of a feature that is off
+  (tracking, the Graph inbound pipeline: both off by default) are declared **inactive**, so they are reported as
+  skipped with the setting that gates them instead of as missing tables. Nothing is memoised (REQ-RUNTIME-002).
+  `mail_kit_graph_inbound.status`, `mail_kit_graph_subscription.client_state_hash`,
+  `mail_kit_tracking_send.{log_id,template_id,last_open_ip,last_open_ua}` are deliberately **not** declared: a state
+  word the bundle writes itself, a value never compared in SQL (`hash_equals()`), back-references that are never
+  matched, and telemetry. A declaration is a claim about identity, and an untrue one is worse than none.
+- Tests: the bundle's own REQ-SEC-006 gate (`tests/Integration/Collation`, extending MigrationsKit's
+  `ExactKeyColumnsTestCase`), on MySQL 8.4 and MariaDB 11.4 in CI. The four tables are created by the stores
+  themselves under a non-empty table prefix and the declared columns are read back from `information_schema`.
+
 ### Changed
 
 - Dev only: `require-dev` `nowo-tech/auth-kit-bundle` widened to `^1.31 || ^2.0`, so the suite also runs against

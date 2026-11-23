@@ -139,10 +139,11 @@ final class ExactCollationTest extends TestCase
         $store      = new GraphInboundStore($this->registry($connection), null, '', null, $logger);
         $sql        = $this->createTableSql($connection, $store, 'mail_kit_graph_subscription', 'mail_kit_graph_delta', 'mail_kit_graph_inbound');
 
-        foreach (['subscription_id', 'message_key', 'status'] as $column) {
+        foreach (['subscription_id', 'message_key'] as $column) {
             self::assertMatchesRegularExpression(sprintf('/\b%s VARCHAR\(\d+\) CHARACTER SET utf8mb4 [^,]*COLLATE `%s`/', $column, $collation), $sql, $column);
         }
         self::assertSame(3, preg_match_all(sprintf('/\bprofile VARCHAR\(64\) CHARACTER SET utf8mb4 [^,]*COLLATE `%s`/', $collation), $sql), 'subscription, delta and inbound');
+        self::assertDoesNotMatchRegularExpression('/\bstatus VARCHAR\(\d+\)[^,]*COLLATE/', $sql, 'a state word the bundle writes itself: not declared, so not collated');
         self::assertDoesNotMatchRegularExpression('/\bclient_state_hash VARCHAR\(\d+\)[^,]*COLLATE/', $sql, 'never compared in SQL: hash_equals() in PHP');
         self::assertCount($warns ? 1 : 0, $logger->records, 'one warning per schema, not per table');
     }

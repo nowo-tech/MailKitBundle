@@ -973,8 +973,8 @@ Offboarding a mailbox: drop its profile from `inboundProfiles()` (its notificati
 Tables: `doctrine:migrations:diff` picks up `mail_kit_graph_subscription`, `mail_kit_graph_delta` and
 `mail_kit_graph_inbound` (with `doctrine.table_prefix`) through a `postGenerateSchema` listener; without migrations,
 `nowo:mail-kit:graph:schema` prints the SQL (`--force` runs it). Since 1.11.0 the key columns (`subscription_id`,
-`profile`, `message_key`, `status`) get a binary NO PAD collation on MySQL / MariaDB instead of the host default, so
-they compare byte for byte (REQ-SEC-006); tables created before 1.11.0 need the `ALTER` in
+`profile`, `message_key`) get a binary NO PAD collation on MySQL / MariaDB instead of the host default, so
+they compare byte for byte (REQ-SEC-006; `status` is a state word the bundle writes itself and keeps the table collation); tables created before 1.11.0 need the `ALTER` in
 [`UPGRADING.md`](UPGRADING.md#to-1110). Schedule `nowo:mail-kit:graph:subscriptions`
 hourly and `nowo:mail-kit:graph:sweep` every 5 minutes (cron, or Symfony Scheduler with
 `RecurringMessage::every('1 hour', new RenewGraphSubscriptions())` and `RecurringMessage::every('5 minutes', new SweepGraphMailbox())`).

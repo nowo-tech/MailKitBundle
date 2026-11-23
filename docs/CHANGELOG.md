@@ -36,6 +36,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `mail_kit_graph_inbound.status` no longer gets the exact (binary) collation when the schema is built. It is a state
+  word the bundle writes and compares itself, and `MailKitExactKeyColumns` deliberately does not declare it, so the
+  collation was an undeclared leftover that the uniform collation gate would report on a fresh schema. The docblock of
+  `GraphInboundStore::defineSchema()` and the Graph usage note say so now. Existing tables keep their binary `status`
+  column, which is harmless; nothing to run.
+
 ## [2.2.0] - 2026-11-23
 
 ### Added

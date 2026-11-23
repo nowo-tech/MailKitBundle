@@ -354,10 +354,10 @@ final class GraphInboundStore
 
     /**
      * Adds the three tables to a schema (ORM `postGenerateSchema`, migrations, the schema command). The key columns
-     * (`subscription_id`, `profile`, `message_key`, `status`) get a binary **NO PAD** collation on MySQL / MariaDB
+     * (`subscription_id`, `profile`, `message_key`) get a binary **NO PAD** collation on MySQL / MariaDB
      * instead of the host's default one, which folds case and accents and ignores trailing spaces on primary keys
      * (REQ-SEC-006, 1.11.0); `client_state_hash` is never compared in SQL (it is read back and checked with
-     * `hash_equals()`), so it keeps the table collation. PostgreSQL and SQLite compare exactly by default.
+     * `hash_equals()`) and `status` is a state word the bundle writes itself, so both keep the table collation. PostgreSQL and SQLite compare exactly by default.
      *
      * @param AbstractPlatform|Connection|null $source the connection the schema is built for (the server version is read
      *                                                 from it), its platform alone, or null for the store's connection
@@ -386,7 +386,7 @@ final class GraphInboundStore
             $table = $schema->createTable($this->inboundTable());
             $table->addColumn('message_key', 'string', ['length' => 64] + $exact);
             $table->addColumn('profile', 'string', ['length' => 64] + $exact);
-            $table->addColumn('status', 'string', ['length' => 16] + $exact);
+            $table->addColumn('status', 'string', ['length' => 16]);
             $table->addColumn('claimed_at', 'bigint');
             $table->addColumn('completed_at', 'bigint', ['notnull' => false]);
             $table->setPrimaryKey(['message_key']);

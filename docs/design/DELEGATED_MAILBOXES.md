@@ -1,11 +1,11 @@
 # Delegated mailboxes (Outlook and Gmail): design
 
-Status 2026-11-23: **design, not built.** For symfony-beacon spec `255-mail-inbox` (owner decision D-20261123-14,
+Status 2026-11-23: **accepted, not built.** The owner accepted every recommendation (Q-MB-1 – Q-MB-22 as
+recommended, 2026-11-23). For symfony-beacon spec `255-mail-inbox` (owner decision D-20261123-14,
 task T001), spec `236` (personal Microsoft 365 mailboxes) and spec `254` block B (CRM mailboxes, FR-020 – FR-023). It
 widens the roadmap rows 2.5.0 "Personal Outlook mailboxes" and 2.6.0 "Gmail provider". The contract revision is
 [`specs/005-delegated-mailboxes/spec.md`](../../specs/005-delegated-mailboxes/spec.md). Nothing here is code yet; the
-open questions are in [section 19](#19-questions-for-the-owner-q-mb), and the build follows the recommended answers
-until the owner replies.
+owner's decisions are in [section 19](#19-questions-for-the-owner-q-mb) and the build follows them.
 
 ## Table of contents
 
@@ -609,30 +609,32 @@ that is useless without the bearer token; it is never logged.
 
 ## 19. Questions for the owner (Q-MB)
 
-| # | Question | Recommended answer |
+All 22 decided by the owner on 2026-11-23, each as recommended.
+
+| # | Question | Decision |
 | --- | --- | --- |
-| Q-MB-1 | Graph send path: draft + send (`createReply` / `createReplyAll` / `createForward`, MIME draft for new) or the one-shot `sendMail` / `reply` actions Beacon's spec names? | **Draft + send**: it returns the ids of the sent copy, makes retries idempotent (draft state check) and supports attachments up to 150 MB through upload sessions; `sendMail` answers 202 with no id |
-| Q-MB-2 | Graph scopes: `Mail.ReadWrite`, `Mail.Send`, `offline_access`, `User.Read`? | **Yes** (same as spec 236); `Mail.Read` alone cannot create drafts (Q-MB-1) |
-| Q-MB-3 | When does the exclusion policy run? | **Before any fetch** when the delta page gives sender and folder (Graph), otherwise after the **single** full fetch, with the body dropped in memory; no second "headers first" call (it doubles API calls and Gmail quota) |
-| Q-MB-4 | Idempotency: rely on the host sink's unique key (no MailKit claim table)? | **Yes**: one control, no extra write per message; the sink contract requires `Duplicate` |
-| Q-MB-5 | Report messages deleted or moved out of a followed folder in the mailbox? | **Report** through `removed()`; Beacon keeps its copy and may mark it "deleted in mailbox" (it is a register) |
-| Q-MB-6 | Sent copy: return ids at once and deliver the full copy through the sink, even when Sent Items is not followed? | **Yes** |
-| Q-MB-7 | Reply / forward body: the host's body replaces the draft body Outlook generates (with its quote)? | **Yes, the host's body wins** (Beacon composes the quote; same behaviour as Gmail, which has no server-side quote) |
-| Q-MB-8 | Remote images: keep the blocked URL in `data-mail-kit-remote-src` for *Show images*? | **Yes, mode `blocked` by default**; Beacon loads them through its own image proxy so the CSP stays `img-src 'self'` |
-| Q-MB-9 | Inline `style` attributes: drop all, or allow a closed list of properties? | **Drop all in 2.5.0** (a strict `style-src` would block them anyway); revisit with a sandboxed render if fidelity is a problem |
-| Q-MB-10 | Thread key: provider thread id first, header fallback; cross-provider joins by header ids left to the host? | **Yes** |
-| Q-MB-11 | First sweep and resync window? | **`P7D` default, per mailbox up to `P90D`** (Beacon can offer 30 days on connect) |
-| Q-MB-12 | Grant-failure signals (section 13): pause only on grant / consent / account errors, transient errors retried? | **Yes**; one event per transition, resume only by the host |
-| Q-MB-13 | Metering: observer port with the mailbox id **and** the `http_client` option for HttpLog? | **Both** |
-| Q-MB-14 | Write delegated sends to MailKit's sent-mail log? | **No** (host stores the thread); if yes, the 2026-11-11 unlink rule applies |
-| Q-MB-15 | Shared mailboxes (soporte@) through delegated `Mail.*.Shared` scopes in 2.5.0? | **No**: in 2.5.0 the shared address is connected as its own account; a later minor can put the 1.9 app-only profiles behind the same sink |
-| Q-MB-16 | Gmail push authentication: OIDC JWT verified with `firebase/php-jwt` (already used by WalletQrBundle, `suggest` only)? | **Yes**, plus the subscription name check; no secret in the URL |
-| Q-MB-17 | Gmail scopes: `gmail.readonly` + `gmail.send`, not `gmail.modify`? | **Yes** (least privilege; MailKit never changes labels) |
-| Q-MB-18 | Gmail gate: `gmail.enabled: false` by default and no extra "verified" flag (Google's testing mode allows test users before verification)? | **Yes**; Beacon's Google phase-2 checklist gates production |
-| Q-MB-19 | Version split: 2.5.0 Outlook (sync, attachments, send; two PRs, one tag), 2.6.0 Gmail? | **Yes** |
-| Q-MB-20 | Make the send idempotency key mandatory? | **Yes** (a double click or a Messenger retry must never send twice) |
-| Q-MB-21 | Personal Outlook.com accounts in 2.5.0? | **Yes if** subscriptions and immutable ids work for them in the first build task; otherwise sweep-only for those accounts, documented |
-| Q-MB-22 | Item attachments (attached e-mails) and OneDrive reference attachments in 2.5.0? | **Listed, not downloadable** in 2.5.0; a later minor if Beacon asks |
+| Q-MB-1 | Graph send path: draft + send (`createReply` / `createReplyAll` / `createForward`, MIME draft for new) or the one-shot `sendMail` / `reply` actions Beacon's spec names? | Decided 2026-11-23: **Draft + send**: it returns the ids of the sent copy, makes retries idempotent (draft state check) and supports attachments up to 150 MB through upload sessions; `sendMail` answers 202 with no id |
+| Q-MB-2 | Graph scopes: `Mail.ReadWrite`, `Mail.Send`, `offline_access`, `User.Read`? | Decided 2026-11-23: **Yes** (same as spec 236); `Mail.Read` alone cannot create drafts (Q-MB-1) |
+| Q-MB-3 | When does the exclusion policy run? | Decided 2026-11-23: **Before any fetch** when the delta page gives sender and folder (Graph), otherwise after the **single** full fetch, with the body dropped in memory; no second "headers first" call (it doubles API calls and Gmail quota) |
+| Q-MB-4 | Idempotency: rely on the host sink's unique key (no MailKit claim table)? | Decided 2026-11-23: **Yes**: one control, no extra write per message; the sink contract requires `Duplicate` |
+| Q-MB-5 | Report messages deleted or moved out of a followed folder in the mailbox? | Decided 2026-11-23: **Report** through `removed()`; Beacon keeps its copy and may mark it "deleted in mailbox" (it is a register) |
+| Q-MB-6 | Sent copy: return ids at once and deliver the full copy through the sink, even when Sent Items is not followed? | Decided 2026-11-23: **Yes** |
+| Q-MB-7 | Reply / forward body: the host's body replaces the draft body Outlook generates (with its quote)? | Decided 2026-11-23: **Yes, the host's body wins** (Beacon composes the quote; same behaviour as Gmail, which has no server-side quote) |
+| Q-MB-8 | Remote images: keep the blocked URL in `data-mail-kit-remote-src` for *Show images*? | Decided 2026-11-23: **Yes, mode `blocked` by default**; Beacon loads them through its own image proxy so the CSP stays `img-src 'self'` |
+| Q-MB-9 | Inline `style` attributes: drop all, or allow a closed list of properties? | Decided 2026-11-23: **Drop all in 2.5.0** (a strict `style-src` would block them anyway); revisit with a sandboxed render if fidelity is a problem |
+| Q-MB-10 | Thread key: provider thread id first, header fallback; cross-provider joins by header ids left to the host? | Decided 2026-11-23: **Yes** |
+| Q-MB-11 | First sweep and resync window? | Decided 2026-11-23: **`P7D` default, per mailbox up to `P90D`** (Beacon can offer 30 days on connect) |
+| Q-MB-12 | Grant-failure signals (section 13): pause only on grant / consent / account errors, transient errors retried? | Decided 2026-11-23: **Yes**; one event per transition, resume only by the host |
+| Q-MB-13 | Metering: observer port with the mailbox id **and** the `http_client` option for HttpLog? | Decided 2026-11-23: **Both** |
+| Q-MB-14 | Write delegated sends to MailKit's sent-mail log? | Decided 2026-11-23: **No** (host stores the thread); if yes, the 2026-11-11 unlink rule applies |
+| Q-MB-15 | Shared mailboxes (soporte@) through delegated `Mail.*.Shared` scopes in 2.5.0? | Decided 2026-11-23: **No**: in 2.5.0 the shared address is connected as its own account; a later minor can put the 1.9 app-only profiles behind the same sink |
+| Q-MB-16 | Gmail push authentication: OIDC JWT verified with `firebase/php-jwt` (already used by WalletQrBundle, `suggest` only)? | Decided 2026-11-23: **Yes**, plus the subscription name check; no secret in the URL |
+| Q-MB-17 | Gmail scopes: `gmail.readonly` + `gmail.send`, not `gmail.modify`? | Decided 2026-11-23: **Yes** (least privilege; MailKit never changes labels) |
+| Q-MB-18 | Gmail gate: `gmail.enabled: false` by default and no extra "verified" flag (Google's testing mode allows test users before verification)? | Decided 2026-11-23: **Yes**; Beacon's Google phase-2 checklist gates production |
+| Q-MB-19 | Version split: 2.5.0 Outlook (sync, attachments, send; two PRs, one tag), 2.6.0 Gmail? | Decided 2026-11-23: **Yes** |
+| Q-MB-20 | Make the send idempotency key mandatory? | Decided 2026-11-23: **Yes** (a double click or a Messenger retry must never send twice) |
+| Q-MB-21 | Personal Outlook.com accounts in 2.5.0? | Decided 2026-11-23: **Yes if** subscriptions and immutable ids work for them in the first build task; otherwise sweep-only for those accounts, documented |
+| Q-MB-22 | Item attachments (attached e-mails) and OneDrive reference attachments in 2.5.0? | Decided 2026-11-23: **Listed, not downloadable** in 2.5.0; a later minor if Beacon asks |
 
 ## 20. Test plan
 

@@ -2,7 +2,7 @@
 
 **Feature Branch**: `feat/2.5.0-delegated-mailboxes` (2.5.0), `feat/2.6.0-gmail` (2.6.0)  
 **Created**: 2026-11-23  
-**Status**: Draft: contract revision for the owner (questions Q-MB-1 – Q-MB-22 open); not built  
+**Status**: Accepted 2026-11-23 (owner: Q-MB-1 – Q-MB-22 as recommended); not built  
 
 **Package**: `nowo-tech/mail-kit-bundle`  
 **Baseline**: [`../001-baseline/spec.md`](../001-baseline/spec.md)  
@@ -65,35 +65,51 @@ same `SyncedMessage` shape as for Outlook.
   `MailboxSenderInterface`, `MailboxAttachmentReaderInterface`. Design §5.2.
 - **FR-003** MailKit never runs an OAuth flow, never stores or caches an access or refresh token, and calls only `/me`
   paths with a delegated token. The account behind the token is checked against the directory's address at start,
-  resume and every renewal.
+  resume and every renewal. Scopes the host requests (Q-MB-2, Q-MB-17): Graph `Mail.ReadWrite`, `Mail.Send`,
+  `offline_access`, `User.Read`; Gmail `gmail.readonly`, `gmail.send` (never `gmail.modify`). No `Mail.*.Shared`
+  scopes in 2.5.0 (Q-MB-15). Personal Outlook.com accounts are supported, sweep-only if their subscriptions or
+  immutable ids fail the first build check (Q-MB-21).
 - **FR-004** Sync: Graph subscription per followed folder plus a per-folder delta sweep (2.5.0); Gmail watch plus a
   per-mailbox history cursor (2.6.0); a scheduled sweep every 5 minutes; idempotent by provider message id through the
-  sink contract.
+  sink contract only, no MailKit claim table (Q-MB-4). First sweep and resync window `P7D` by default, per mailbox up
+  to `P90D` (Q-MB-11). Messages deleted or moved out of a followed folder are reported through the sink's `removed()`
+  (Q-MB-5).
 - **FR-005** Exclusion runs before the sink on every path, and before the fetch when the provider's change page gives
-  sender and folder; an excluded body is never normalised, logged or stored.
+  sender and folder; otherwise after the single full fetch (no extra headers-only call); an excluded body is never
+  normalised, logged or stored (Q-MB-3).
 - **FR-006** Thread key: provider thread id, else root of `References`, else `In-Reply-To`, else own `Message-ID`;
-  header ids always exposed. Design §12.
+  header ids always exposed; joins across providers by header ids are the host's (Q-MB-10). Design §12.
 - **FR-007** Attachments are fetched on demand by provider ids into capped temp streams; MailKit stores no content.
-- **FR-008** Send: new, reply, reply all, forward from the mailbox address, with attachments, a mandatory idempotency
-  key and the sent copy delivered to the sink. Design §6.5, §9.4.
+  Attached e-mails and OneDrive reference attachments are listed, not downloadable, in 2.5.0 (Q-MB-22).
+- **FR-008** Send: new, reply, reply all, forward from the mailbox address, with attachments and a **mandatory**
+  idempotency key (Q-MB-20). Graph uses **draft + send** (`createReply` / `createReplyAll` / `createForward`, MIME draft
+  for new; not `sendMail`) (Q-MB-1); the host's body replaces the draft body Outlook generates (Q-MB-7). `send()`
+  returns the ids at once and the full sent copy reaches the sink even when Sent Items is not followed (Q-MB-6).
+  Design §6.5, §9.4.
 - **FR-009** HTML sanitised with MailKit's existing `symfony/html-sanitizer` configuration; remote images `blocked`
-  by default (URL kept in `data-mail-kit-remote-src`), no `style` attribute or element, no script or event handler.
+  by default (URL kept in `data-mail-kit-remote-src` for the host's image proxy, Q-MB-8), no `style` attribute or
+  element (Q-MB-9), no script or event handler.
 - **FR-010** Webhooks: Graph `validationToken` echo and per-subscription `clientState` (SHA-256, constant time); Gmail
-  Pub/Sub OIDC JWT (issuer, audience, service account, expiry) and subscription name. Both enqueue only.
+  Pub/Sub OIDC JWT verified with `firebase/php-jwt` (issuer, audience, service account, expiry) and subscription name,
+  no secret in the URL (Q-MB-16). Both enqueue only.
 - **FR-011** Subscriptions / watches renewed before expiry by a scheduled command; lifecycle events handled.
 - **FR-012** Concurrency (REQ-RUNTIME-003): folder lease with `rerun` coalescing, cursor compare-and-set, unique first
   rows with caught duplicates, conditional status transitions, send claim with stale takeover, savepoints inside a host
   transaction, 409 `CONFLICT_001` / `CONFLICT_002` on MailKit's routes. Design §9.
 - **FR-013** Grant failure: one conditional transition to `PausedGrant`, one `MailboxGrantFailedEvent` after commit,
-  unrecoverable Messenger failure, no retry until `resume()`. Transient errors (429, 5xx, timeouts) retry with backoff.
+  unrecoverable Messenger failure, no retry until `resume()`; only grant, consent and account errors pause. Transient
+  errors (429, 5xx, timeouts) retry with backoff (Q-MB-12).
 - **FR-014** Metering: `MailboxCallObserverInterface::called(ProviderCall)` after every provider call (mailbox id,
   operation label, status, duration, bytes, retry-after, quota units; never URLs, ids of messages, addresses or
-  bodies) and the `mailboxes.http_client` option for HttpLog.
+  bodies) **and** the `mailboxes.http_client` option for HttpLog (Q-MB-13).
 - **FR-015** GDPR: MailKit's tables hold no address, subject, body, token or recipient; `disconnect()` removes remote
   subscriptions / watch and every MailKit row of the mailbox; delegated sends are not written to the sent-mail log
   (Q-MB-14).
 - **FR-016** Worker mode (kernel reset off): no per-mailbox state in services; only JWKS cached (PSR-6).
-- **FR-017** Gmail (2.6.0) is off by default (`gmail.enabled: false`) and needs topic and push settings to build.
+- **FR-017** Gmail (2.6.0) is off by default (`gmail.enabled: false`, no extra "verified" flag) and needs topic and push
+  settings to build; Beacon's Google phase-2 checklist (verification + CASA) gates production (Q-MB-18).
+- **FR-018** Versions (Q-MB-19): 2.5.0 = ports + Graph (sync and attachments, then send: two PRs, one tag); 2.6.0 =
+  Gmail.
 
 ## Success Criteria
 
@@ -108,5 +124,6 @@ same `SyncedMessage` shape as for Outlook.
 ## Out of scope
 
 OAuth flows and token storage (host); message storage, search, retention and encryption (host); shared mailboxes
-through `Mail.*.Shared` (Q-MB-15); IMAP; rich notifications with resource data; editing, moving or deleting provider
+through `Mail.*.Shared` (Q-MB-15); delegated sends in the sent-mail log (Q-MB-14; if ever added, the 2026-11-11 unlink
+rule applies); IMAP; rich notifications with resource data; editing, moving or deleting provider
 mail.

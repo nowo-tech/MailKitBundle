@@ -6,6 +6,7 @@
 - [1.1 (unreleased)](#11-unreleased)
 - [Phase 2 — branded, editable e-mail templates](#phase-2--branded-editable-e-mail-templates)
 - [Later candidates](#later-candidates)
+- [Requested for CrmKit (Beacon spec 254, 2026-11-23)](#requested-for-crmkit-beacon-spec-254-2026-11-23)
 
 ## 1.0 (this release)
 
@@ -42,3 +43,23 @@ Out of scope for 1.0 (Beacon kit #3, `src/Shared/EmailTemplate/**`):
 - Optional automatic purge (Scheduler message) instead of a cron line.
 - Provider webhooks (bounces, complaints) updating the log status.
 - `nowo-tech/runtime-env-bundle` DSN provider shipped as an optional integration.
+
+## Requested for CrmKit (Beacon spec 254, 2026-11-23)
+
+Beacon spec 254 "CRM HubSpot parity" (owner decision D-20261123-11) and the owner's reuse rule of 2026-11-23 ("if a
+nowo bundle already does, or nearly does, a CRM capability, use it or extend it") send these pieces here instead of
+building CRM-only copies in CrmKitBundle. Each piece is opt-in, generic (no CRM dependency) and gets its own contract
+revision before it is built. Versions are planned next minors and move if this bundle releases something else first.
+Plan and reuse matrix: [CrmKitBundle docs/ROADMAP.md](https://github.com/nowo-tech/CrmKitBundle/blob/main/docs/ROADMAP.md#reuse-matrix).
+
+| Version | Piece | Used by |
+| --- | --- | --- |
+| 2.3.0 | **ICS invites**: an invite part on outgoing mail (`text/calendar`, `METHOD:REQUEST` / `CANCEL`, stable UID, SEQUENCE, organiser and attendees), plain-text fallback | CrmKit A-1 meetings, I booking; usable by TaskBoard and WorkingTime |
+| 2.4.0 | **Editable templates** (this roadmap's Phase 2) plus what the CRM needs: personal and shared scopes through a host owner port, snippets, locale, and a closed placeholder resolver registry by service tag (unknown placeholders shown as text, never evaluated) | CrmKit A-2 (`contact.*`, `company.*`, `deal.*`, `me.*` placeholders) |
+| 2.5.0 | **Personal Outlook mailboxes**: Graph delegated mode (read, send, delta sweep) that consumes a **token port** (`MailboxTokenProviderInterface`-style: current access token per person and mailbox, refreshed by the host). MailKit has **no OAuth flow, consent page or callback** of its own: the host keeps one connection per person and provider, obtained through TimeTrack's PKCE helpers with the extra mail scopes and encrypted with DoctrineEncrypt (Q-254-15, Decision 2026-11-23: (b)) | CrmKit B (spec 236 kit side) |
+| 2.6.0 | **Gmail provider** behind the same mailbox port and the same token port (no OAuth flow or callback in MailKit; Q-254-15), off until Google's OAuth verification and security assessment (`gmail.readonly` is restricted) | CrmKit B |
+| 2.7.0 | **`sending_domains`**: a domain per tenant, SPF / DKIM / DMARC verification (Resend domains API on Resend, DNS checks otherwise), sends from an unverified or failing domain refused with the reason | CrmKit F (circulars, sequences, FR-064) |
+
+Reused as they are (no change): tracking 1.10 (pixel, `MailOpenedEvent`, `MailMachineOpenedEvent`,
+`EmailTrackingPolicyInterface`), Graph inbound 1.9 with plus-address tags and `GraphInboundHandlerInterface` (ticket
+address), the queue and the sent-mail log.

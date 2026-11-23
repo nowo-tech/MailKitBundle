@@ -11,6 +11,7 @@ Bundle-specific security analysis. The short GitHub reporting policy lives in [`
 - [Secrets and cryptography](#secrets-and-cryptography)
 - [Personal data (GDPR)](#personal-data-gdpr)
 - [E-mail open and click tracking (1.10)](#e-mail-open-and-click-tracking-110)
+- [Delegated mailboxes (2.5.0)](#delegated-mailboxes-250)
 - [Logging](#logging)
 - [Resource limits and timeouts](#resource-limits-and-timeouts)
 - [CSRF](#csrf)
@@ -182,6 +183,45 @@ processing-register entry (Beacon spec 230: on by default with opt-out, 90-day r
 - **Open inflation**: at most `tracking.max_opens_per_send` opens are counted per send (default 1000).
 - **Labels**: `TrackedLink::$label` is author-controlled text: escape it wherever it is displayed.
 - **Opt-out**: the host should also call `eraseRecipient()` when an opt-out must remove past rows.
+
+## Delegated mailboxes (2.5.0)
+
+Off by default (`mailboxes.enabled`). Threat model: design section 17.
+
+- **Tokens.** MailKit runs no OAuth flow and never stores, caches, logs or serialises an access token:
+  `MailboxAccessToken` keeps its value private, dumps `[redacted]`, refuses `serialize()`, and accepts only RFC 6750
+  bearer characters (no header injection). The token goes only in the `Authorization` header to
+  `https://graph.microsoft.com/v1.0` and is kept for one Messenger message. A 401 tells the host the token's
+  fingerprint (12 hex of its SHA-256) and retries once with a fresh one. Exceptions carry the operation, status,
+  Graph error code and request id only (never a body, URL or token) and keep no previous exception.
+- **Host pinning / SSRF.** Only `/me/…` paths are called: the token decides the mailbox, so a wrong address can never
+  reach another person's mail. Delta / next links are followed only when they are `https://graph.microsoft.com/v1.0/`
+  mail-folder message deltas of `/me`, of the mailbox's address or of the bound account (no `.` / `..`, `;`, other
+  port, user info or fragment, even after a second decoding). No redirects. With `mailboxes.graph.outbound_url_guard`
+  (`auto` by default) the Graph host is pinned to the public address OutboundUrlGuard resolved; private answers are
+  refused.
+- **Cross-mailbox confusion.** The account behind the token must have the directory's address and stay the account
+  first bound (SHA-256 of the Graph account id); otherwise the mailbox pauses `AccountMismatch`. The webhook takes the
+  mailbox and folder from MailKit's subscription row, never from the payload.
+- **Webhook.** Per-subscription random 256-bit `clientState`, stored as SHA-256 and compared in constant time (also
+  for unknown ids); expired subscriptions and paused mailboxes do no work; body / batch caps, a verified bucket and a
+  per-IP bucket, optional `allowed_ips`; the route only enqueues. Make it public, stateless and keep it out of HTTP
+  logs.
+- **Remote input.** Ids are format-checked (`[A-Za-z0-9+/=_-]`, ≤ 512), the fetched id must match, answers are capped
+  (message `limits.max_message_bytes`, pages 4 MiB, metadata 256 KiB), addresses, names, subjects, dates, content
+  types and file names are validated, stripped of control and bidi characters and bounded; at most 100 attachment
+  references and 20 Content-ID look-ups per message.
+- **HTML.** symfony/html-sanitizer with the W3C safe set: no script, event handler, form, iframe, `style` element or
+  attribute; links `http`, `https`, `mailto` with `rel="noopener noreferrer nofollow"`. `blocked` (default) removes
+  every remote image source (re-validated URL kept in `data-mail-kit-remote-src`, which a sender cannot plant) and
+  remote `srcset`, `poster`, `background`, audio and video. Render it under a strict CSP anyway.
+- **Attachments.** On demand only, into `php://temp` capped at `$maxBytes` (≤ `limits.max_attachment_bytes`), refused
+  before the download when the declared size is larger; type detected by finfo; file names neutralised and given an
+  extension that matches the detected type. MailKit never stores or renders them.
+- **Grant failures.** Only grant, consent, scope, mailbox and account errors pause (one conditional transition, one
+  event, unrecoverable message); transient errors retry with backoff, so a dead grant never causes a retry storm.
+- **Personal data.** MailKit's tables hold no address, subject, body, token or recipient; `disconnect()` deletes the
+  remote subscriptions (best effort) and every MailKit row of the mailbox. Logs carry the mailbox id and counts only.
 
 ## Logging
 

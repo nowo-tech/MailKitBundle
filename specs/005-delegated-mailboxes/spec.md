@@ -2,7 +2,7 @@
 
 **Feature Branch**: `feat/2.5.0-delegated-mailboxes` (2.5.0), `feat/2.6.0-gmail` (2.6.0)  
 **Created**: 2026-11-23  
-**Status**: Accepted 2026-11-23 (owner: Q-MB-1 – Q-MB-22 as recommended); not built  
+**Status**: Accepted 2026-11-23 (owner: Q-MB-1 – Q-MB-22 as recommended); 2.5.0 part 1 (sync, attachments) built 2026-11-24, part 2 (send) pending  
 
 **Package**: `nowo-tech/mail-kit-bundle`  
 **Baseline**: [`../001-baseline/spec.md`](../001-baseline/spec.md)  

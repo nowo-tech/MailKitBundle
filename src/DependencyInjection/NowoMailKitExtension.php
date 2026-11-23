@@ -81,6 +81,34 @@ use Nowo\MailKitBundle\Log\SentMailPersonalDataExporterInterface;
 use Nowo\MailKitBundle\Log\SentMailPersonalDataSubjectResolverInterface;
 use Nowo\MailKitBundle\Log\SentMailRecorder;
 use Nowo\MailKitBundle\Log\SentMailRepository;
+use Nowo\MailKitBundle\Mailbox\Engine\MailboxAttachmentReader;
+use Nowo\MailKitBundle\Mailbox\Engine\MailboxSyncEngine;
+use Nowo\MailKitBundle\Mailbox\Engine\MailboxSyncOptions;
+use Nowo\MailKitBundle\Mailbox\Graph\GraphMailboxGateway;
+use Nowo\MailKitBundle\Mailbox\Html\MailHtmlSanitizer;
+use Nowo\MailKitBundle\Mailbox\Html\RemoteImages;
+use Nowo\MailKitBundle\Mailbox\Infrastructure\Command\MailboxSchemaCommand;
+use Nowo\MailKitBundle\Mailbox\Infrastructure\Command\MailboxStatusCommand;
+use Nowo\MailKitBundle\Mailbox\Infrastructure\Command\MailboxSubscriptionsCommand;
+use Nowo\MailKitBundle\Mailbox\Infrastructure\Command\MailboxSweepCommand;
+use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\FetchMailboxMessage;
+use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\MailboxMessageHandler;
+use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\RenewMailboxSubscriptions;
+use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\SyncMailboxFolder;
+use Nowo\MailKitBundle\Mailbox\Infrastructure\Store\MailboxSchemaListener;
+use Nowo\MailKitBundle\Mailbox\Infrastructure\Store\MailboxStore;
+use Nowo\MailKitBundle\Mailbox\Infrastructure\Webhook\MailboxGraphWebhookController;
+use Nowo\MailKitBundle\Mailbox\Infrastructure\Webhook\MailboxWebhookRouteLoader;
+use Nowo\MailKitBundle\Mailbox\Port\KeepAllExclusionPolicy;
+use Nowo\MailKitBundle\Mailbox\Port\MailboxCallObserverInterface;
+use Nowo\MailKitBundle\Mailbox\Port\MailboxDirectoryInterface;
+use Nowo\MailKitBundle\Mailbox\Port\MailboxExclusionPolicyInterface;
+use Nowo\MailKitBundle\Mailbox\Port\MailboxMessageSinkInterface;
+use Nowo\MailKitBundle\Mailbox\Port\MailboxTokenProviderInterface;
+use Nowo\MailKitBundle\Mailbox\Port\NullMailboxCallObserver;
+use Nowo\MailKitBundle\Mailbox\Service\MailboxAttachmentReaderInterface;
+use Nowo\MailKitBundle\Mailbox\Service\MailboxSyncInterface;
+use Nowo\MailKitBundle\Mailbox\Value\MailboxProvider;
 use Nowo\MailKitBundle\Mailer\MailKitMailer;
 use Nowo\MailKitBundle\Mailer\RuntimeTransport;
 use Nowo\MailKitBundle\NowoMailKitBundle;
@@ -183,6 +211,21 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
 
     /** Service id of the per-client-IP rate limiter factory of unverified webhook requests (1.9). */
     public const GRAPH_WEBHOOK_CLIENT_LIMITER_ID = 'nowo_mail_kit.graph.webhook_client_limiter';
+
+    /** Service id of the delegated mailboxes' webhook rate limiter factory of verified requests (2.5.0). */
+    public const MAILBOX_WEBHOOK_LIMITER_ID = 'nowo_mail_kit.mailbox.webhook_limiter';
+
+    /** Service id of the delegated mailboxes' per-client-IP webhook rate limiter factory (2.5.0). */
+    public const MAILBOX_WEBHOOK_CLIENT_LIMITER_ID = 'nowo_mail_kit.mailbox.webhook_client_limiter';
+
+    /** Service id of the Graph client of the delegated mailboxes (2.5.0; no app-only tokens). */
+    public const MAILBOX_GRAPH_CLIENT_ID = 'nowo_mail_kit.mailbox.graph_api_client';
+
+    /** Service id of the Graph normaliser of the delegated mailboxes (2.5.0; mailbox HTML sanitiser). */
+    public const MAILBOX_NORMALIZER_ID = 'nowo_mail_kit.mailbox.graph_normalizer';
+
+    /** Parameter: `mailboxes.graph.outbound_url_guard` when the Graph provider is on (2.5.0), read by the pass. */
+    public const MAILBOX_URL_GUARD_PARAMETER = 'nowo_mail_kit.mailboxes.graph.outbound_url_guard';
 
     /** Container parameter: true when the configuration is read from Instance Settings (1.6). */
     public const INSTANCE_SETTINGS_PARAMETER = 'nowo_mail_kit.instance_settings';
@@ -320,7 +363,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $config = $this->processConfiguration(new Configuration(), $configs);
         $this->assertLiteralBooleans($config);
 
-        /** @var array{mailer: array{decorate: bool, dsn_provider: string|null, sender_provider: string|null, fallback_counts_as_ready: bool}, dsn: array{allowed_schemes: list<string>, allowed_hosts: list<string>, allow_private_hosts: bool, allow_insecure_tls: bool, resolve_dns: bool, dns_timeout: float}, sender: array{default_from: string|null, default_from_name: string|null, require_public_domain: bool}, resend: array{enabled: bool, api_timeout: float}, bootstrap: array{mailer_dsn: string|null, resend_api_key: string|null}, test_email: array{rate_limit: int, rate_interval: string}, log: array{enabled: bool, map_entities: bool, store_bodies: bool, retention_days: int, purge_batch_size: int}, personal_data: array{enabled: bool, subject_resolver: string|null}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>, page_size: int, export: array{enabled: bool, max_rows: int, access_roles: list<string>, include_bodies: bool, body_batch_bytes: int}}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}, conflict_response: array{status: int, retry_after: int}, brand: array{mode: string, name: string|null, colors: array<string, string>, max_image_bytes: int, max_total_bytes: int, max_image_side: int}, graph: array{enabled: bool, mailbox_provider: string|null, default_profile: string, profiles: array<string, array{tenant_id: string, client_id: string, client_secret: string, mailbox: string}>, http_client: string, token_cache: string, timeout: float, draft_cleanup: array{bus: string|null, delay_ms: int}, upload_hosts: list<string>, limits: array{max_attachments: int, max_attachment_bytes: int, max_message_bytes: int}, inbound: array{enabled: bool, webhook: array{path: string}}}, tracking: array<string, mixed>} $config */
+        /** @var array{mailer: array{decorate: bool, dsn_provider: string|null, sender_provider: string|null, fallback_counts_as_ready: bool}, dsn: array{allowed_schemes: list<string>, allowed_hosts: list<string>, allow_private_hosts: bool, allow_insecure_tls: bool, resolve_dns: bool, dns_timeout: float}, sender: array{default_from: string|null, default_from_name: string|null, require_public_domain: bool}, resend: array{enabled: bool, api_timeout: float}, bootstrap: array{mailer_dsn: string|null, resend_api_key: string|null}, test_email: array{rate_limit: int, rate_interval: string}, log: array{enabled: bool, map_entities: bool, store_bodies: bool, retention_days: int, purge_batch_size: int}, personal_data: array{enabled: bool, subject_resolver: string|null}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>, page_size: int, export: array{enabled: bool, max_rows: int, access_roles: list<string>, include_bodies: bool, body_batch_bytes: int}}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}, conflict_response: array{status: int, retry_after: int}, brand: array{mode: string, name: string|null, colors: array<string, string>, max_image_bytes: int, max_total_bytes: int, max_image_side: int}, graph: array{enabled: bool, mailbox_provider: string|null, default_profile: string, profiles: array<string, array{tenant_id: string, client_id: string, client_secret: string, mailbox: string}>, http_client: string, token_cache: string, timeout: float, draft_cleanup: array{bus: string|null, delay_ms: int}, upload_hosts: list<string>, limits: array{max_attachments: int, max_attachment_bytes: int, max_message_bytes: int}, inbound: array{enabled: bool, webhook: array{path: string}}}, tracking: array<string, mixed>, mailboxes: array<string, mixed>} $config */
         $webUi = $config['web_ui'];
 
         $settings = $this->hasBundle($container, 'NowoInstanceSettingsBundle') || $container->hasExtension('nowo_instance_settings');
@@ -353,6 +396,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $this->registerWebUi($container, $config, $settings);
         $this->registerBrand($container, $config['brand']);
         $this->registerGraph($container, $config['graph'], $config['doctrine'], $hasOrm);
+        $this->registerMailboxes($container, $config['mailboxes'], $config['doctrine'], $hasDoctrine, $hasOrm);
         $this->registerTracking($container, $config['tracking'], $config['doctrine'], $config['personal_data']['enabled'], $hasDoctrine, $hasOrm);
         $this->registerConflictResponse($container, $config['conflict_response']);
         // REQ-SEC-006: the bundle's own declaration of its identity / access-key columns. Autoconfigured so that
@@ -362,12 +406,17 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             $config['doctrine']['table_prefix'],
             $config['tracking']['enabled'] === true,
             $config['graph']['inbound']['enabled'],
+            $config['mailboxes']['enabled'],
         ]))->setAutoconfigured(true));
 
         $container->setParameter('nowo_mail_kit.graph.webhook_path', $config['graph']['inbound']['webhook']['path']);
         $container->setDefinition(GraphWebhookRouteLoader::class, (new Definition(GraphWebhookRouteLoader::class, [
             $config['graph']['inbound']['enabled'],
             $config['graph']['inbound']['webhook']['path'],
+        ]))->addTag('routing.loader'));
+        $container->setDefinition(MailboxWebhookRouteLoader::class, (new Definition(MailboxWebhookRouteLoader::class, [
+            $config['mailboxes']['enabled'] && $config['mailboxes']['graph']['enabled'],
+            $config['mailboxes']['graph']['webhook']['path'],
         ]))->addTag('routing.loader'));
     }
 
@@ -568,6 +617,150 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             ->addTag('console.command', ['command' => GraphSweepCommand::NAME]));
         $container->setDefinition(GraphSchemaCommand::class, (new Definition(GraphSchemaCommand::class, [new Reference(GraphInboundStore::class)]))
             ->addTag('console.command', ['command' => GraphSchemaCommand::NAME]));
+    }
+
+    /**
+     * 2.5.0 (design docs/design/DELEGATED_MAILBOXES.md): the delegated mailboxes, only with `mailboxes.enabled` (the
+     * route loader is always registered and empty otherwise). Ports from the host; the engine, the attachment reader,
+     * the Messenger handler and the commands are stateless; the Graph provider (client without app-only tokens,
+     * normaliser with the mailbox HTML sanitiser, webhook controller and its buckets) only with `mailboxes.graph.enabled`.
+     *
+     * @param array<string, mixed> $mailboxes
+     * @param array{table_prefix: string, entity_manager: string|null} $doctrine
+     * @param bool $hasDoctrine DoctrineBundle registered
+     * @param bool $hasOrm the Doctrine ORM is installed and configured (else `nowo:mail-kit:mailbox:schema` creates the tables)
+     */
+    private function registerMailboxes(ContainerBuilder $container, array $mailboxes, array $doctrine, bool $hasDoctrine, bool $hasOrm): void
+    {
+        /** @var array{enabled: bool, token_provider: string, directory: string, sink: string, exclusion_policy: string|null, call_observer: string|null, http_client: string, connection: string|null, bus: string, timeout: float, max_folders: int, sync: array{initial_window: string, max_initial_window: string, resync_window: string, page_size: int, max_pages_per_run: int, lease_seconds: int}, limits: array{max_message_bytes: int, max_html_bytes: int, max_attachment_bytes: int}, html: array{remote_images: string}, graph: array{enabled: bool, renew_before: string, outbound_url_guard: string, webhook: array{path: string, notification_url: string|null, max_body_bytes: int, max_notifications: int, allowed_ips: list<string>, rate_limit: array{limit: int, interval: string}, client_rate_limit: array{limit: int, interval: string}}}} $mailboxes */
+        if (!$mailboxes['enabled']) {
+            return;
+        }
+        self::requireInterface(MessageBusInterface::class, 'NowoMailKitBundle: nowo_mail_kit.mailboxes requires symfony/messenger (the webhook and the sweep only enqueue work).');
+        self::requireInterface(HtmlSanitizer::class, 'NowoMailKitBundle: nowo_mail_kit.mailboxes requires symfony/html-sanitizer (received HTML is sanitised).');
+        self::requireInterface(finfo::class, 'NowoMailKitBundle: nowo_mail_kit.mailboxes requires the PHP fileinfo extension (attachment types are detected from the bytes).');
+        if (!$hasDoctrine) {
+            throw new LogicException('NowoMailKitBundle: nowo_mail_kit.mailboxes requires doctrine/doctrine-bundle (DBAL connection of the mailbox tables).');
+        }
+        $logger = new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE);
+        $clock  = new Reference('clock', ContainerInterface::NULL_ON_INVALID_REFERENCE);
+        $bus    = new Reference($mailboxes['bus']);
+        $graph  = $mailboxes['graph'];
+
+        $container->setDefinition(MailboxStore::class, new Definition(MailboxStore::class, [new Reference('doctrine'), $mailboxes['connection'], $doctrine['table_prefix'], $clock, $logger]));
+        if ($hasOrm) {
+            $container->setDefinition(MailboxSchemaListener::class, (new Definition(MailboxSchemaListener::class, [new Reference(MailboxStore::class), new Reference('doctrine'), $doctrine['entity_manager']]))
+                ->addTag('doctrine.event_listener', ['event' => 'postGenerateSchema']));
+        }
+
+        $container->setAlias(MailboxTokenProviderInterface::class, $mailboxes['token_provider']);
+        $container->setAlias(MailboxDirectoryInterface::class, $mailboxes['directory']);
+        $container->setAlias(MailboxMessageSinkInterface::class, $mailboxes['sink']);
+        $exclusion = $mailboxes['exclusion_policy'];
+        if (is_string($exclusion) && $exclusion !== '') {
+            $container->setAlias(MailboxExclusionPolicyInterface::class, $exclusion);
+        } else {
+            $container->setDefinition(KeepAllExclusionPolicy::class, new Definition(KeepAllExclusionPolicy::class));
+            $container->setAlias(MailboxExclusionPolicyInterface::class, KeepAllExclusionPolicy::class);
+        }
+        $observer = $mailboxes['call_observer'];
+        if (is_string($observer) && $observer !== '') {
+            $container->setAlias(MailboxCallObserverInterface::class, $observer);
+        } else {
+            $container->setDefinition(NullMailboxCallObserver::class, new Definition(NullMailboxCallObserver::class));
+            $container->setAlias(MailboxCallObserverInterface::class, NullMailboxCallObserver::class);
+        }
+
+        $gateways = [];
+        if ($graph['enabled']) {
+            $container->setParameter(self::MAILBOX_URL_GUARD_PARAMETER, $graph['outbound_url_guard']);
+            $container->setDefinition(self::MAILBOX_GRAPH_CLIENT_ID, new Definition(GraphApiClient::class, [
+                new Reference($mailboxes['http_client']),
+                null,
+                GraphApiClient::DEFAULT_UPLOAD_HOSTS,
+                $mailboxes['timeout'],
+                $logger,
+                null,
+            ]));
+            $container->setDefinition(self::MAILBOX_NORMALIZER_ID, new Definition(GraphMessageNormalizer::class, [
+                new Definition(MailHtmlSanitizer::class, [RemoteImages::from($mailboxes['html']['remote_images']), $mailboxes['limits']['max_html_bytes']]),
+            ]));
+            $container->setDefinition(GraphMailboxGateway::class, new Definition(GraphMailboxGateway::class, [
+                new Reference(self::MAILBOX_GRAPH_CLIENT_ID),
+                new Reference(self::MAILBOX_NORMALIZER_ID),
+                $mailboxes['limits']['max_message_bytes'],
+            ]));
+            $gateways[MailboxProvider::Graph->value] = new Reference(GraphMailboxGateway::class);
+        }
+
+        $sync = $mailboxes['sync'];
+        $container->setDefinition(MailboxSyncEngine::class, (new Definition(MailboxSyncEngine::class, [
+            new Reference(MailboxStore::class),
+            new Reference(MailboxDirectoryInterface::class),
+            new Reference(MailboxTokenProviderInterface::class),
+            new Reference(MailboxMessageSinkInterface::class),
+            new Reference(MailboxExclusionPolicyInterface::class),
+            new Reference(MailboxCallObserverInterface::class),
+            $gateways,
+            $bus,
+            new Definition(MailboxSyncOptions::class, [
+                $mailboxes['max_folders'],
+                $sync['initial_window'],
+                $sync['max_initial_window'],
+                $sync['resync_window'],
+                $sync['page_size'],
+                $sync['max_pages_per_run'],
+                $sync['lease_seconds'],
+                $mailboxes['limits']['max_attachment_bytes'],
+                $graph['webhook']['notification_url'],
+                $graph['renew_before'],
+                GraphSubscriptionManager::MAX_LIFETIME_MINUTES,
+            ]),
+            new Reference('event_dispatcher', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            $clock,
+            $logger,
+        ]))->setPublic(true));
+        $container->setAlias(MailboxSyncInterface::class, MailboxSyncEngine::class)->setPublic(true);
+        $container->setDefinition(MailboxAttachmentReader::class, (new Definition(MailboxAttachmentReader::class, [
+            new Reference(MailboxSyncEngine::class),
+            $mailboxes['limits']['max_attachment_bytes'],
+        ]))->setPublic(true));
+        $container->setAlias(MailboxAttachmentReaderInterface::class, MailboxAttachmentReader::class)->setPublic(true);
+        $container->setDefinition(MailboxMessageHandler::class, (new Definition(MailboxMessageHandler::class, [new Reference(MailboxSyncEngine::class), $logger]))
+            ->addTag('messenger.message_handler', ['handles' => SyncMailboxFolder::class, 'method' => 'sync'])
+            ->addTag('messenger.message_handler', ['handles' => FetchMailboxMessage::class, 'method' => 'fetch'])
+            ->addTag('messenger.message_handler', ['handles' => RenewMailboxSubscriptions::class, 'method' => 'renew']));
+
+        if ($graph['enabled']) {
+            $webhook = $graph['webhook'];
+            $container->setDefinition(self::MAILBOX_WEBHOOK_LIMITER_ID, new Definition(RateLimiterFactory::class, [
+                ['id' => 'nowo_mail_kit_mailbox_webhook', 'policy' => 'sliding_window', 'limit' => $webhook['rate_limit']['limit'], 'interval' => $webhook['rate_limit']['interval']],
+                new Definition(CacheStorage::class, [new Reference('cache.app')]),
+            ]));
+            $container->setDefinition(self::MAILBOX_WEBHOOK_CLIENT_LIMITER_ID, new Definition(RateLimiterFactory::class, [
+                ['id' => 'nowo_mail_kit_mailbox_webhook_client', 'policy' => 'sliding_window', 'limit' => $webhook['client_rate_limit']['limit'], 'interval' => $webhook['client_rate_limit']['interval']],
+                new Definition(CacheStorage::class, [new Reference('cache.app')]),
+            ]));
+            $container->setDefinition(MailboxGraphWebhookController::class, (new Definition(MailboxGraphWebhookController::class, [
+                new Reference(MailboxStore::class),
+                $bus,
+                new Reference(self::MAILBOX_WEBHOOK_LIMITER_ID),
+                new Reference(self::MAILBOX_WEBHOOK_CLIENT_LIMITER_ID),
+                $webhook['max_body_bytes'],
+                $webhook['max_notifications'],
+                $webhook['allowed_ips'],
+                $logger,
+            ]))->setPublic(true)->addTag('controller.service_arguments'));
+        }
+
+        $container->setDefinition(MailboxSchemaCommand::class, (new Definition(MailboxSchemaCommand::class, [new Reference(MailboxStore::class)]))
+            ->addTag('console.command', ['command' => MailboxSchemaCommand::NAME]));
+        $container->setDefinition(MailboxSweepCommand::class, (new Definition(MailboxSweepCommand::class, [new Reference(MailboxSyncEngine::class)]))
+            ->addTag('console.command', ['command' => MailboxSweepCommand::NAME]));
+        $container->setDefinition(MailboxSubscriptionsCommand::class, (new Definition(MailboxSubscriptionsCommand::class, [new Reference(MailboxSyncEngine::class)]))
+            ->addTag('console.command', ['command' => MailboxSubscriptionsCommand::NAME]));
+        $container->setDefinition(MailboxStatusCommand::class, (new Definition(MailboxStatusCommand::class, [new Reference(MailboxSyncInterface::class)]))
+            ->addTag('console.command', ['command' => MailboxStatusCommand::NAME]));
     }
 
     /**

@@ -6,10 +6,10 @@ namespace Nowo\MailKitBundle\Graph\Inbound\Store;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception as DbalException;
-use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\DBAL\Platforms\AbstractPlatform;
 use Doctrine\DBAL\Schema\Schema;
 use Doctrine\Persistence\ManagerRegistry;
+use Nowo\MailKitBundle\Concurrency\SavepointWrites;
 use Nowo\MailKitBundle\Concurrency\StorageConflicts;
 use Nowo\MailKitBundle\Doctrine\ExactCollation;
 use Nowo\MailKitBundle\Graph\Inbound\InboundAction;
@@ -277,71 +277,24 @@ final class GraphInboundStore
     }
 
     /**
-     * Inserts one row; false when its key already exists (a concurrent writer stored it first). Inside an open
-     * transaction the INSERT runs in a savepoint that is rolled back on **any** failure (1.13, audit UE-MK-1): a
-     * duplicate key, a lock wait timeout, a deadlock or a serialization failure never leaves the caller's PostgreSQL
-     * transaction aborted. Failures other than the duplicate key are rethrown after that rollback.
+     * Inserts one row; false when its key already exists ({@see SavepointWrites::insertOnce()}, audit UE-MK-1).
      *
      * @param array<string, mixed> $row
      */
     private function insertOnce(Connection $connection, string $savepoint, string $table, array $row): bool
     {
-        $nested = $connection->isTransactionActive();
-        if ($nested) {
-            $connection->createSavepoint($savepoint);
-        }
-
-        try {
-            $connection->insert($table, $row);
-            if ($nested) {
-                $connection->releaseSavepoint($savepoint);
-            }
-
-            return true;
-        } catch (Throwable $failure) {
-            if ($nested) {
-                try {
-                    $connection->rollbackSavepoint($savepoint);
-                } catch (Throwable) {
-                    // The savepoint is gone (MySQL / MariaDB drop them on a deadlock): the original failure tells.
-                }
-            }
-            if (!$failure instanceof UniqueConstraintViolationException) {
-                throw $failure;
-            }
-
-            return false;
-        }
+        return SavepointWrites::insertOnce($connection, $savepoint, $table, $row);
     }
 
     /**
-     * Runs one write statement; inside an open transaction it runs in a savepoint that is rolled back on any failure
-     * (audit UE2-MK-1), so a lock wait timeout, a deadlock or a serialization failure never leaves the caller's
-     * PostgreSQL transaction aborted. The failure is rethrown unchanged after that rollback. Returns the affected rows.
+     * Runs one write statement in a savepoint inside an open transaction ({@see SavepointWrites::write()}, audit
+     * UE2-MK-1). Returns the affected rows.
      *
      * @param list<mixed> $params
      */
     private function write(Connection $connection, string $sql, array $params): int
     {
-        if (!$connection->isTransactionActive()) {
-            return (int) $connection->executeStatement($sql, $params);
-        }
-        $connection->createSavepoint(self::WRITE_SAVEPOINT);
-
-        try {
-            $count = (int) $connection->executeStatement($sql, $params);
-        } catch (Throwable $failure) {
-            try {
-                $connection->rollbackSavepoint(self::WRITE_SAVEPOINT);
-            } catch (Throwable) {
-                // The savepoint is gone (MySQL / MariaDB drop them on a deadlock): the original failure tells.
-            }
-
-            throw $failure;
-        }
-        $connection->releaseSavepoint(self::WRITE_SAVEPOINT);
-
-        return $count;
+        return SavepointWrites::write($connection, self::WRITE_SAVEPOINT, $sql, $params);
     }
 
     /**

@@ -8,6 +8,7 @@ use Doctrine\DBAL\Connection;
 use Doctrine\Persistence\ManagerRegistry;
 use Nowo\MailKitBundle\Doctrine\MailKitExactKeyColumns;
 use Nowo\MailKitBundle\Graph\Inbound\Store\GraphInboundStore;
+use Nowo\MailKitBundle\Mailbox\Infrastructure\Store\MailboxStore;
 use Nowo\MailKitBundle\Tracking\Store\TrackingStore;
 use Nowo\MigrationsKitBundle\Test\ExactKeyColumnsTestCase;
 
@@ -15,7 +16,7 @@ use Nowo\MigrationsKitBundle\Test\ExactKeyColumnsTestCase;
  * REQ-SEC-006 on a real server (MAIL_KIT_TEST_DATABASE_URL: MySQL 8.4 and MariaDB 11.4 in CI): the bundle's own gate
  * over its own declaration.
  *
- * The four tables are created by the stores themselves, the way a host creates them, under a non-empty table prefix;
+ * The tables are created by the stores themselves, the way a host creates them, under a non-empty table prefix;
  * the declared columns are then read back from `information_schema`. A key column that lost its binary NO PAD
  * collation — or a new one nobody collated — fails *this bundle's* pipeline, long before any host installs it, and
  * the prefix proves the declaration follows the configured table name instead of a literal.
@@ -40,7 +41,7 @@ final class ExactKeyColumnsGateTest extends ExactKeyColumnsTestCase
      */
     protected function exactKeyColumnProviders(): array
     {
-        return [new MailKitExactKeyColumns(self::PREFIX, true, true)];
+        return [new MailKitExactKeyColumns(self::PREFIX, true, true, true)];
     }
 
     /**
@@ -53,9 +54,10 @@ final class ExactKeyColumnsGateTest extends ExactKeyColumnsTestCase
 
         $tracking = new TrackingStore($registry, null, self::PREFIX);
         $inbound  = new GraphInboundStore($registry, null, self::PREFIX);
+        $mailbox  = new MailboxStore($registry, null, self::PREFIX);
 
         $manager = $connection->createSchemaManager();
-        foreach ([$tracking->table(), $inbound->subscriptionTable(), $inbound->deltaTable(), $inbound->inboundTable()] as $table) {
+        foreach ([$tracking->table(), $inbound->subscriptionTable(), $inbound->deltaTable(), $inbound->inboundTable(), $mailbox->subscriptionTable(), $mailbox->cursorTable(), $mailbox->mailboxTable()] as $table) {
             if ($manager->tablesExist([$table])) {
                 $connection->executeStatement('DROP TABLE ' . $table);
             }
@@ -63,5 +65,6 @@ final class ExactKeyColumnsGateTest extends ExactKeyColumnsTestCase
 
         $tracking->execute($tracking->missingTablesSql());
         $inbound->execute($inbound->missingTablesSql());
+        $mailbox->execute($mailbox->missingTablesSql());
     }
 }

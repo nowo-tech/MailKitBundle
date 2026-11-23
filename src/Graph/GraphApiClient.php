@@ -11,6 +11,7 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 use function ftell;
 use function fwrite;
+use function hrtime;
 use function in_array;
 use function is_array;
 use function is_numeric;
@@ -34,6 +35,10 @@ use const JSON_THROW_ON_ERROR;
  * token on 401), no redirects, a deadline per call and errors mapped to {@see GraphException} (status, Graph error code
  * and request id only — never the body or the URL).
  *
+ * 2.5.0: every call takes a shared-mailbox profile ({@see GraphMailbox}, app-only token) or a
+ * {@see GraphCredentialInterface} (the delegated mailboxes' host token, reported per call for metering); optional
+ * request options pin the Graph host to the address OutboundUrlGuard resolved.
+ *
  * Only `https://graph.microsoft.com` is called with a token; upload sessions (`PUT` of attachment chunks) go only to
  * the configured upload hosts, over HTTPS, and never carry the token (the upload URL is pre-authenticated).
  *
@@ -54,15 +59,18 @@ final class GraphApiClient
     public const DEFAULT_UPLOAD_HOSTS = ['outlook.office.com', 'outlook.office365.com'];
 
     /**
+     * @param GraphTokenProvider|null $tokens app-only tokens (null: only {@see GraphCredentialInterface} calls, 2.5.0)
      * @param list<string> $uploadHosts hosts accepted for upload session URLs (exact, case-insensitive)
      * @param float $timeout idle deadline of one call, in seconds
+     * @param GraphRequestOptionsInterface|null $requestOptions extra options per request (host pin, 2.5.0)
      */
     public function __construct(
         private readonly HttpClientInterface $client,
-        private readonly GraphTokenProvider $tokens,
+        private readonly ?GraphTokenProvider $tokens,
         private readonly array $uploadHosts = self::DEFAULT_UPLOAD_HOSTS,
         private readonly float $timeout = 30.0,
         private readonly ?LoggerInterface $logger = null,
+        private readonly ?GraphRequestOptionsInterface $requestOptions = null,
     ) {
     }
 
@@ -87,13 +95,13 @@ final class GraphApiClient
      *
      * @return array<mixed>
      */
-    public function call(GraphMailbox $mailbox, string $method, string $path, array $options, array $expected, string $operation, int $maxBytes = self::MAX_RESPONSE_BYTES): array
+    public function call(GraphMailbox|GraphCredentialInterface $mailbox, string $method, string $path, array $options, array $expected, string $operation, int $maxBytes = self::MAX_RESPONSE_BYTES): array
     {
         if (!str_starts_with($path, '/')) {
             throw GraphException::untrustedUrl($operation);
         }
 
-        return $this->authorized($mailbox, $method, self::BASE_URL . $path, $options, $expected, $operation, $maxBytes, null);
+        return $this->authorized($this->credential($mailbox), $method, self::BASE_URL . $path, $options, $expected, $operation, $maxBytes, null);
     }
 
     /**
@@ -106,11 +114,11 @@ final class GraphApiClient
      *
      * @return array<mixed>
      */
-    public function callUrl(GraphMailbox $mailbox, string $method, string $url, array $options, array $expected, string $operation, int $maxBytes = self::MAX_RESPONSE_BYTES): array
+    public function callUrl(GraphMailbox|GraphCredentialInterface $mailbox, string $method, string $url, array $options, array $expected, string $operation, int $maxBytes = self::MAX_RESPONSE_BYTES): array
     {
         $this->assertGraphUrl($url, $operation);
 
-        return $this->authorized($mailbox, $method, $url, $options, $expected, $operation, $maxBytes, null);
+        return $this->authorized($this->credential($mailbox), $method, $url, $options, $expected, $operation, $maxBytes, null);
     }
 
     /**
@@ -121,13 +129,13 @@ final class GraphApiClient
      *
      * @throws GraphException
      */
-    public function download(GraphMailbox $mailbox, string $path, mixed $sink, int $maxBytes, string $operation): int
+    public function download(GraphMailbox|GraphCredentialInterface $mailbox, string $path, mixed $sink, int $maxBytes, string $operation): int
     {
         if (!str_starts_with($path, '/')) {
             throw GraphException::untrustedUrl($operation);
         }
         $start = (int) ftell($sink);
-        $this->authorized($mailbox, 'GET', self::BASE_URL . $path, ['headers' => ['Accept' => '*/*']], [200], $operation, $maxBytes, $sink);
+        $this->authorized($this->credential($mailbox), 'GET', self::BASE_URL . $path, ['headers' => ['Accept' => '*/*']], [200], $operation, $maxBytes, $sink);
 
         return (int) ftell($sink) - $start;
     }
@@ -154,21 +162,48 @@ final class GraphApiClient
     }
 
     /**
+     * The credential of a call: a delegated credential as given, a shared-mailbox profile through the app-only tokens.
+     *
+     * @throws GraphException without app-only tokens (a client built for delegated mailboxes only)
+     */
+    private function credential(GraphMailbox|GraphCredentialInterface $mailbox): GraphCredentialInterface
+    {
+        if ($mailbox instanceof GraphCredentialInterface) {
+            return $mailbox;
+        }
+        if (!$this->tokens instanceof GraphTokenProvider) {
+            throw GraphException::configuration('This Microsoft Graph client has no app-only credentials.');
+        }
+
+        return new AppOnlyGraphCredential($this->tokens, $mailbox);
+    }
+
+    /**
      * @param array<string, mixed> $options
      * @param list<int> $expected
      * @param resource|null $sink
      *
      * @return array<mixed>
      */
-    private function authorized(GraphMailbox $mailbox, string $method, string $url, array $options, array $expected, string $operation, int $maxBytes, mixed $sink): array
+    private function authorized(GraphCredentialInterface $credential, string $method, string $url, array $options, array $expected, string $operation, int $maxBytes, mixed $sink): array
     {
+        $context = ['bundle' => 'NowoMailKitBundle'] + $credential->logContext();
         for ($attempt = 0;; ++$attempt) {
             $headers                  = is_array($options['headers'] ?? null) ? $options['headers'] : [];
-            $headers['Authorization'] = 'Bearer ' . $this->tokens->token($mailbox);
+            $headers['Authorization'] = 'Bearer ' . $credential->token();
             $headers['Accept'] ??= 'application/json';
-            [$status, $data, $requestId, $retryAfter] = $this->send($method, $url, ['headers' => $headers] + $options, $operation, $mailbox, $maxBytes, $sink);
+            $started = hrtime(true);
+
+            try {
+                [$status, $data, $requestId, $retryAfter, $bytes] = $this->send($method, $url, ['headers' => $headers] + $options, $operation, $context, $maxBytes, $sink);
+            } catch (GraphException $failure) {
+                $credential->called($operation, $failure->status ?? 0, $this->elapsedMs($started), 0, null, $attempt + 1);
+
+                throw $failure;
+            }
+            $credential->called($operation, $status, $this->elapsedMs($started), $bytes, $retryAfter, $attempt + 1);
             if ($status === 401 && $attempt === 0) {
-                $this->tokens->forget($mailbox);
+                $credential->rejected();
 
                 continue;
             }
@@ -177,9 +212,7 @@ final class GraphApiClient
             }
             $error = is_array($data['error'] ?? null) ? $data['error'] : [];
             $code  = is_string($error['code'] ?? null) ? $error['code'] : null;
-            $this->logger?->warning('Microsoft Graph call failed.', [
-                'bundle'     => 'NowoMailKitBundle',
-                'profile'    => $mailbox->profile,
+            $this->logger?->warning('Microsoft Graph call failed.', $context + [
                 'operation'  => $operation,
                 'status'     => $status,
                 'code'       => GraphException::safeToken($code),
@@ -188,6 +221,14 @@ final class GraphApiClient
 
             throw GraphException::status($operation, $status, $code, $requestId, $retryAfter);
         }
+    }
+
+    /**
+     * Milliseconds since an hrtime() mark.
+     */
+    private function elapsedMs(int|float $started): int
+    {
+        return (int) ((hrtime(true) - $started) / 1_000_000);
     }
 
     /**
@@ -205,7 +246,7 @@ final class GraphApiClient
                 'Content-Range' => 'bytes ' . $start . '-' . $end . '/' . $total,
             ],
             'body' => $chunk,
-        ], 'attachment upload', $mailbox);
+        ], 'attachment upload', ['bundle' => 'NowoMailKitBundle', 'profile' => $mailbox->profile]);
         if ($status === 200 || $status === 201) {
             return $status;
         }
@@ -222,7 +263,7 @@ final class GraphApiClient
     {
         try {
             $this->assertUploadUrl($uploadUrl);
-            $this->send('DELETE', $uploadUrl, [], 'attachment upload cancel', $mailbox);
+            $this->send('DELETE', $uploadUrl, [], 'attachment upload cancel', ['bundle' => 'NowoMailKitBundle', 'profile' => $mailbox->profile]);
         } catch (GraphException) {
             // Best effort: the session expires by itself.
         }
@@ -275,12 +316,18 @@ final class GraphApiClient
 
     /**
      * @param array<string, mixed> $options
+     * @param array<string, string> $context log context (bundle and caller)
      * @param resource|null $sink receives a 2xx body instead of the JSON decoding
      *
-     * @return array{0: int, 1: array<mixed>, 2: string|null, 3: int|null} status, JSON body, request id, Retry-After
+     * @throws GraphException
+     *
+     * @return array{0: int, 1: array<mixed>, 2: string|null, 3: int|null, 4: int} status, JSON body, request id,
+     *                                                                             Retry-After, bytes read
      */
-    private function send(string $method, string $url, array $options, string $operation, GraphMailbox $mailbox, int $maxBytes = self::MAX_RESPONSE_BYTES, mixed $sink = null): array
+    private function send(string $method, string $url, array $options, string $operation, array $context, int $maxBytes = self::MAX_RESPONSE_BYTES, mixed $sink = null): array
     {
+        $options += $this->requestOptions?->options($url) ?? [];
+
         try {
             $response = $this->client->request($method, $url, $options + [
                 'timeout'       => $this->timeout,
@@ -307,7 +354,7 @@ final class GraphApiClient
                 }
             }
         } catch (HttpClientException) {
-            $this->logger?->warning('Microsoft Graph call failed.', ['bundle' => 'NowoMailKitBundle', 'profile' => $mailbox->profile, 'operation' => $operation, 'error' => 'transport']);
+            $this->logger?->warning('Microsoft Graph call failed.', $context + ['operation' => $operation, 'error' => 'transport']);
 
             throw GraphException::transport($operation);
         }
@@ -324,6 +371,6 @@ final class GraphApiClient
         $requestId  = $headers['request-id'][0] ?? $headers['client-request-id'][0] ?? null;
         $retryAfter = $headers['retry-after'][0] ?? null;
 
-        return [$status, $data, $requestId, is_numeric($retryAfter) ? (int) $retryAfter : null];
+        return [$status, $data, $requestId, is_numeric($retryAfter) ? (int) $retryAfter : null, $size];
     }
 }

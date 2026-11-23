@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\MailKitBundle;
 
 use Nowo\MailKitBundle\DependencyInjection\Compiler\CsrfProtectionPass;
+use Nowo\MailKitBundle\DependencyInjection\Compiler\MailboxUrlGuardPass;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\MailerIntegrationPass;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\SenderPortPass;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\TwigPathsPass;
@@ -32,7 +33,7 @@ final class NowoMailKitBundle extends Bundle
 
     /**
      * Registers the compiler passes: Twig paths, mailer / Instance Settings integration, the sender port gate, CSRF
-     * fail-closed guard and the demo-only unauthenticated access guard.
+     * fail-closed guard, the demo-only unauthenticated access guard and the delegated mailboxes' Graph host pin (2.5.0).
      */
     public function build(ContainerBuilder $container): void
     {
@@ -43,6 +44,7 @@ final class NowoMailKitBundle extends Bundle
         $container->addCompilerPass(new SenderPortPass(), PassConfig::TYPE_BEFORE_OPTIMIZATION);
         $container->addCompilerPass(new CsrfProtectionPass());
         $container->addCompilerPass(new UnauthenticatedAccessPass());
+        $container->addCompilerPass(new MailboxUrlGuardPass());
     }
 
     /**

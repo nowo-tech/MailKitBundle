@@ -18,6 +18,7 @@
 - [Using it from a DDD / hexagonal application](#using-it-from-a-ddd--hexagonal-application)
 - [Microsoft Graph (shared mailbox)](#microsoft-graph-shared-mailbox)
 - [Inbound mail from a Graph mailbox](#inbound-mail-from-a-graph-mailbox)
+- [Delegated Outlook mailboxes (2.5.0)](#delegated-outlook-mailboxes-250)
 - [Open and click tracking](#open-and-click-tracking)
 - [Admin UI](#admin-ui)
 - [Translations](#translations)
@@ -1058,6 +1059,122 @@ for two organizations in one kernel without the services resetter). Limits: `web
 `max_notifications`, `rate_limit` (verified requests), `client_rate_limit` (unverified, per client IP),
 `allowed_ips`; `limits.*` for the message and its attachments (`application/zip` must be added explicitly). Logs carry the profile, the decision
 and counts — never addresses, subjects, bodies or file names.
+
+## Delegated Outlook mailboxes (2.5.0)
+
+MailKit syncs the folders a person follows in **their own** Outlook mailbox (Microsoft Graph, delegated permissions)
+into your storage. It is plumbing only: you own the OAuth connection, the tokens, the message storage, encryption,
+retention and the UI. Design: [`docs/design/DELEGATED_MAILBOXES.md`](design/DELEGATED_MAILBOXES.md). Sending from a
+delegated mailbox arrives with the second part of 2.5.0.
+
+### The ports you implement
+
+All ports take and return MailKit value objects (`Nowo\MailKitBundle\Mailbox\Value\…`), never Symfony, Doctrine or
+HTTP types, so a DDD host implements them in its infrastructure layer.
+
+```php
+use Nowo\MailKitBundle\Mailbox\Port\MailboxTokenProviderInterface;
+use Nowo\MailKitBundle\Mailbox\Exception\MailboxGrantFailure;
+use Nowo\MailKitBundle\Mailbox\Value\{GrantFailureReason, MailboxAccessToken, MailboxId};
+
+final class MailboxTokens implements MailboxTokenProviderInterface
+{
+    public function accessToken(MailboxId $mailbox): MailboxAccessToken
+    {
+        $connection = $this->connections->find($mailbox->value)
+            ?? throw new MailboxGrantFailure(GrantFailureReason::Revoked);
+        // Refresh with your stored (encrypted) refresh token when needed; throw MailboxTokenUnavailable on a
+        // transient failure of your token endpoint, MailboxGrantFailure when the grant is gone.
+        return new MailboxAccessToken($connection->accessToken(), $connection->expiresAt());
+    }
+
+    public function rejected(MailboxId $mailbox, string $tokenFingerprint): void
+    {
+        $this->connections->forgetAccessToken($mailbox->value); // Graph answered 401: refresh next time
+    }
+}
+```
+
+- `MailboxDirectoryInterface::mailbox()` returns `MailboxSettings` (provider, address, followed folders, host pause,
+  optional first-sweep window) or `null` when you no longer know the mailbox (MailKit then deletes its rows).
+- `MailboxMessageSinkInterface::store(SyncedMessage)` stores one message **idempotently**: a unique key on
+  `(mailbox id, provider message id)` and a caught violation that answers `StoreOutcome::Duplicate`. Duplicate
+  notifications, a notification plus a sweep, retries and two workers all end there. `removed()` tells you a message
+  left a followed folder or was deleted.
+- `MailboxExclusionPolicyInterface::decide(MessageEnvelope)` (optional) keeps a sender, domain, list or folder out:
+  an excluded message is never normalised, logged or stored. It runs before the fetch when the delta page gives the
+  sender (`$envelope->complete === false`) and always after the fetch.
+- `MailboxCallObserverInterface::called(ProviderCall)` (optional) meters every Graph call per mailbox (operation,
+  status, duration, bytes, Retry-After; never a URL, id, address or body). It must not throw.
+
+### Starting, pausing, disconnecting
+
+```php
+$status = $mailboxSync->start(new MailboxId('mbx-42'));    // account check, subscriptions, first sweep (enqueued)
+$mailboxSync->pause($id);                                   // host pause
+$mailboxSync->resume($id);                                  // after a reconnect or a host pause
+$mailboxSync->sweep($id);                                   // enqueue a sweep now
+$mailboxSync->status($id);                                  // MailboxSyncStatus (no provider call)
+$mailboxSync->disconnect($id);                              // remote subscriptions + every MailKit row (GDPR)
+```
+
+`start()` checks that the account behind the token has the directory's address and binds the mailbox to that
+account (SHA-256 of the Graph account id); another account later pauses the mailbox `AccountMismatch`.
+
+A revoked grant, missing consent or scope, a mailbox without Exchange Online, or an account mismatch pauses the
+mailbox **once**: one `MailboxGrantFailedEvent` (listen to it for the bell notice), the failing Messenger message is
+unrecoverable, queued work is dropped, nothing retries until you call `resume()`. Throttling, 5xx and timeouts never
+pause; they are retried (Retry-After honoured, at most one hour).
+
+### What you receive
+
+`SyncedMessage` carries the mailbox, folder, provider id, thread key (`provider:graph:<conversationId>`, else the
+References root, In-Reply-To or Message-ID), the threading ids, addresses (`Sender\MailAddress`), subject, snippet,
+text, **sanitised HTML**, dates, List-Id, `AuthenticationResults` (Exchange-received mail only), attachment references
+and its origin (`Sync`, `Resync`). With `html.remote_images: blocked` the HTML has no remote `src`: the URL of each
+remote image is in `data-mail-kit-remote-src` (counted in `$remoteImagesBlocked`); load it through your own image
+proxy when the reader asks to show images, so your CSP keeps `img-src 'self'`. `cid:` images reference inline
+`AttachmentRef`s (`$contentId`). Treat every field as untrusted input.
+
+Attachments are read on demand:
+
+```php
+$file = $attachmentReader->open($mailbox, $message->id, $ref->id, 10 * 1024 * 1024); // capped php://temp stream
+// $file->contentType is detected from the bytes; $file->filename is neutralised; close the stream when done.
+```
+
+Attached e-mails and OneDrive links are listed (`AttachmentKind::Item` / `Reference`) but not downloadable.
+
+### Wiring
+
+```yaml
+# config/routes/nowo_mail_kit.yaml
+nowo_mail_kit_mailbox_webhook:
+    resource: .
+    type: nowo_mail_kit_mailbox_webhook
+
+# config/packages/messenger.yaml
+framework:
+    messenger:
+        routing:
+            Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\SyncMailboxFolder: async
+            Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\FetchMailboxMessage: async
+            Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\RenewMailboxSubscriptions: async
+```
+
+Make the webhook path public and stateless in the firewall and keep it out of your HTTP log. Schedule
+`nowo:mail-kit:mailbox:sweep` every 5 minutes (a lost notification costs at most one interval) and
+`nowo:mail-kit:mailbox:subscriptions` hourly. `nowo:mail-kit:mailbox:status <id>` prints the status without personal
+data. Without `graph.webhook.notification_url` MailKit creates no subscriptions and the sweep is the only reader.
+
+### Concurrency and worker mode
+
+One worker sweeps a folder at a time (a lease taken by one conditional update; a sweep that finds it held asks the
+holder for one more run). The cursor advances by compare-and-set on its version and the lease owner, after the page's
+fetches are enqueued; a worker whose lease expired stops without writing. Status transitions are single conditional
+updates, so one worker wins a grant failure and dispatches its event right after that statement (MailKit has no
+commit hook: call `start()` / `resume()` outside your own transaction if a listener must only see committed state).
+Inside your transaction MailKit's statements run in savepoints. No service keeps per-mailbox state: a token is asked once per Messenger message and dropped with it.
 
 ## Open and click tracking
 

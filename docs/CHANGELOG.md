@@ -95,7 +95,8 @@ All notable changes to this project are documented here. The format follows
   them as drafts and keeps a row whose draft could not be dealt with, so the next run retries it (I4). ZAV-F1: after a
   refused or vanished submit the `failed` / `unknown` transition is written first and the draft deleted only while the
   call still holds the key; a holder that lost the key answers the row's outcome (replay, failure, unknown or in
-  progress). Index on (`mailbox_id`, `provider_message_id`).
+  progress). Index on (`mailbox_id`, `provider_message_id`). ZAV-F2: a failure before the submit whose
+  `released` / `failed` write finds the key taken over answers the new holder's outcome (a replay when it sent).
 - `Mailbox\Port\MailboxMessageIndexInterface` (optional, `mailboxes.message_index`; owner answer Q1 of 2026-11-24):
   which messages of a change page the host already stores in that folder; the sweep asks once per page and fetches
   only the others. No default implementation.

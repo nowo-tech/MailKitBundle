@@ -1007,6 +1007,25 @@ final class MailboxSenderTest extends TestCase
         $this->mailboxConnection->executeStatement('DROP TRIGGER lose_unknown');
     }
 
+    public function testAHolderThatLostTheKeyWhileDraftingAnswersTheRowsOutcome(): void
+    {
+        // ZAV-F2: a failure before the submit while another worker took the key over and sent the message.
+        $connection            = $this->mailboxConnection;
+        $this->graph->override = static function (string $method, string $path) use ($connection): ?MockResponse {
+            if ($method === 'POST' && str_contains($path, '/attachments')) {
+                $connection->executeStatement("UPDATE mail_kit_mailbox_send SET claim_token = 'worker-b', status = 'sent', provider_message_id = 'DRAFT-9', sent_at = 1");
+
+                return MailboxGraphFake::json([], 503);
+            }
+
+            return null;
+        };
+        $sent = $this->sender->send($this->ana, $this->mail(attachments: [OutgoingAttachment::fromString('a', 'a.txt')]));
+        self::assertTrue($sent->replayed);
+        self::assertSame('DRAFT-9', $sent->id->value);
+        self::assertSame([], $this->graph->delivered);
+    }
+
     public function testAnInvalidArgumentInTheBackgroundReconcileIsNotMistakenForATransaction(): void
     {
         $this->mailboxConnection->executeStatement("INSERT INTO mail_kit_mailbox_send (mailbox_id, idempotency_key, payload_hash, status, claim_token, provider_message_id, attempts, row_version, claimed_at, updated_at) VALUES ('mbx-ana', 'bad-draft-key-01', 'h', 'sending', 't0', 'bad id', 1, 0, 0, 0)");

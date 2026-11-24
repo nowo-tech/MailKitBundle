@@ -24,6 +24,7 @@ use Nowo\MailKitBundle\Mailbox\Html\RemoteImages;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Store\MailboxStore;
 use Nowo\MailKitBundle\Mailbox\Value\MailboxId;
 use Nowo\MailKitBundle\Mailbox\Value\MailboxProvider;
+use Nowo\MailKitBundle\Mailbox\Value\OutgoingAttachment;
 use Nowo\MailKitBundle\Mailbox\Value\OutgoingKind;
 use Nowo\MailKitBundle\Mailbox\Value\OutgoingMailboxMail;
 use Nowo\MailKitBundle\Sender\MailAddress;
@@ -212,6 +213,34 @@ final class MailboxSendRaceTest extends TestCase
         self::assertTrue($a->send($this->id, $mail)->replayed);
         self::assertSame(['DRAFT-1'], $graph->delivered);
         self::assertSame([], $graph->deleted);
+        self::assertSame(SendState::Sent, $this->storeA->sendRow($this->id, self::KEY)['status'] ?? null);
+    }
+
+    public function testAHolderThatLostTheKeyWhileDraftingAnswersTheNewHoldersSend(): void
+    {
+        // Audit ZAV-F2: A stalls on an attachment; B takes the stale `drafting` key over and sends; A's attachment then
+        // fails. A must answer B's outcome (a replay), not a failure of its own, and nothing is sent twice.
+        $graph           = new MailboxGraphFake();
+        $ports           = (new MemoryMailboxPorts())->add(MemoryMailboxPorts::settings('mbx-ana', 'ana@example.com', ['inbox']));
+        $a               = $this->sender($this->storeA, $graph, $ports);
+        $b               = $this->sender($this->storeB, $graph, $ports);
+        $mail            = new OutgoingMailboxMail(OutgoingKind::New, null, [new MailAddress('pedro@example.org')], [], [], 'Plan', 'Hello', null, [OutgoingAttachment::fromString('a', 'a.txt')], self::KEY);
+        $clock           = $this->clock;
+        $stalled         = false;
+        $graph->override = static function (string $method, string $path) use (&$stalled, $b, $mail, $clock): ?MockResponse {
+            if ($method === 'POST' && str_ends_with($path, '/DRAFT-1/attachments') && !$stalled) {
+                $stalled = true;
+                $clock->modify('+121 seconds');
+                self::assertFalse($b->send(new MailboxId('mbx-ana'), $mail)->replayed);
+
+                return MailboxGraphFake::json([], 503);
+            }
+
+            return null;
+        };
+
+        self::assertTrue($a->send($this->id, $mail)->replayed);
+        self::assertSame(['DRAFT-2'], $graph->delivered);
         self::assertSame(SendState::Sent, $this->storeA->sendRow($this->id, self::KEY)['status'] ?? null);
     }
 

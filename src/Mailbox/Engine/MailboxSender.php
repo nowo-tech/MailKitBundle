@@ -250,7 +250,7 @@ final readonly class MailboxSender implements MailboxSenderInterface
                 throw new MailboxSendInProgress();
             }
         } catch (Throwable $failure) {
-            $this->abandon($settings, $gateway, $session, $key, $token, $draft?->id, $failure);
+            return $this->abandon($settings, $gateway, $session, $key, $token, $draft?->id, $failure);
         }
 
         return $this->submit($settings, $gateway, $session, $key, $token, $draft->id, $since, false);
@@ -284,11 +284,12 @@ final readonly class MailboxSender implements MailboxSenderInterface
 
     /**
      * Ends a failed attempt before the submit: deletes its draft (read as a draft first), then `failed` for a definite
-     * refusal, `released` otherwise (a lost claim leaves the row to its new holder). Always throws.
+     * refusal, `released` otherwise. When the key changed hands meanwhile (audit ZAV-F2), the new holder's outcome is
+     * answered instead (a replay when it sent the message); otherwise it throws.
      *
      * @throws Throwable
      */
-    private function abandon(MailboxSettings $settings, MailboxGatewayInterface $gateway, MailboxSession $session, string $key, string $token, ?ProviderMessageId $draft, Throwable $failure): never
+    private function abandon(MailboxSettings $settings, MailboxGatewayInterface $gateway, MailboxSession $session, string $key, string $token, ?ProviderMessageId $draft, Throwable $failure): SentMessage
     {
         $mailbox   = $settings->id;
         $discarded = !$draft instanceof ProviderMessageId || $this->discard($gateway, $session, $draft);
@@ -304,7 +305,11 @@ final readonly class MailboxSender implements MailboxSenderInterface
         $set = ($draft instanceof ProviderMessageId ? ['provider_message_id' => $discarded ? null : $draft->value] : []) + ($definite ? ['reason' => $reason] : []);
 
         try {
-            $this->store->updateSend($mailbox, $key, $token, SendState::Drafting, $definite ? SendState::Failed : SendState::Released, $set);
+            if (!$this->store->updateSend($mailbox, $key, $token, SendState::Drafting, $definite ? SendState::Failed : SendState::Released, $set)) {
+                // Audit ZAV-F2: the key changed hands while this call drafted (it stalled past the stale delay); the new
+                // holder may have sent the message, so its outcome is answered, not this call's failure.
+                return $this->lostOutcome($mailbox, $key);
+            }
         } catch (Throwable $storage) {
             // The claim then goes stale and is taken over: the original failure is what the caller needs.
             $this->logger?->warning('Mailbox send: the abandoned claim could not be recorded; it is taken over once stale.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value, 'error' => $storage::class]);

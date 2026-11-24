@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 2.2.2](#to-222)
 - [To 2.2.1](#to-221)
 - [To 2.2.0](#to-220)
   - [The bundle declares its own identity / access-key columns (REQ-SEC-006)](#the-bundle-declares-its-own-identity--access-key-columns-req-sec-006)
@@ -65,6 +66,14 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+## To 2.2.2
+
+From **2.2.1**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
 
 From **2.2.1**: `composer update nowo-tech/mail-kit-bundle`. Nothing to change in the configuration.
 

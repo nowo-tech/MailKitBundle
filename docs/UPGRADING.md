@@ -66,6 +66,17 @@
 
 ## Unreleased
 
+From **2.2.1**: `composer update nowo-tech/mail-kit-bundle`. Nothing to change in the configuration.
+
+- **Graph app-only send (ZAT-L5):** if you run Messenger with a retry or failure transport, failed Graph sends
+  stored before this release may hold an app-only bearer token in their flattened trace. Those tokens expire within
+  about an hour, but purge or inspect old `messenger_messages` failure rows (and error-tracker events) if you keep
+  them. A failure of a decorated HTTP client is now reported as a Graph transport error (retryable) instead of the
+  decorator's own exception.
+- **Graph inbound HTML (ZAT-L4):** with `allow_remote_images: false`, `srcset`, `poster`, `background` and the other
+  URL-bearing media attributes, and the `<source>` / `<track>` elements, are now always removed. Messages already
+  stored keep the HTML they were sanitised with.
+
 ## To 2.2.1
 
 From **2.2.0**:

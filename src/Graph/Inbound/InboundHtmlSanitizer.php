@@ -28,13 +28,26 @@ use const ENT_QUOTES;
  * Sanitises the HTML of inbound messages (1.9) with symfony/html-sanitizer: the W3C safe elements and attributes only
  * (no script, style, iframe, form, event handler or `style` attribute), links `http`, `https` and `mailto` only with
  * `rel="noopener noreferrer nofollow"`, no relative URLs. Images: `cid:` references to the message's own inline
- * parts only, unless remote images are allowed (`http` / `https`, which lets the sender track the reader). The input is
- * cut to `max_html_bytes` first. Also derives the plain text of an HTML-only message.
+ * parts only, unless remote images are allowed (`http` / `https`, which lets the sender track the reader). Without
+ * remote images, the other URL-bearing media attributes (`srcset`, `imagesrcset`, `lowsrc`, `dynsrc`, `poster`,
+ * `background`, `longdesc`, `style`) and the `source`, `track`, `link` and `style` elements are removed as well, whatever
+ * the installed sanitizer version checks (audit ZAT-L4). The input is cut to `max_html_bytes` first. Also derives the plain text of an HTML-only message.
  */
 final class InboundHtmlSanitizer
 {
     /** Placeholder host that carries `cid:` references through the URL sanitizer. */
     private const CID_HOST = 'cid.mail-kit.invalid';
+
+    /**
+     * URL-bearing attributes removed from every element when remote images are not allowed (audit ZAT-L4): older
+     * symfony/html-sanitizer releases keep `srcset` / `imagesrcset` without a URL check (before 7.4.23 and 8.1.11),
+     * and `poster` / `longdesc` too in early 7.4 releases, so a remote image could still load. Dropped explicitly so
+     * the result does not depend on the installed sanitizer version.
+     */
+    private const DROPPED_URL_ATTRIBUTES = ['srcset', 'imagesrcset', 'lowsrc', 'dynsrc', 'poster', 'background', 'longdesc', 'style'];
+
+    /** Elements removed (with their content) when remote images are not allowed: they only carry media sources. */
+    private const DROPPED_MEDIA_ELEMENTS = ['source', 'track', 'link', 'style'];
 
     private readonly HtmlSanitizer $sanitizer;
 
@@ -53,9 +66,17 @@ final class InboundHtmlSanitizer
             ->allowRelativeMedias(false)
             ->forceAttribute('a', 'rel', 'noopener noreferrer nofollow')
             ->withMaxInputLength($maxBytes * 2);
-        $config = $allowRemoteImages
-            ? $config->allowMediaSchemes(['http', 'https'])
-            : $config->allowMediaSchemes(['https'])->allowMediaHosts([self::CID_HOST]);
+        if ($allowRemoteImages) {
+            $config = $config->allowMediaSchemes(['http', 'https']);
+        } else {
+            $config = $config->allowMediaSchemes(['https'])->allowMediaHosts([self::CID_HOST]);
+            foreach (self::DROPPED_URL_ATTRIBUTES as $attribute) {
+                $config = $config->dropAttribute($attribute, '*');
+            }
+            foreach (self::DROPPED_MEDIA_ELEMENTS as $element) {
+                $config = $config->dropElement($element);
+            }
+        }
         // Stateless after construction (immutable config): safe to share across requests in worker mode.
         $this->sanitizer = new HtmlSanitizer($config);
     }

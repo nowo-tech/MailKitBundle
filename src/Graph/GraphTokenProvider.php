@@ -10,6 +10,7 @@ use Psr\Log\LoggerInterface;
 use Symfony\Component\Clock\NativeClock;
 use Symfony\Contracts\HttpClient\Exception\ExceptionInterface as HttpClientException;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Throwable;
 
 use function hash;
 use function is_array;
@@ -127,6 +128,12 @@ final class GraphTokenProvider
             $data   = $response->toArray(false);
         } catch (HttpClientException) {
             $this->logger?->warning('Microsoft Graph token request failed.', ['bundle' => 'NowoMailKitBundle', 'profile' => $mailbox->profile, 'error' => 'transport']);
+
+            throw GraphException::transport('token request');
+        } catch (Throwable $exception) {
+            // Any other failure of the HTTP client records the request options, and so the client secret, in its trace
+            // arguments: replaced without `previous` (audit ZAT-L5).
+            $this->logger?->warning('Microsoft Graph token request failed.', ['bundle' => 'NowoMailKitBundle', 'profile' => $mailbox->profile, 'error' => 'transport', 'exception' => $exception::class]);
 
             throw GraphException::transport('token request');
         }

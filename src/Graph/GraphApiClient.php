@@ -6,8 +6,10 @@ namespace Nowo\MailKitBundle\Graph;
 
 use JsonException;
 use Psr\Log\LoggerInterface;
+use SensitiveParameter;
 use Symfony\Contracts\HttpClient\Exception\ExceptionInterface as HttpClientException;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Throwable;
 
 use function ftell;
 use function fwrite;
@@ -87,7 +89,7 @@ final class GraphApiClient
      *
      * @return array<mixed>
      */
-    public function call(GraphMailbox $mailbox, string $method, string $path, array $options, array $expected, string $operation, int $maxBytes = self::MAX_RESPONSE_BYTES): array
+    public function call(GraphMailbox $mailbox, string $method, string $path, #[SensitiveParameter] array $options, array $expected, string $operation, int $maxBytes = self::MAX_RESPONSE_BYTES): array
     {
         if (!str_starts_with($path, '/')) {
             throw GraphException::untrustedUrl($operation);
@@ -106,7 +108,7 @@ final class GraphApiClient
      *
      * @return array<mixed>
      */
-    public function callUrl(GraphMailbox $mailbox, string $method, string $url, array $options, array $expected, string $operation, int $maxBytes = self::MAX_RESPONSE_BYTES): array
+    public function callUrl(GraphMailbox $mailbox, string $method, string $url, #[SensitiveParameter] array $options, array $expected, string $operation, int $maxBytes = self::MAX_RESPONSE_BYTES): array
     {
         $this->assertGraphUrl($url, $operation);
 
@@ -160,7 +162,7 @@ final class GraphApiClient
      *
      * @return array<mixed>
      */
-    private function authorized(GraphMailbox $mailbox, string $method, string $url, array $options, array $expected, string $operation, int $maxBytes, mixed $sink): array
+    private function authorized(GraphMailbox $mailbox, string $method, string $url, #[SensitiveParameter] array $options, array $expected, string $operation, int $maxBytes, mixed $sink): array
     {
         for ($attempt = 0;; ++$attempt) {
             $headers                  = is_array($options['headers'] ?? null) ? $options['headers'] : [];
@@ -195,7 +197,7 @@ final class GraphApiClient
      *
      * @throws GraphException
      */
-    public function uploadChunk(GraphMailbox $mailbox, string $uploadUrl, string $chunk, int $start, int $total): int
+    public function uploadChunk(GraphMailbox $mailbox, #[SensitiveParameter] string $uploadUrl, string $chunk, int $start, int $total): int
     {
         $this->assertUploadUrl($uploadUrl);
         $end                                      = $start + strlen($chunk) - 1;
@@ -218,7 +220,7 @@ final class GraphApiClient
     /**
      * Cancels an upload session (best effort, errors ignored).
      */
-    public function cancelUpload(GraphMailbox $mailbox, string $uploadUrl): void
+    public function cancelUpload(GraphMailbox $mailbox, #[SensitiveParameter] string $uploadUrl): void
     {
         try {
             $this->assertUploadUrl($uploadUrl);
@@ -233,7 +235,7 @@ final class GraphApiClient
      *
      * @throws GraphException
      */
-    public function assertUploadUrl(string $url): void
+    public function assertUploadUrl(#[SensitiveParameter] string $url): void
     {
         $parts = parse_url($url);
         if (!is_array($parts)
@@ -251,7 +253,7 @@ final class GraphApiClient
      *
      * @param array<string, mixed> $parts parse_url() result
      */
-    private function defaultHttpsPort(string $url, array $parts): bool
+    private function defaultHttpsPort(#[SensitiveParameter] string $url, #[SensitiveParameter] array $parts): bool
     {
         if (!isset($parts['port'])) {
             return true;
@@ -274,12 +276,15 @@ final class GraphApiClient
     }
 
     /**
+     * The URL (an upload session URL is pre-authenticated) and the options (they carry the `Authorization` header) are
+     * sensitive parameters: they never appear in the trace arguments of an exception thrown here (audit ZAT-L5).
+     *
      * @param array<string, mixed> $options
      * @param resource|null $sink receives a 2xx body instead of the JSON decoding
      *
      * @return array{0: int, 1: array<mixed>, 2: string|null, 3: int|null} status, JSON body, request id, Retry-After
      */
-    private function send(string $method, string $url, array $options, string $operation, GraphMailbox $mailbox, int $maxBytes = self::MAX_RESPONSE_BYTES, mixed $sink = null): array
+    private function send(string $method, #[SensitiveParameter] string $url, #[SensitiveParameter] array $options, string $operation, GraphMailbox $mailbox, int $maxBytes = self::MAX_RESPONSE_BYTES, mixed $sink = null): array
     {
         try {
             $response = $this->client->request($method, $url, $options + [
@@ -306,8 +311,16 @@ final class GraphApiClient
                     $content .= $piece;
                 }
             }
+        } catch (GraphException $exception) {
+            throw $exception;
         } catch (HttpClientException) {
             $this->logger?->warning('Microsoft Graph call failed.', ['bundle' => 'NowoMailKitBundle', 'profile' => $mailbox->profile, 'operation' => $operation, 'error' => 'transport']);
+
+            throw GraphException::transport($operation);
+        } catch (Throwable $exception) {
+            // Any other failure of the HTTP client (a decorator, a URL guard...) records the request options, and so the
+            // Authorization header, in its trace arguments: replaced without `previous` (audit ZAT-L5).
+            $this->logger?->warning('Microsoft Graph call failed.', ['bundle' => 'NowoMailKitBundle', 'profile' => $mailbox->profile, 'operation' => $operation, 'error' => 'transport', 'exception' => $exception::class]);
 
             throw GraphException::transport($operation);
         }

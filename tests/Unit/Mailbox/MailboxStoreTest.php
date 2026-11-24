@@ -95,7 +95,16 @@ final class MailboxStoreTest extends TestCase
         self::assertFalse($this->store->advanceCursor($this->id, 'inbox', 'owner-b', 1, 'link-x', 120, false), 'not the holder');
         self::assertTrue($this->store->advanceCursor($this->id, 'inbox', 'owner-a', 1, 'delta-1', 120, true));
         self::assertSame(['cursor' => 'delta-1', 'version' => 2], $this->store->cursor($this->id, 'inbox'));
-        self::assertSame([['folder_key' => 'inbox', 'last_complete_at' => $this->clock->now()->getTimestamp()]], $this->store->cursors($this->id));
+        self::assertSame([['folder_key' => 'inbox', 'last_complete_at' => $this->clock->now()->getTimestamp(), 'sync_error' => null, 'sync_error_at' => null]], $this->store->cursors($this->id));
+
+        // A folder error is recorded once per transition and cleared by the next good advance.
+        self::assertTrue($this->store->markFolderError($this->id, 'inbox', 'refused'));
+        self::assertFalse($this->store->markFolderError($this->id, 'inbox', 'too_large'));
+        self::assertSame(['refused', $this->clock->now()->getTimestamp()], [$this->store->cursors($this->id)[0]['sync_error'], $this->store->cursors($this->id)[0]['sync_error_at']]);
+        self::assertTrue($this->store->extendLease($this->id, 'inbox', 'owner-a', 120));
+        self::assertFalse($this->store->extendLease($this->id, 'inbox', 'owner-b', 120));
+        self::assertTrue($this->store->advanceCursor($this->id, 'inbox', 'owner-a', 2, 'delta-2', 120, false));
+        self::assertNull($this->store->cursors($this->id)[0]['sync_error']);
 
         self::assertTrue($this->store->releaseLease($this->id, 'inbox', 'owner-a'), 'a rerun was requested');
         self::assertTrue($this->store->acquireLease($this->id, 'inbox', 'owner-b', 120));

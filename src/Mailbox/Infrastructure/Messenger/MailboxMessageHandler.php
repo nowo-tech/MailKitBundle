@@ -18,6 +18,7 @@ use Symfony\Component\Messenger\Exception\UnrecoverableMessageHandlingException;
 use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\Messenger\Stamp\DelayStamp;
 
+use function max;
 use function min;
 
 /**
@@ -31,7 +32,8 @@ use function min;
  *   pile up during throttling (audit ZAT-L2);
  * - a transient failure of a fetch or a renewal with Retry-After is re-enqueued after that delay (at most one hour)
  *   for at most {@see MAX_DELAYED_ATTEMPTS} attempts; then, and without Retry-After, it is rethrown for the transport's
- *   bounded retry strategy and failure transport;
+ *   bounded retry strategy and failure transport (on a synchronous bus the DelayStamp is ignored, so these attempts run
+ *   back to back);
  * - any other provider refusal (untrusted link, oversized answer, missing id) is unrecoverable.
  *
  * Stateless.
@@ -133,6 +135,7 @@ final readonly class MailboxMessageHandler
 
                 return;
             }
+            $attempt = max(0, $attempt);
             if ($failure->retryAfter === null || $attempt + 1 >= self::MAX_DELAYED_ATTEMPTS) {
                 throw $failure;
             }

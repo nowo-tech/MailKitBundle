@@ -57,7 +57,10 @@ All notable changes to this project are documented here. The format follows
   Messenger message (the pause survives a `doctrine_transaction` middleware); the account is checked on every sweep;
   bounded retries (sweeps acknowledge transient failures; Retry-After re-enqueues at most 10 times); `removed()`
   carries a `RemovalReason` (`Deleted` / `MovedOut`, confirmed with Graph); delta links bound to their folder; only
-  grant / consent / scope 403s pause; 400 sync-state errors resync.
+  grant / consent / scope 403s pause; 400 sync-state errors resync. Re-audit ZAT-R: a folder whose sweeps are refused
+  records the error on its cursor (`FolderSyncState::$syncError`, one `MailboxFolderSyncFailedEvent` per transition,
+  cleared by the next good sweep) instead of failing unnoticed; an unrecognised delta-link folder form is logged and
+  followed; the removal check reports `MovedOut` on an unexpected refusal and extends the folder lease after each check.
 - `Mailbox\Html\MailHtmlSanitizer`: the 1.9 inbound sanitiser, provider-neutral, with `html.remote_images: blocked`
   (default for mailboxes): remote image URLs move to `data-mail-kit-remote-src` for the host's image proxy; no
   `style`, script or event handler in any mode. `Graph\Inbound\InboundHtmlSanitizer` is now a thin subclass (no BC

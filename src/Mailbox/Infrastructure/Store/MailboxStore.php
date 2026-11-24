@@ -31,7 +31,7 @@ use function is_string;
  *
  * - `<prefix>mail_kit_mailbox`: status, grant-failure reason, SHA-256 of the provider account id;
  * - `<prefix>mail_kit_mailbox_cursor`: per followed folder the provider cursor (delta link), its version, the sweep
- *   lease (owner, until), the `rerun` flag and the end of the last complete sweep;
+ *   lease (owner, until), the `rerun` flag, the end of the last complete sweep and the folder's sync error;
  * - `<prefix>mail_kit_mailbox_subscription`: change-notification subscriptions per folder with the **SHA-256 of the
  *   client state** only.
  *
@@ -192,6 +192,8 @@ final class MailboxStore
             'lease_until'      => null,
             'rerun'            => 0,
             'last_complete_at' => null,
+            'sync_error'       => null,
+            'sync_error_at'    => null,
         ]);
     }
 
@@ -249,10 +251,33 @@ final class MailboxStore
         $now = $this->now();
 
         return $this->write(
-            'UPDATE ' . $this->cursorTable() . ' SET cursor_value = ?, cursor_version = cursor_version + 1, lease_until = ?, last_complete_at = ' . ($complete ? '?' : 'last_complete_at')
+            'UPDATE ' . $this->cursorTable() . ' SET cursor_value = ?, cursor_version = cursor_version + 1, lease_until = ?, sync_error = NULL, sync_error_at = NULL, last_complete_at = ' . ($complete ? '?' : 'last_complete_at')
             . ' WHERE mailbox_id = ? AND folder_key = ? AND cursor_version = ? AND lease_owner = ?',
             $complete ? [$cursor, $now + $leaseSeconds, $now, $mailbox->value, $folder, $version, $owner] : [$cursor, $now + $leaseSeconds, $mailbox->value, $folder, $version, $owner],
         ) === 1;
+    }
+
+    /**
+     * Extends the lease of this run (between slow provider checks); false when the lease changed hands.
+     */
+    public function extendLease(MailboxId $mailbox, string $folder, string $owner, int $seconds): bool
+    {
+        return $this->write('UPDATE ' . $this->cursorTable() . ' SET lease_until = ? WHERE mailbox_id = ? AND folder_key = ? AND lease_owner = ?', [
+            $this->now() + $seconds, $mailbox->value, $folder, $owner,
+        ]) === 1;
+    }
+
+    /**
+     * Records a folder sync error (audit ZAT-R1): true only for the call that moved the folder from "no error" to this
+     * error (one event per transition). The next good cursor advance clears it.
+     *
+     * @param string $error a short reason (`refused`, `too_large`, `not_found`)
+     */
+    public function markFolderError(MailboxId $mailbox, string $folder, string $error): bool
+    {
+        return $this->write('UPDATE ' . $this->cursorTable() . ' SET sync_error = ?, sync_error_at = ? WHERE mailbox_id = ? AND folder_key = ? AND sync_error IS NULL', [
+            $error, $this->now(), $mailbox->value, $folder,
+        ]) === 1;
     }
 
     /**
@@ -278,14 +303,19 @@ final class MailboxStore
     /**
      * Cursor rows of a mailbox.
      *
-     * @return list<array{folder_key: string, last_complete_at: int|null}>
+     * @return list<array{folder_key: string, last_complete_at: int|null, sync_error: string|null, sync_error_at: int|null}>
      */
     public function cursors(MailboxId $mailbox): array
     {
         $rows = [];
-        foreach ($this->connection()->fetchAllAssociative('SELECT folder_key, last_complete_at FROM ' . $this->cursorTable() . ' WHERE mailbox_id = ? ORDER BY folder_key', [$mailbox->value]) as $row) {
+        foreach ($this->connection()->fetchAllAssociative('SELECT folder_key, last_complete_at, sync_error, sync_error_at FROM ' . $this->cursorTable() . ' WHERE mailbox_id = ? ORDER BY folder_key', [$mailbox->value]) as $row) {
             if (is_string($row['folder_key'] ?? null)) {
-                $rows[] = ['folder_key' => $row['folder_key'], 'last_complete_at' => is_numeric($row['last_complete_at'] ?? null) ? (int) $row['last_complete_at'] : null];
+                $rows[] = [
+                    'folder_key'       => $row['folder_key'],
+                    'last_complete_at' => is_numeric($row['last_complete_at'] ?? null) ? (int) $row['last_complete_at'] : null,
+                    'sync_error'       => is_string($row['sync_error'] ?? null) && $row['sync_error'] !== '' ? $row['sync_error'] : null,
+                    'sync_error_at'    => is_numeric($row['sync_error_at'] ?? null) ? (int) $row['sync_error_at'] : null,
+                ];
             }
         }
 
@@ -426,6 +456,8 @@ final class MailboxStore
             $table->addColumn('lease_until', 'bigint', ['notnull' => false]);
             $table->addColumn('rerun', 'smallint', ['default' => 0]);
             $table->addColumn('last_complete_at', 'bigint', ['notnull' => false]);
+            $table->addColumn('sync_error', 'string', ['length' => 32, 'notnull' => false]);
+            $table->addColumn('sync_error_at', 'bigint', ['notnull' => false]);
             $table->setPrimaryKey(['mailbox_id', 'folder_key']);
         }
         if (!$schema->hasTable($this->subscriptionTable())) {

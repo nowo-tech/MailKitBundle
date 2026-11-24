@@ -689,6 +689,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
                 new Reference(self::MAILBOX_GRAPH_CLIENT_ID),
                 new Reference(self::MAILBOX_NORMALIZER_ID),
                 $mailboxes['limits']['max_message_bytes'],
+                $logger,
             ]));
             $gateways[MailboxProvider::Graph->value] = new Reference(GraphMailboxGateway::class);
         }

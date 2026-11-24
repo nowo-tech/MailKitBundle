@@ -6,6 +6,7 @@ namespace Nowo\MailKitBundle\Tests\Unit\Mailbox;
 
 use InvalidArgumentException;
 use Nowo\MailKitBundle\Mailbox\Engine\MailboxSyncOptions;
+use Nowo\MailKitBundle\Mailbox\Event\MailboxFolderSyncFailedEvent;
 use Nowo\MailKitBundle\Mailbox\Event\MailboxGrantFailedEvent;
 use Nowo\MailKitBundle\Mailbox\Event\MailboxResyncedEvent;
 use Nowo\MailKitBundle\Mailbox\Exception\MailboxProviderFailure;
@@ -492,6 +493,46 @@ final class MailboxSyncEngineTest extends TestCase
         self::assertSame([], $this->drain());
         self::assertSame(['mbx-ana' . "\n" . 'm5' . "\n" . 'inbox' . "\n" . 'moved_out', 'mbx-ana' . "\n" . 'm6' . "\n" . 'inbox' . "\n" . 'deleted'], $this->ports->removedMessages);
         self::assertSame('sentitems', $this->ports->stored['mbx-ana' . "\n" . 'm5']->folder->key);
+    }
+
+    public function testARefusedFolderIsRecordedOnceAndClearedByTheNextGoodSweep(): void
+    {
+        $this->engine->start($this->ana);
+        $this->drain();
+        $this->graph->override = static fn (string $method, string $path): ?MockResponse => str_contains($path, '/delta') ? MailboxGraphFake::json(['error' => ['code' => 'BadRequest']], 400) : null;
+        $this->bus->dispatch(new SyncMailboxFolder('mbx-ana', 'inbox'));
+        $this->bus->dispatch(new SyncMailboxFolder('mbx-ana', 'inbox'));
+        self::assertSame([], $this->drain(), 'the sweep is acknowledged, not unrecoverable');
+        self::assertCount(1, $this->events->of(MailboxFolderSyncFailedEvent::class));
+        self::assertSame('refused', $this->events->of(MailboxFolderSyncFailedEvent::class)[0]->reason);
+        $inbox = $this->engine->status($this->ana)->folders[0];
+        self::assertSame(['inbox', 'refused'], [$inbox->folder->key, $inbox->syncError]);
+        self::assertNotNull($inbox->syncErrorSince);
+        self::assertSame(MailboxStatus::Active, $this->engine->status($this->ana)->status);
+
+        $this->graph->override = null;
+        $this->engine->sweepFolder($this->ana, 'inbox');
+        self::assertNull($this->engine->status($this->ana)->folders[0]->syncError);
+        // A transient failure is not a folder error.
+        $this->graph->override = static fn (string $method, string $path): ?MockResponse => str_contains($path, '/delta') ? MailboxGraphFake::json(['error' => ['code' => 'x']], 503) : null;
+        $this->expectException(MailboxProviderFailure::class);
+        $this->engine->sweepFolder($this->ana, 'inbox');
+    }
+
+    public function testALeaseLostDuringRemovalChecksStopsTheRun(): void
+    {
+        $this->engine->start($this->ana);
+        $this->drain();
+        $this->graph->after['inbox'] = [['id' => 'm7', '@removed' => ['reason' => 'deleted']]];
+        $this->graph->override       = function (string $method, string $path): ?MockResponse {
+            if (str_contains($path, 'parentFolderId')) {
+                $this->mailboxConnection->executeStatement("UPDATE mail_kit_mailbox_cursor SET lease_owner = 'thief' WHERE folder_key = 'inbox'");
+            }
+
+            return null;
+        };
+        $this->engine->sweepFolder($this->ana, 'inbox');
+        self::assertSame([], $this->ports->removedMessages);
     }
 
     public function testCallsAreMetered(): void

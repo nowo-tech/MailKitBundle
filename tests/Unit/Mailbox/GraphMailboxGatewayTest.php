@@ -32,6 +32,7 @@ use Nowo\MailKitBundle\Mailbox\Value\ProviderMessageId;
 use Nowo\MailKitBundle\Sender\MailAddress;
 use Nowo\MailKitBundle\Tests\Support\MailboxGraphFake;
 use Nowo\MailKitBundle\Tests\Support\MemoryMailboxPorts;
+use Nowo\MailKitBundle\Tests\Support\RecordingLogger;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpClient\Response\MockResponse;
 
@@ -217,17 +218,29 @@ final class GraphMailboxGatewayTest extends TestCase
         $this->expectFailure(MailboxProviderFailure::REFUSED, fn (): ChangePage => $this->gateway->changes($session, FolderRef::inbox(), null, 0, 25));
     }
 
-    public function testDeltaLinksAreBoundToTheCursorFolder(): void
+    public function testDeltaLinksAreCheckedAgainstTheCursorFolder(): void
     {
+        $log     = new RecordingLogger();
+        $gateway = new GraphMailboxGateway(new GraphApiClient($this->graph->client(), null), new GraphMessageNormalizer(new MailHtmlSanitizer(RemoteImages::Blocked)), 65_536, $log);
         $session = $this->session();
-        // Graph may name the folder by its id: accepted when it is this folder's id (read once per operation).
-        $this->gateway->changes($session, FolderRef::inbox(), MailboxGraphFake::BASE . "/me/mailFolders('FOLDER-inbox')/messages/delta?\$deltatoken=x", 0, 25);
-        $this->gateway->changes($session, FolderRef::inbox(), MailboxGraphFake::BASE . "/me/mailFolders('FOLDER-inbox')/messages/delta?\$deltatoken=x", 0, 25);
+        // Graph may name the folder by its id: recognised when it is this folder's id (read once per operation, with
+        // the same immutable-id form as the delta request).
+        $gateway->changes($session, FolderRef::inbox(), MailboxGraphFake::BASE . "/me/mailFolders('FOLDER-inbox')/messages/delta?\$deltatoken=x", 0, 25);
+        $gateway->changes($session, FolderRef::inbox(), MailboxGraphFake::BASE . "/me/mailFolders('FOLDER-inbox')/messages/delta?\$deltatoken=x", 0, 25);
         self::assertCount(1, $this->graph->matching('/me/mailFolders/inbox?$select=id'));
-        $this->expectFailure(MailboxProviderFailure::REFUSED, fn (): ChangePage => $this->gateway->changes($session, FolderRef::inbox(), MailboxGraphFake::BASE . "/me/mailFolders('sentitems')/messages/delta?\$deltatoken=x", 0, 25));
-        $this->expectFailure(MailboxProviderFailure::REFUSED, fn (): ChangePage => $this->gateway->changes($session, FolderRef::inbox(), MailboxGraphFake::BASE . "/me/mailFolders('FOLDER-archive')/messages/delta?\$deltatoken=x", 0, 25));
-        $this->graph->override = static fn (string $method, string $path): ?MockResponse => str_contains($path, '/me/mailFolders/archive') ? MailboxGraphFake::json(['id' => 'bad id']) : null;
-        $this->expectFailure(MailboxProviderFailure::REFUSED, fn (): ChangePage => $this->gateway->changes($this->session(), new FolderRef('archive'), MailboxGraphFake::BASE . "/me/mailFolders('x')/messages/delta?\$deltatoken=x", 0, 25));
+        self::assertSame([], $log->records);
+
+        // Another form passes the host and mailbox checks: logged and followed (re-audit ZAT-R1).
+        $gateway->changes($session, FolderRef::inbox(), MailboxGraphFake::BASE . "/me/mailFolders('sentitems')/messages/delta?\$deltatoken=x", 0, 25);
+        self::assertTrue($log->has('does not recognise; followed'));
+
+        // A refused folder lookup is not fatal; a transient one is retried.
+        $this->graph->override = static fn (string $method, string $path): ?MockResponse => str_contains($path, '/me/mailFolders/archive?') ? MailboxGraphFake::json(['error' => ['code' => 'x']], 403) : null;
+        $gateway->changes($this->session(), new FolderRef('archive'), MailboxGraphFake::BASE . "/me/mailFolders('x')/messages/delta?\$deltatoken=x", 0, 25);
+        $this->graph->override = static fn (string $method, string $path): ?MockResponse => str_contains($path, '/me/mailFolders/archive?') ? MailboxGraphFake::json(['id' => 'bad id']) : null;
+        $gateway->changes($this->session(), new FolderRef('archive'), MailboxGraphFake::BASE . "/me/mailFolders('x')/messages/delta?\$deltatoken=x", 0, 25);
+        $this->graph->override = static fn (string $method, string $path): ?MockResponse => str_contains($path, '/me/mailFolders/archive?') ? MailboxGraphFake::json(['error' => ['code' => 'x']], 503) : null;
+        $this->expectFailure(MailboxProviderFailure::TRANSIENT, fn (): mixed => $gateway->changes($this->session(), new FolderRef('archive'), MailboxGraphFake::BASE . "/me/mailFolders('x')/messages/delta?\$deltatoken=x", 0, 25));
     }
 
     public function testRemovalsAreConfirmedWithGraph(): void
@@ -237,6 +250,9 @@ final class GraphMailboxGatewayTest extends TestCase
         self::assertTrue($this->gateway->stillExists($this->session(), new ProviderMessageId('moved')));
         self::assertFalse($this->gateway->stillExists($this->session(), new ProviderMessageId('gone')));
         self::assertFalse($this->gateway->stillExists($this->session(), new ProviderMessageId('other')));
+        // An unexpected refusal answers "moved out" (the host never deletes on it); a transient failure is retried.
+        $this->graph->override = static fn (): MockResponse => MailboxGraphFake::json(['error' => ['code' => 'ErrorItemAccessDenied']], 403);
+        self::assertTrue($this->gateway->stillExists($this->session(), new ProviderMessageId('moved')));
         $this->graph->override = static fn (): MockResponse => MailboxGraphFake::json(['error' => ['code' => 'x']], 503);
         $this->expectFailure(MailboxProviderFailure::TRANSIENT, fn (): bool => $this->gateway->stillExists($this->session(), new ProviderMessageId('moved')));
     }

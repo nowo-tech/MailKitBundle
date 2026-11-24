@@ -1133,7 +1133,11 @@ to it for the bell notice). The failing Messenger message is **acknowledged** (l
 until you call `resume()`. A 403 on one item or attachment ends that call only. Throttling, 5xx and timeouts never
 pause: a sweep is acknowledged (the next scheduled sweep covers the folder), a fetch or renewal with Retry-After is
 re-enqueued after that delay (at most one hour) up to 10 times, then handed to your transport's retry strategy and
-failure transport. An invalid or expired sync state (Graph 410, or 400 with a sync-state code) resyncs the folder.
+failure transport (on a synchronous bus the `DelayStamp` is ignored, so those attempts run back to back). An invalid
+or expired sync state (Graph 410, or 400 with a sync-state code) resyncs the folder. Any other refusal of a folder's
+sweep (an unrecognised answer, an oversized page) is recorded on that folder: `status()` shows it in
+`FolderSyncState::$syncError` / `$syncErrorSince`, one `MailboxFolderSyncFailedEvent` is dispatched per transition,
+the sweep is acknowledged, and the next good sweep clears it. The mailbox and its other folders keep syncing.
 
 ### What you receive
 

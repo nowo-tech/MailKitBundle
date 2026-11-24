@@ -140,6 +140,9 @@ final class MailboxRunnersTest extends TestCase
             self::assertSame($delay, $stamp->getDelay());
         }
         $this->bus->messages = [];
+        $this->handler->fetch(new FetchMailboxMessage('mbx-ana', 'inbox', 'm1', 'sync', -5));
+        self::assertEquals([new FetchMailboxMessage('mbx-ana', 'inbox', 'm1', 'sync', 1)], $this->bus->messages, 'a negative attempt is clamped');
+        $this->bus->messages = [];
         self::assertInstanceOf(MailboxProviderFailure::class, $this->failure(fn () => $this->handler->fetch(new FetchMailboxMessage('mbx-ana', 'inbox', 'm1', 'sync', MailboxMessageHandler::MAX_DELAYED_ATTEMPTS - 1))));
         self::assertSame([], $this->bus->messages, 'the last attempt goes to the transport retry strategy');
 
@@ -238,6 +241,9 @@ final class MailboxRunnersTest extends TestCase
         $this->mailboxStore->advanceCursor($this->ana, 'inbox', 'x', 0, null, 1, true);
         $status->execute(['mailbox' => 'mbx-ana']);
         self::assertStringContainsString('subscription none', $status->getDisplay());
+        $this->mailboxStore->markFolderError($this->ana, 'inbox', 'refused');
+        $status->execute(['mailbox' => 'mbx-ana']);
+        self::assertStringContainsString(', sync error refused since ', $status->getDisplay());
         self::assertSame(2, $status->execute(['mailbox' => 'bad id']));
     }
 

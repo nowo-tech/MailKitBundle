@@ -6,6 +6,7 @@ namespace Nowo\MailKitBundle\Mailbox\Engine;
 
 use DateTimeImmutable;
 use InvalidArgumentException;
+use Nowo\MailKitBundle\Mailbox\Event\MailboxFolderSyncFailedEvent;
 use Nowo\MailKitBundle\Mailbox\Event\MailboxGrantFailedEvent;
 use Nowo\MailKitBundle\Mailbox\Event\MailboxResyncedEvent;
 use Nowo\MailKitBundle\Mailbox\Exception\MailboxGrantFailure;
@@ -175,14 +176,14 @@ final class MailboxSyncEngine implements MailboxSyncInterface
         }
         $states = [];
         foreach ($this->store->cursors($mailbox) as $cursor) {
-            $states[$cursor['folder_key']] = ['complete' => $cursor['last_complete_at'], 'expires' => null];
+            $states[$cursor['folder_key']] = ['complete' => $cursor['last_complete_at'], 'expires' => null, 'error' => $cursor['sync_error'], 'error_at' => $cursor['sync_error_at']];
         }
         foreach ($this->store->subscriptions($mailbox) as $subscription) {
-            $states[$subscription['folder_key']] = ['complete' => $states[$subscription['folder_key']]['complete'] ?? null, 'expires' => $subscription['expires_at']];
+            $states[$subscription['folder_key']] = ['expires' => $subscription['expires_at']] + ($states[$subscription['folder_key']] ?? ['complete' => null, 'error' => null, 'error_at' => null]);
         }
         $folders = [];
         foreach ($states as $key => $state) {
-            $folders[] = new FolderSyncState(new FolderRef((string) $key), $this->time($state['complete']), $this->time($state['expires']));
+            $folders[] = new FolderSyncState(new FolderRef((string) $key), $this->time($state['complete']), $this->time($state['expires']), $state['error'], $this->time($state['error_at']));
         }
 
         return new MailboxSyncStatus($mailbox, $row['status'], $row['status'] === MailboxStatus::PausedGrant ? $row['reason'] : null, $folders);
@@ -228,8 +229,8 @@ final class MailboxSyncEngine implements MailboxSyncInterface
     /**
      * Sweeps one folder under its lease (Messenger {@see SyncMailboxFolder}).
      *
-     * @throws MailboxGrantFailure the mailbox was paused (the handler makes it unrecoverable)
-     * @throws MailboxProviderFailure
+     * @throws MailboxGrantFailure the mailbox was paused (the handler acknowledges the message)
+     * @throws MailboxProviderFailure transient only; a refusal is recorded on the folder ({@see MailboxFolderSyncFailedEvent})
      */
     public function sweepFolder(MailboxId $mailbox, string $folderKey): void
     {
@@ -264,6 +265,16 @@ final class MailboxSyncEngine implements MailboxSyncInterface
             $this->grantFailed($mailbox, $settings->provider, $failure->reason);
 
             throw $failure;
+        } catch (MailboxProviderFailure $failure) {
+            if ($failure->isRetryable()) {
+                throw $failure;
+            }
+            // Audit ZAT-R1: a refusal that would stop this folder forever is recorded on its cursor (one event per
+            // transition, shown by status(), cleared by the next good sweep) and the sweep is acknowledged.
+            if ($this->store->markFolderError($mailbox, $folder->key, $failure->reason)) {
+                $this->logger?->warning('Mailbox folder sweep refused by the provider; the folder is not synced until it recovers.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value, 'reason' => $failure->reason, 'status' => $failure->status]);
+                $this->events?->dispatch(new MailboxFolderSyncFailedEvent($mailbox, $folder, $failure->reason));
+            }
         } finally {
             if ($this->store->releaseLease($mailbox, $folder->key, $owner) || $again) {
                 $this->bus->dispatch(new SyncMailboxFolder($mailbox->value, $folder->key));
@@ -451,8 +462,13 @@ final class MailboxSyncEngine implements MailboxSyncInterface
             ++$pages;
             foreach ($page->items as $item) {
                 if ($item->removed) {
-                    // Deleted or moved elsewhere (audit ZAT-L3): the sink must never treat a move as a deletion.
-                    $this->sink->removed($mailbox, $item->id, $folder, $gateway->stillExists($session, $item->id) ? RemovalReason::MovedOut : RemovalReason::Deleted);
+                    // Deleted or moved elsewhere (audit ZAT-L3): the sink must never treat a move as a deletion. The
+                    // check is one provider call, so the lease is extended after it (audit ZAT-R2).
+                    $reason = $gateway->stillExists($session, $item->id) ? RemovalReason::MovedOut : RemovalReason::Deleted;
+                    if (!$this->store->extendLease($mailbox, $folder->key, $owner, $this->options->leaseSeconds)) {
+                        return false;
+                    }
+                    $this->sink->removed($mailbox, $item->id, $folder, $reason);
 
                     continue;
                 }

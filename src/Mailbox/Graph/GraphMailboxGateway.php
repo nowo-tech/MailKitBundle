@@ -41,6 +41,7 @@ use Nowo\MailKitBundle\Mailbox\Value\ProviderMessageId;
 use Nowo\MailKitBundle\Mailbox\Value\SyncedMessage;
 use Nowo\MailKitBundle\Mailbox\Value\ThreadKey;
 use Nowo\MailKitBundle\Sender\MailAddress;
+use Psr\Log\LoggerInterface;
 
 use function array_slice;
 use function array_values;
@@ -130,6 +131,7 @@ final class GraphMailboxGateway implements MailboxGatewayInterface
         private readonly GraphApiClient $api,
         private readonly GraphMessageNormalizer $normalizer,
         private readonly int $maxMessageBytes = 26_214_400,
+        private readonly ?LoggerInterface $logger = null,
     ) {
     }
 
@@ -320,8 +322,14 @@ final class GraphMailboxGateway implements MailboxGatewayInterface
             if ($failure->reason === MailboxProviderFailure::NOT_FOUND) {
                 return false;
             }
+            if ($failure->isRetryable()) {
+                throw $failure;
+            }
+            // Audit ZAT-R1: an unexpected refusal (another 403 / 400) must not stop the folder. "Moved out" is the safe
+            // answer: the host never deletes on it.
+            $this->logger?->warning('Microsoft Graph refused the existence check of a removed message; reported as moved out.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $session->mailbox->value, 'status' => $failure->status]);
 
-            throw $failure;
+            return true;
         }
 
         return ($data['id'] ?? null) === $message->value;
@@ -522,8 +530,9 @@ final class GraphMailboxGateway implements MailboxGatewayInterface
      * A delta / next link is followed only on `https://graph.microsoft.com/v1.0/` (the 1.8 SSRF guard) when its path
      * is exactly a mail-folder message delta of `/me`, of the session's address or of the account MailKit bound
      * (`users/{id}` whose SHA-256 is the stored account hash): case-insensitive, no `.` / `..` segment or `;`, even
-     * after a second URL-decoding. The folder segment must be the cursor's folder (audit ZAT-I3): its key, or the
-     * provider id Graph names it by (read once per operation with `GET /me/mailFolders/{key}?$select=id`).
+     * after a second URL-decoding. The folder segment should be the cursor's folder (audit ZAT-I3): its key, or the
+     * provider id Graph names it by (read once per operation with `GET /me/mailFolders/{key}?$select=id`); another
+     * form is logged and accepted (audit ZAT-R1).
      */
     private function assertDeltaLink(MailboxSession $session, FolderRef $folder, string $url): void
     {
@@ -548,7 +557,9 @@ final class GraphMailboxGateway implements MailboxGatewayInterface
         }
         $segment = ($match[3] ?? '') !== '' ? $match[3] : ($match[4] ?? '');
         if ($segment !== strtolower($folder->key) && $segment !== strtolower($this->folderId($session, $folder))) {
-            throw new MailboxProviderFailure('Microsoft Graph delta returned a link of another folder; refused.', MailboxProviderFailure::REFUSED);
+            // Audit ZAT-R1: the pinned host and the mailbox check above are the security boundary; an unrecognised
+            // folder form (another id spelling) is logged and accepted instead of stopping the folder for good.
+            $this->logger?->warning('Microsoft Graph delta link names the folder in a form MailKit does not recognise; followed.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $session->mailbox->value]);
         }
     }
 
@@ -561,8 +572,16 @@ final class GraphMailboxGateway implements MailboxGatewayInterface
         if ($known !== null) {
             return $known;
         }
-        $data = $this->call($session, 'GET', '/me/mailFolders/' . rawurlencode($folder->key) . '?$select=id', [], [200], 'list', self::MAX_SMALL_BYTES);
-        $id   = is_string($data['id'] ?? null) && preg_match(FolderRef::PATTERN, $data['id']) === 1 ? $data['id'] : '';
+        // The same id form as the delta request (immutable ids).
+        try {
+            $data = $this->call($session, 'GET', '/me/mailFolders/' . rawurlencode($folder->key) . '?$select=id', ['headers' => ['Prefer' => 'IdType="ImmutableId"']], [200], 'list', self::MAX_SMALL_BYTES);
+        } catch (MailboxProviderFailure $failure) {
+            if ($failure->isRetryable()) {
+                throw $failure;
+            }
+            $data = [];
+        }
+        $id = is_string($data['id'] ?? null) && preg_match(FolderRef::PATTERN, $data['id']) === 1 ? $data['id'] : '';
         $session->rememberFolderId($folder->key, $id);
 
         return $id;

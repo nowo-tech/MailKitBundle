@@ -57,10 +57,11 @@ final class MailboxStatusCommand extends Command
         $output->writeln(sprintf('Status: %s%s', $status->status->value, $status->reason instanceof GrantFailureReason ? ' (' . $status->reason->value . ')' : ''));
         foreach ($status->folders as $folder) {
             $output->writeln(sprintf(
-                '  %s: last complete sweep %s, subscription %s',
+                '  %s: last complete sweep %s, subscription %s%s',
                 $folder->folder->key,
                 $folder->lastCompleteSweep?->format(DateTimeInterface::ATOM) ?? 'never',
                 $folder->subscriptionExpiresAt !== null ? 'until ' . $folder->subscriptionExpiresAt->format(DateTimeInterface::ATOM) : 'none',
+                $folder->syncError !== null ? ', sync error ' . $folder->syncError . ' since ' . ($folder->syncErrorSince?->format(DateTimeInterface::ATOM) ?? '?') : '',
             ));
         }
 

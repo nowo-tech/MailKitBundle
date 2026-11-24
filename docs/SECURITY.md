@@ -225,8 +225,11 @@ Off by default (`mailboxes.enabled`). Threat model: design section 17.
   403 (one item or attachment refused) ends that call only. Transient errors retry a bounded number of times, so a
   dead grant or a long throttling never causes a retry storm or a growing queue. The account behind the token is
   checked on every sweep run, so a token of another account never stores foreign mail under the mailbox.
-- **Folder binding.** Delta links must name the cursor's own folder (its key or its Graph id); removals are confirmed
-  with Graph (`Deleted` vs `MovedOut`) so a move is never reported as a deletion.
+- **Folder binding.** Delta links should name the cursor's own folder (its key or its Graph id); another folder form is
+  logged and followed, because the pinned host and the `/me` / bound-account check are the security boundary.
+  Removals are confirmed with Graph (`Deleted` vs `MovedOut`; an unexpected refusal answers `MovedOut`) so a move is
+  never reported as a deletion. A folder whose sweeps are refused is recorded and reported (`MailboxFolderSyncFailedEvent`)
+  instead of failing silently.
 - **Personal data.** MailKit's tables hold no address, subject, body, token or recipient; `disconnect()` deletes the
   remote subscriptions (best effort) and every MailKit row of the mailbox. Logs carry the mailbox id and counts only.
 

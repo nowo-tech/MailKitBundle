@@ -102,7 +102,7 @@ MySQL 8.4:
 
 ```sql
 CREATE TABLE mail_kit_mailbox (mailbox_id VARCHAR(128) CHARACTER SET utf8mb4 NOT NULL COLLATE `utf8mb4_0900_bin`, provider VARCHAR(16) NOT NULL, status VARCHAR(16) NOT NULL, reason VARCHAR(32) DEFAULT NULL, account_hash VARCHAR(64) DEFAULT NULL, updated_at BIGINT NOT NULL, PRIMARY KEY (mailbox_id));
-CREATE TABLE mail_kit_mailbox_cursor (mailbox_id VARCHAR(128) CHARACTER SET utf8mb4 NOT NULL COLLATE `utf8mb4_0900_bin`, folder_key VARCHAR(255) CHARACTER SET utf8mb4 NOT NULL COLLATE `utf8mb4_0900_bin`, cursor_value LONGTEXT DEFAULT NULL, cursor_version INT DEFAULT 0 NOT NULL, lease_owner VARCHAR(32) DEFAULT NULL, lease_until BIGINT DEFAULT NULL, rerun SMALLINT DEFAULT 0 NOT NULL, last_complete_at BIGINT DEFAULT NULL, PRIMARY KEY (mailbox_id, folder_key));
+CREATE TABLE mail_kit_mailbox_cursor (mailbox_id VARCHAR(128) CHARACTER SET utf8mb4 NOT NULL COLLATE `utf8mb4_0900_bin`, folder_key VARCHAR(255) CHARACTER SET utf8mb4 NOT NULL COLLATE `utf8mb4_0900_bin`, cursor_value LONGTEXT DEFAULT NULL, cursor_version INT DEFAULT 0 NOT NULL, lease_owner VARCHAR(32) DEFAULT NULL, lease_until BIGINT DEFAULT NULL, rerun SMALLINT DEFAULT 0 NOT NULL, last_complete_at BIGINT DEFAULT NULL, sync_error VARCHAR(32) DEFAULT NULL, sync_error_at BIGINT DEFAULT NULL, PRIMARY KEY (mailbox_id, folder_key));
 CREATE TABLE mail_kit_mailbox_subscription (subscription_id VARCHAR(128) CHARACTER SET utf8mb4 NOT NULL COLLATE `utf8mb4_0900_bin`, mailbox_id VARCHAR(128) CHARACTER SET utf8mb4 NOT NULL COLLATE `utf8mb4_0900_bin`, folder_key VARCHAR(255) CHARACTER SET utf8mb4 NOT NULL COLLATE `utf8mb4_0900_bin`, client_state_hash VARCHAR(64) NOT NULL, expires_at BIGINT NOT NULL, created_at BIGINT NOT NULL, UNIQUE INDEX uniq_mail_kit_mailbox_sub_folder (mailbox_id, folder_key), PRIMARY KEY (subscription_id));
 ```
 
@@ -112,7 +112,7 @@ PostgreSQL 16:
 
 ```sql
 CREATE TABLE mail_kit_mailbox (mailbox_id VARCHAR(128) NOT NULL, provider VARCHAR(16) NOT NULL, status VARCHAR(16) NOT NULL, reason VARCHAR(32) DEFAULT NULL, account_hash VARCHAR(64) DEFAULT NULL, updated_at BIGINT NOT NULL, PRIMARY KEY (mailbox_id));
-CREATE TABLE mail_kit_mailbox_cursor (mailbox_id VARCHAR(128) NOT NULL, folder_key VARCHAR(255) NOT NULL, cursor_value TEXT DEFAULT NULL, cursor_version INT DEFAULT 0 NOT NULL, lease_owner VARCHAR(32) DEFAULT NULL, lease_until BIGINT DEFAULT NULL, rerun SMALLINT DEFAULT 0 NOT NULL, last_complete_at BIGINT DEFAULT NULL, PRIMARY KEY (mailbox_id, folder_key));
+CREATE TABLE mail_kit_mailbox_cursor (mailbox_id VARCHAR(128) NOT NULL, folder_key VARCHAR(255) NOT NULL, cursor_value TEXT DEFAULT NULL, cursor_version INT DEFAULT 0 NOT NULL, lease_owner VARCHAR(32) DEFAULT NULL, lease_until BIGINT DEFAULT NULL, rerun SMALLINT DEFAULT 0 NOT NULL, last_complete_at BIGINT DEFAULT NULL, sync_error VARCHAR(32) DEFAULT NULL, sync_error_at BIGINT DEFAULT NULL, PRIMARY KEY (mailbox_id, folder_key));
 CREATE TABLE mail_kit_mailbox_subscription (subscription_id VARCHAR(128) NOT NULL, mailbox_id VARCHAR(128) NOT NULL, folder_key VARCHAR(255) NOT NULL, client_state_hash VARCHAR(64) NOT NULL, expires_at BIGINT NOT NULL, created_at BIGINT NOT NULL, PRIMARY KEY (subscription_id));
 CREATE UNIQUE INDEX uniq_mail_kit_mailbox_sub_folder ON mail_kit_mailbox_subscription (mailbox_id, folder_key);
 ```

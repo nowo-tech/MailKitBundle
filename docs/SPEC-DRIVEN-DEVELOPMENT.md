@@ -37,6 +37,7 @@ The sections below state **behavior**; this subsection states **intent** in back
 | US-08 | **As a** security reviewer, **I want** stored DSNs restricted to safe schemes and public hosts, secrets encrypted and never rendered, logged or exported in clear **so that** the admin form cannot be used for SSRF, host commands or credential leaks. |
 | US-09 | **As a** support engineer, **I want** a sent-mail log with status, recipients and errors (bodies only when enabled) and a retention / erasure command **so that** I can answer "was it sent?" within privacy rules. |
 | US-10 | **As an** AuthKit integrator, **I want** magic-login and password-reset to appear only when mail can be delivered **so that** users are never sent to a dead end. |
+| US-11 | **As a** host application, **I want** the folders a person follows in their own Outlook mailbox delivered to my storage once each, and to send replies from that mailbox at most once per idempotency key, **so that** people work their mail inside the platform. |
 
 **Out of scope for these stories:** guarantees outside the stated public API and outside dependency limits (PHP, Symfony, third-party libraries).
 
@@ -55,12 +56,21 @@ The sections below state **behavior**; this subsection states **intent** in back
 - Sent-mail log (`SentMail`, `SentMailBody`, `SentMailRecorder`, `SentMailRepository`, filters, purge / forget commands, UiKit list and show pages, table prefix).
 - Readiness (`OutboundMailReadiness`, `MailStatus`, Twig functions, AuthKit adapter).
 - Admin UI (opt-in route loader, access checker, CSRF, FormKit forms) and fail-closed container checks.
+- Branded e-mail layouts and helpers (1.14, [spec 004](../specs/004-branded-email/spec.md)).
+- Microsoft Graph: sending from shared mailboxes with app-only credentials (1.8) and the inbound pipeline (1.9:
+  change-notification webhook, delta sweep, normalised messages handed to the host).
+- Open and click tracking (1.10): signed pixel, link rewriting through the host's short-link port, GDPR export /
+  erasure.
+- Delegated mailboxes (2.5.0, [spec 005](../specs/005-delegated-mailboxes/spec.md)): sync of people's own Outlook
+  folders into the host's sink (delegated tokens from the host, no OAuth flow in MailKit), on-demand attachments, and
+  sending (new, reply, reply all, forward) with a mandatory idempotency key; Gmail follows in 2.6.0.
 - Documented integration (see root `README.md` and `docs/`), configuration and runtime behaviour in [`CONFIGURATION.md`](CONFIGURATION.md) and [`USAGE.md`](USAGE.md), consumer-facing notes in [`CHANGELOG.md`](CHANGELOG.md) / [`UPGRADING.md`](UPGRADING.md).
 
 **Explicit non-goals**
 
-- Branded, editable e-mail templates and ready-made AuthKit notifiers (phase 2, [ROADMAP](ROADMAP.md)).
-- Storing settings itself (Instance Settings), SMS (SmsKit), bulk / marketing mail, bounce or webhook processing.
+- Editable e-mail templates and ready-made AuthKit notifiers ([ROADMAP](ROADMAP.md)).
+- Storing settings itself (Instance Settings), SMS (SmsKit), bulk / marketing mail, bounce processing.
+- OAuth flows and token storage for delegated mailboxes, and the storage of their messages (the host's).
 - Behavior not documented here or in linked integrator docs.
 - **`demo/`** trees: illustrative unless a path is explicitly published as stable API in this document.
 

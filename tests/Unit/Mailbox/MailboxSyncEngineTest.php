@@ -31,7 +31,6 @@ use Nowo\MailKitBundle\Tests\Support\MailboxHarness;
 use Nowo\MailKitBundle\Tests\Support\MemoryMailboxPorts;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpClient\Response\MockResponse;
-use Symfony\Component\Messenger\Exception\UnrecoverableMessageHandlingException;
 
 use function array_keys;
 use function array_map;
@@ -78,7 +77,7 @@ final class MailboxSyncEngineTest extends TestCase
 
         self::assertSame([], $this->drain());
         self::assertSame(['mbx-ana' . "\n" . 'm1', 'mbx-ana' . "\n" . 'm3'], array_keys($this->ports->stored));
-        self::assertSame(['mbx-ana' . "\n" . 'm0' . "\n" . 'inbox'], $this->ports->removedMessages);
+        self::assertSame(['mbx-ana' . "\n" . 'm0' . "\n" . 'inbox' . "\n" . 'deleted'], $this->ports->removedMessages);
         self::assertCount(0, $this->graph->matching('/me/messages/m2'), 'excluded before the fetch');
         $m1 = $this->ports->stored['mbx-ana' . "\n" . 'm1'];
         self::assertSame(MessageOrigin::Sync, $m1->origin);
@@ -154,8 +153,8 @@ final class MailboxSyncEngineTest extends TestCase
         $this->bus->dispatch(new FetchMailboxMessage('mbx-ana', 'inbox', 'm1'));
         $failures = $this->drain();
 
-        self::assertCount(1, $failures, 'the first message fails unrecoverably, the others are dropped on the status check');
-        self::assertInstanceOf(UnrecoverableMessageHandlingException::class, $failures[0]);
+        self::assertSame([], $failures, 'the first message is acknowledged after the pause, the others are dropped on the status check');
+        self::assertTrue($this->log->has('Mailbox message acknowledged: the grant failed'));
         self::assertCount(1, $this->events->of(MailboxGrantFailedEvent::class));
         self::assertSame(GrantFailureReason::Revoked, $this->events->of(MailboxGrantFailedEvent::class)[0]->reason);
         self::assertSame(MailboxStatus::PausedGrant, $this->engine->status($this->ana)->status);
@@ -307,7 +306,10 @@ final class MailboxSyncEngineTest extends TestCase
         // A cursor lost while another worker holds the folder is not cleared either.
         $this->mailboxStore->advanceCursor($this->ana, 'inbox', 'thief', 0, MailboxGraphFake::BASE . "/me/mailFolders('inbox')/messages/delta?\$deltatoken=done", 120, true);
         $this->mailboxConnection->executeStatement("UPDATE mail_kit_mailbox_cursor SET lease_owner = NULL, lease_until = NULL WHERE folder_key = 'inbox'");
-        $this->graph->override = function (string $method, string $path): MockResponse {
+        $this->graph->override = function (string $method, string $path): ?MockResponse {
+            if (!str_contains($path, '/delta')) {
+                return null;
+            }
             $this->mailboxConnection->executeStatement("UPDATE mail_kit_mailbox_cursor SET lease_owner = 'thief' WHERE folder_key = 'inbox'");
 
             return MailboxGraphFake::json(['error' => ['code' => 'syncStateNotFound']], 410);
@@ -353,14 +355,14 @@ final class MailboxSyncEngineTest extends TestCase
         $this->drain();
         $this->graph->override = static fn (string $method, string $path): ?MockResponse => str_contains($path, '/me/messages/') ? MailboxGraphFake::json(['error' => ['code' => 'ErrorAccessDenied']], 403) : null;
         $this->bus->dispatch(new FetchMailboxMessage('mbx-ana', 'inbox', 'm1'));
-        self::assertInstanceOf(UnrecoverableMessageHandlingException::class, $this->drain()[0] ?? null);
+        self::assertSame([], $this->drain());
         self::assertSame(GrantFailureReason::ConsentMissing, $this->engine->status($this->ana)->reason);
 
         $this->engine->resume($this->ana);
         $this->drain();
         $this->graph->override = static fn (string $method, string $path): ?MockResponse => $path === '/v1.0/me?$select=id,mail,userPrincipalName' ? MailboxGraphFake::json(['error' => ['code' => 'MailboxNotEnabledForRESTAPI']], 404) : null;
         $this->bus->dispatch(new RenewMailboxSubscriptions('mbx-ana'));
-        self::assertInstanceOf(UnrecoverableMessageHandlingException::class, $this->drain()[0] ?? null);
+        self::assertSame([], $this->drain());
         self::assertSame(GrantFailureReason::MailboxNotFound, $this->engine->status($this->ana)->reason);
         self::assertCount(2, $this->events->of(MailboxGrantFailedEvent::class));
     }
@@ -375,7 +377,7 @@ final class MailboxSyncEngineTest extends TestCase
         // Nothing expires soon: nothing to do (the account is checked again).
         $this->engine->renew($this->ana);
         self::assertSame([], $this->graph->renewed);
-        self::assertCount(2, $this->graph->matching('/v1.0/me?'));
+        self::assertCount(4, $this->graph->matching('/v1.0/me?'), 'start, two first sweeps and the renewal');
 
         // reauthorizationRequired renews at once, only for the subscription it names.
         $this->engine->renew($this->ana, RenewMailboxSubscriptions::REAUTHORIZE, $subscriptions[0]['id']);
@@ -460,6 +462,36 @@ final class MailboxSyncEngineTest extends TestCase
         $this->mailboxConnection->executeStatement("UPDATE mail_kit_mailbox SET provider = 'gmail'");
         self::assertTrue($this->engine->disconnect($this->ana)->remoteCleanupFailed);
         self::assertSame(0, $this->engine->disconnect($this->ana)->rowsDeleted);
+    }
+
+    public function testEverySweepChecksTheAccountBehindTheToken(): void
+    {
+        $this->engine->start($this->ana);
+        $this->drain();
+        $before = count($this->graph->matching('/delta'));
+        // The host now hands this mailbox a token of another account.
+        $this->graph->account             = ['id' => 'pedro-id', 'mail' => 'ana@example.com'];
+        $this->graph->delta['inbox']      = [[['id' => 'foreign']]];
+        $this->graph->messages['foreign'] = MailboxGraphFake::message('foreign');
+        $this->engine->sweepFolder($this->ana, 'inbox');
+        self::assertSame(GrantFailureReason::AccountMismatch, $this->engine->status($this->ana)->reason);
+        self::assertCount($before, $this->graph->matching('/delta'), 'the folder is not paged with the foreign token');
+        self::assertSame([], $this->drain());
+        self::assertSame([], $this->ports->stored);
+    }
+
+    public function testAMoveBetweenFollowedFoldersIsNotADeletion(): void
+    {
+        $this->engine->start($this->ana);
+        $this->drain();
+        // m5 moved from Inbox to Sent Items (same immutable id); m6 was deleted.
+        $this->graph->messages['m5']     = MailboxGraphFake::message('m5');
+        $this->graph->after['inbox']     = [['id' => 'm5', '@removed' => ['reason' => 'changed']], ['id' => 'm6', '@removed' => ['reason' => 'deleted']]];
+        $this->graph->after['sentitems'] = [['id' => 'm5']];
+        $this->engine->sweep($this->ana);
+        self::assertSame([], $this->drain());
+        self::assertSame(['mbx-ana' . "\n" . 'm5' . "\n" . 'inbox' . "\n" . 'moved_out', 'mbx-ana' . "\n" . 'm6' . "\n" . 'inbox' . "\n" . 'deleted'], $this->ports->removedMessages);
+        self::assertSame('sentitems', $this->ports->stored['mbx-ana' . "\n" . 'm5']->folder->key);
     }
 
     public function testCallsAreMetered(): void

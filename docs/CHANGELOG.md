@@ -53,7 +53,11 @@ All notable changes to this project are documented here. The format follows
   thread key, removals reported to the sink, grant-failure pause, per-call metering. Commands
   `nowo:mail-kit:mailbox:schema`, `…:mailbox:subscriptions`, `…:mailbox:sweep`, `…:mailbox:status`. Three DBAL tables
   (`mail_kit_mailbox`, `_cursor`, `_subscription`) with no address, subject, body, token or recipient. Sending from a
-  delegated mailbox follows in part 2 of 2.5.0.
+  delegated mailbox follows in part 2 of 2.5.0. Audit ZAT fixes before release: a grant failure acknowledges its
+  Messenger message (the pause survives a `doctrine_transaction` middleware); the account is checked on every sweep;
+  bounded retries (sweeps acknowledge transient failures; Retry-After re-enqueues at most 10 times); `removed()`
+  carries a `RemovalReason` (`Deleted` / `MovedOut`, confirmed with Graph); delta links bound to their folder; only
+  grant / consent / scope 403s pause; 400 sync-state errors resync.
 - `Mailbox\Html\MailHtmlSanitizer`: the 1.9 inbound sanitiser, provider-neutral, with `html.remote_images: blocked`
   (default for mailboxes): remote image URLs move to `data-mail-kit-remote-src` for the host's image proxy; no
   `style`, script or event handler in any mode. `Graph\Inbound\InboundHtmlSanitizer` is now a thin subclass (no BC

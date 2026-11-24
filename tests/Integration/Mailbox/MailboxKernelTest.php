@@ -4,12 +4,16 @@ declare(strict_types=1);
 
 namespace Nowo\MailKitBundle\Tests\Integration\Mailbox;
 
+use Closure;
 use LogicException;
 use Nowo\MailKitBundle\Mailbox\Engine\MailboxSyncEngine;
+use Nowo\MailKitBundle\Mailbox\Event\MailboxGrantFailedEvent;
+use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\SyncMailboxFolder;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Store\MailboxStore;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Webhook\MailboxGraphWebhookController;
 use Nowo\MailKitBundle\Mailbox\Service\MailboxAttachmentReaderInterface;
 use Nowo\MailKitBundle\Mailbox\Service\MailboxSyncInterface;
+use Nowo\MailKitBundle\Mailbox\Value\GrantFailureReason;
 use Nowo\MailKitBundle\Mailbox\Value\MailboxId;
 use Nowo\MailKitBundle\Mailbox\Value\MailboxStatus;
 use Nowo\MailKitBundle\Tests\Integration\Kernel\KernelTestCase;
@@ -21,9 +25,11 @@ use Nowo\MailKitBundle\Tests\Support\StaticDsnProvider;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Component\Console\Tester\ApplicationTester;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
+use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\HttpKernel;
+use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\Routing\Loader\Configurator\RoutingConfigurator;
 
 use function gc_collect_cycles;
@@ -128,6 +134,37 @@ final class MailboxKernelTest extends KernelTestCase
         self::assertSame(0, $tester->getStatusCode());
     }
 
+    public function testAGrantPauseSurvivesTheDoctrineTransactionMiddleware(): void
+    {
+        $kernel = $this->bootMailboxes(['instance_settings'], false, static function (ContainerConfigurator $container): void {
+            $container->extension('framework', ['messenger' => [
+                'default_bus' => 'messenger.bus.default',
+                'buses'       => ['messenger.bus.default' => ['middleware' => ['doctrine_transaction']]],
+            ]]);
+        });
+        $ports = $this->service($kernel, MemoryMailboxPorts::class);
+        $ports->add(MemoryMailboxPorts::settings('mbx-ana', 'ana@example.com'));
+        $events     = [];
+        $dispatcher = $this->container($kernel)->get('event_dispatcher');
+        self::assertInstanceOf(EventDispatcherInterface::class, $dispatcher);
+        $dispatcher->addListener(MailboxGrantFailedEvent::class, static function (MailboxGrantFailedEvent $event) use (&$events): void {
+            $events[] = $event;
+        });
+        $sync = $this->service($kernel, MailboxSyncInterface::class);
+        self::assertSame(MailboxStatus::Active, $sync->start(new MailboxId('mbx-ana'))->status);
+
+        // The grant dies: two sweeps run through the bus inside the middleware's transaction.
+        $ports->revoked['mbx-ana'] = GrantFailureReason::Revoked;
+        $bus                       = $this->container($kernel)->get('messenger.default_bus');
+        self::assertInstanceOf(MessageBusInterface::class, $bus);
+        $bus->dispatch(new SyncMailboxFolder('mbx-ana', 'inbox'));
+        $bus->dispatch(new SyncMailboxFolder('mbx-ana', 'inbox'));
+
+        self::assertSame(MailboxStatus::PausedGrant, $sync->status(new MailboxId('mbx-ana'))->status);
+        self::assertSame('paused_grant', $this->connection($kernel)->fetchOne("SELECT status FROM mail_kit_mailbox WHERE mailbox_id = 'mbx-ana'"));
+        self::assertCount(1, $events);
+    }
+
     public function testMailboxesNeedDoctrine(): void
     {
         $this->expectException(LogicException::class);
@@ -138,7 +175,7 @@ final class MailboxKernelTest extends KernelTestCase
     /**
      * @param list<string> $without
      */
-    private function bootMailboxes(array $without, bool $debug = false): MailKitTestKernel
+    private function bootMailboxes(array $without, bool $debug = false, ?Closure $more = null): MailKitTestKernel
     {
         return $this->bootKernel(
             [
@@ -161,13 +198,16 @@ final class MailboxKernelTest extends KernelTestCase
                 $routes->import('.', 'nowo_mail_kit_mailbox_webhook');
             },
             debug: $debug,
-            extra: static function (ContainerConfigurator $container): void {
+            extra: static function (ContainerConfigurator $container) use ($more): void {
                 $services = $container->services();
                 $services->set(MailboxGraphFake::class)->public();
                 $services->set('test.mailbox_http_client', MockHttpClient::class)->factory([service(MailboxGraphFake::class), 'client']);
                 $services->set(MemoryMailboxPorts::class)->public();
                 $services->set(StaticDsnProvider::class)->args(['memory://default']);
                 $services->set(RequestTenantSenderProvider::class)->args([service('request_stack')]);
+                if ($more instanceof Closure) {
+                    $more($container);
+                }
             },
         );
     }

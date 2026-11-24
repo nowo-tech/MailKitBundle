@@ -32,6 +32,7 @@ use Nowo\MailKitBundle\Mailbox\Value\MailboxSyncStatus;
 use Nowo\MailKitBundle\Mailbox\Value\MessageEnvelope;
 use Nowo\MailKitBundle\Mailbox\Value\MessageOrigin;
 use Nowo\MailKitBundle\Mailbox\Value\ProviderMessageId;
+use Nowo\MailKitBundle\Mailbox\Value\RemovalReason;
 use Psr\Clock\ClockInterface;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Log\LoggerInterface;
@@ -254,7 +255,11 @@ final class MailboxSyncEngine implements MailboxSyncInterface
         $again = false;
 
         try {
-            $again = $this->page($settings, $gateway, $session, $folder, $owner);
+            // The account behind the token is checked on every run (audit ZAT-L1): a token of another account never
+            // pages this folder; the fetches the run enqueues inherit the check.
+            if ($this->checkAccount($settings, $gateway, $session)) {
+                $again = $this->page($settings, $gateway, $session, $folder, $owner);
+            }
         } catch (MailboxGrantFailure $failure) {
             $this->grantFailed($mailbox, $settings->provider, $failure->reason);
 
@@ -446,7 +451,8 @@ final class MailboxSyncEngine implements MailboxSyncInterface
             ++$pages;
             foreach ($page->items as $item) {
                 if ($item->removed) {
-                    $this->sink->removed($mailbox, $item->id, $folder);
+                    // Deleted or moved elsewhere (audit ZAT-L3): the sink must never treat a move as a deletion.
+                    $this->sink->removed($mailbox, $item->id, $folder, $gateway->stillExists($session, $item->id) ? RemovalReason::MovedOut : RemovalReason::Deleted);
 
                     continue;
                 }

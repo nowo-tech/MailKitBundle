@@ -97,11 +97,17 @@ final class GraphMailboxGateway implements MailboxGatewayInterface
     /** Graph error codes of a mailbox that does not exist behind the account. */
     public const MAILBOX_NOT_FOUND_CODES = ['MailboxNotEnabledForRESTAPI', 'MailboxNotSupportedForRESTAPI', 'ErrorInvalidUser', 'ErrorNonExistentMailbox'];
 
+    /** Graph error codes of a withdrawn consent or access to the mailbox (403). */
+    public const CONSENT_CODES = ['ErrorAccessDenied', 'AccessDenied', 'Authorization_RequestDenied', 'ErrorAccessDeniedConsent', 'ConsentRequired'];
+
+    /** Graph error codes of a lost or invalid sync state (400 / 410): the folder resyncs (audit ZAT-I5). */
+    public const SYNC_STATE_CODES = ['syncstatenotfound', 'resyncrequired', 'errorinvalidsyncstatedata', 'syncstateinvalid', 'errorsyncstatenotfound', 'errorinvalidsyncstate'];
+
     /** Graph error codes of a token without a needed scope. */
     public const SCOPE_MISSING_CODES = ['ErrorInsufficientPermissionsInAccessToken', 'InsufficientScopes'];
 
     /** Accepted (decoded, lower-cased) path of a delta link: `/me` or one user's mail-folder message delta. */
-    private const LINK_PATTERN = "#^/v1\\.0/(?:me|users/([^/()';]+)|users\\('([^/()';]+)'\\))/mailfolders(?:/[^/()';]+|\\('[^/()';]+'\\))/messages/delta\\z#";
+    private const LINK_PATTERN = "#^/v1\\.0/(?:me|users/([^/()';]+)|users\\('([^/()';]+)'\\))/mailfolders(?:/([^/()';]+)|\\('([^/()';]+)'\\))/messages/delta\\z#";
 
     /** Cap of an oversized message's envelope read. */
     private const MAX_OVERSIZED_BYTES = 262_144;
@@ -218,11 +224,11 @@ final class GraphMailboxGateway implements MailboxGatewayInterface
             if ($cursor === null) {
                 $data = $this->call($session, 'GET', '/me/mailFolders/' . rawurlencode($folder->key) . '/messages/delta?$select=' . self::DELTA_SELECT . '&$filter=' . rawurlencode('receivedDateTime ge ' . $this->iso($since)), $options, [200], 'delta', self::MAX_PAGE_BYTES);
             } else {
-                $this->assertDeltaLink($session, $cursor);
+                $this->assertDeltaLink($session, $folder, $cursor);
                 $data = $this->call($session, 'GET', $cursor, $options, [200], 'delta', self::MAX_PAGE_BYTES, false, true);
             }
         } catch (MailboxProviderFailure $failure) {
-            if ($failure->status === 410) {
+            if ($failure->status === 410 || ($failure->status === 400 && in_array(strtolower((string) $failure->providerCode), self::SYNC_STATE_CODES, true))) {
                 throw new CursorExpired();
             }
 
@@ -249,7 +255,7 @@ final class GraphMailboxGateway implements MailboxGatewayInterface
         if ($link === null) {
             throw new MailboxProviderFailure('Microsoft Graph delta answered without a next or delta link.', MailboxProviderFailure::REFUSED, 200);
         }
-        $this->assertDeltaLink($session, $link);
+        $this->assertDeltaLink($session, $folder, $link);
 
         return new ChangePage($items, $link, is_string($delta));
     }
@@ -301,6 +307,24 @@ final class GraphMailboxGateway implements MailboxGatewayInterface
         );
 
         return new FetchedMessage($message, $folder, $envelope, $data, $oversized);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function stillExists(MailboxSession $session, ProviderMessageId $message): bool
+    {
+        try {
+            $data = $this->call($session, 'GET', '/me/messages/' . rawurlencode($message->value) . '?$select=id,parentFolderId', ['headers' => ['Prefer' => 'IdType="ImmutableId"']], [200], 'get_message', self::MAX_SMALL_BYTES);
+        } catch (MailboxProviderFailure $failure) {
+            if ($failure->reason === MailboxProviderFailure::NOT_FOUND) {
+                return false;
+            }
+
+            throw $failure;
+        }
+
+        return ($data['id'] ?? null) === $message->value;
     }
 
     /**
@@ -399,7 +423,8 @@ final class GraphMailboxGateway implements MailboxGatewayInterface
     public function open(MailboxSession $session, ProviderMessageId $message, ProviderAttachmentId $attachment, int $maxBytes): FetchedAttachment
     {
         $path = '/me/messages/' . rawurlencode($message->value) . '/attachments/' . rawurlencode($attachment->value);
-        $meta = $this->call($session, 'GET', $path . '?$select=id,name,contentType,size,isInline', ['headers' => ['Prefer' => 'IdType="ImmutableId"']], [200], 'get_attachment', self::MAX_SMALL_BYTES);
+        // A 403 on one attachment ends this read only; it never pauses the mailbox (audit ZAT-I4).
+        $meta = $this->call($session, 'GET', $path . '?$select=id,name,contentType,size,isInline', ['headers' => ['Prefer' => 'IdType="ImmutableId"']], [200], 'get_attachment', self::MAX_SMALL_BYTES, true);
         if (($meta['@odata.type'] ?? null) !== '#microsoft.graph.fileAttachment') {
             throw new MailboxProviderFailure('Microsoft Graph attachment is not a file; it cannot be downloaded.', MailboxProviderFailure::NOT_DOWNLOADABLE, 200);
         }
@@ -431,8 +456,8 @@ final class GraphMailboxGateway implements MailboxGatewayInterface
      * @param array<string, mixed> $options
      * @param list<int> $expected
      * @param string $operation label of {@see ProviderCall::OPERATIONS}
-     * @param bool $subscription refusals other than 401 are not grant failures (a personal account without
-     *                           subscriptions stays sweep-only, Q-MB-21)
+     * @param bool $subscription a 403 is not a grant failure (a personal account without subscriptions stays
+     *                           sweep-only, Q-MB-21; one attachment refused, ZAT-I4)
      * @param bool $absolute `$path` is an absolute link returned by Graph
      *
      * @return array<mixed>
@@ -460,7 +485,7 @@ final class GraphMailboxGateway implements MailboxGatewayInterface
         try {
             return $this->api->download(new DelegatedGraphCredential($session), $path, $sink, $maxBytes, 'get_attachment');
         } catch (GraphException $failure) {
-            throw self::failure($failure, 'get_attachment', false);
+            throw self::failure($failure, 'get_attachment', true);
         }
     }
 
@@ -471,10 +496,12 @@ final class GraphMailboxGateway implements MailboxGatewayInterface
     {
         $status = $failure->status;
         $code   = $failure->graphCode;
+        // Only grant, consent, scope and account errors pause (design section 13, audit ZAT-I4): another 403 (an item
+        // or attachment refused, a refused subscription) ends that call only.
         $reason = match (true) {
             $status === 401                                                                       => GrantFailureReason::Revoked,
             $status === 403 && !$subscription && in_array($code, self::SCOPE_MISSING_CODES, true) => GrantFailureReason::ScopeMissing,
-            $status === 403 && !$subscription                                                     => GrantFailureReason::ConsentMissing,
+            $status === 403 && !$subscription && in_array($code, self::CONSENT_CODES, true)       => GrantFailureReason::ConsentMissing,
             $status === 404 && in_array($code, self::MAILBOX_NOT_FOUND_CODES, true)               => GrantFailureReason::MailboxNotFound,
             default                                                                               => null,
         };
@@ -488,16 +515,17 @@ final class GraphMailboxGateway implements MailboxGatewayInterface
             default                                               => MailboxProviderFailure::REFUSED,
         };
 
-        return new MailboxProviderFailure($failure->getMessage(), $kind, $status, $failure->retryAfter);
+        return new MailboxProviderFailure($failure->getMessage(), $kind, $status, $failure->retryAfter, $code);
     }
 
     /**
      * A delta / next link is followed only on `https://graph.microsoft.com/v1.0/` (the 1.8 SSRF guard) when its path
      * is exactly a mail-folder message delta of `/me`, of the session's address or of the account MailKit bound
      * (`users/{id}` whose SHA-256 is the stored account hash): case-insensitive, no `.` / `..` segment or `;`, even
-     * after a second URL-decoding.
+     * after a second URL-decoding. The folder segment must be the cursor's folder (audit ZAT-I3): its key, or the
+     * provider id Graph names it by (read once per operation with `GET /me/mailFolders/{key}?$select=id`).
      */
-    private function assertDeltaLink(MailboxSession $session, string $url): void
+    private function assertDeltaLink(MailboxSession $session, FolderRef $folder, string $url): void
     {
         try {
             $this->api->assertGraphUrl($url, 'delta');
@@ -515,11 +543,29 @@ final class GraphMailboxGateway implements MailboxGatewayInterface
             throw new MailboxProviderFailure('Microsoft Graph delta returned a link outside the mailbox; refused.', MailboxProviderFailure::REFUSED);
         }
         $user = ($match[1] ?? '') !== '' ? $match[1] : ($match[2] ?? '');
-        if ($user === '' || $user === $session->address || ($session->accountHash !== null && hash_equals($session->accountHash, hash('sha256', $user)))) {
-            return;
+        if ($user !== '' && $user !== $session->address && ($session->accountHash === null || !hash_equals($session->accountHash, hash('sha256', $user)))) {
+            throw new MailboxProviderFailure('Microsoft Graph delta returned a link outside the mailbox; refused.', MailboxProviderFailure::REFUSED);
         }
+        $segment = ($match[3] ?? '') !== '' ? $match[3] : ($match[4] ?? '');
+        if ($segment !== strtolower($folder->key) && $segment !== strtolower($this->folderId($session, $folder))) {
+            throw new MailboxProviderFailure('Microsoft Graph delta returned a link of another folder; refused.', MailboxProviderFailure::REFUSED);
+        }
+    }
 
-        throw new MailboxProviderFailure('Microsoft Graph delta returned a link outside the mailbox; refused.', MailboxProviderFailure::REFUSED);
+    /**
+     * Provider id of a followed folder (`GET /me/mailFolders/{key}?$select=id`), memoised on the operation's session.
+     */
+    private function folderId(MailboxSession $session, FolderRef $folder): string
+    {
+        $known = $session->folderId($folder->key);
+        if ($known !== null) {
+            return $known;
+        }
+        $data = $this->call($session, 'GET', '/me/mailFolders/' . rawurlencode($folder->key) . '?$select=id', [], [200], 'list', self::MAX_SMALL_BYTES);
+        $id   = is_string($data['id'] ?? null) && preg_match(FolderRef::PATTERN, $data['id']) === 1 ? $data['id'] : '';
+        $session->rememberFolderId($folder->key, $id);
+
+        return $id;
     }
 
     /**

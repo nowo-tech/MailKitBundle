@@ -25,6 +25,9 @@ final class MailboxSession
 {
     private ?MailboxAccessToken $token = null;
 
+    /** @var array<string, string> folder key => provider folder id, for this operation */
+    private array $folderIds = [];
+
     /**
      * @param string|null $address the directory's address (lower-case), when known
      * @param string|null $accountHash SHA-256 of the provider account id MailKit bound to the mailbox, when known
@@ -59,6 +62,23 @@ final class MailboxSession
         }
         // @igor-ignore - A session is built per operation (one Messenger message or service call) and never shared.
         $this->token = null;
+    }
+
+    /**
+     * The provider id of a folder already read in this operation, or null.
+     */
+    public function folderId(string $key): ?string
+    {
+        return $this->folderIds[$key] ?? null;
+    }
+
+    /**
+     * Remembers a folder's provider id for the rest of this operation.
+     */
+    public function rememberFolderId(string $key, string $id): void
+    {
+        // @igor-ignore - A session is built per operation (one Messenger message or service call) and never shared.
+        $this->folderIds[$key] = $id;
     }
 
     /**

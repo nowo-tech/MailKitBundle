@@ -181,6 +181,9 @@ final class MailboxGraphFake
 
             return $this->deltaPage($folder, $pages[$skip] ?? [], $skip + 1 < count($pages) ? $skip + 1 : null);
         }
+        if ($method === 'GET' && preg_match('#^/me/mailFolders/([^/]+)$#', $path, $m) === 1) {
+            return self::json(['id' => 'FOLDER-' . $m[1]]);
+        }
         if ($method === 'GET' && preg_match('#^/me/messages/([^/]+)$#', $path, $m) === 1) {
             return array_key_exists($m[1], $this->messages) ? self::json($this->messages[$m[1]]) : self::json(['error' => ['code' => 'ErrorItemNotFound']], 404);
         }

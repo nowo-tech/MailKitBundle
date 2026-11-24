@@ -68,6 +68,12 @@ interface MailboxGatewayInterface
     public function fetch(MailboxSession $session, FolderRef $folder, ProviderMessageId $message): ?FetchedMessage;
 
     /**
+     * Whether a message reported as removed from a folder still exists in the mailbox (moved elsewhere) rather than
+     * being deleted (audit ZAT-L3).
+     */
+    public function stillExists(MailboxSession $session, ProviderMessageId $message): bool;
+
+    /**
      * The attachment references of a kept message (no content).
      *
      * @return list<AttachmentRef>

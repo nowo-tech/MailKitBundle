@@ -30,12 +30,14 @@ final class MailboxProviderFailure extends MailboxException
      * @param string $reason one of the constants
      * @param int|null $status HTTP status of the failed call
      * @param int|null $retryAfter seconds from Retry-After (throttling)
+     * @param string|null $providerCode provider error code (a short token), when given
      */
     public function __construct(
         string $message,
         public readonly string $reason,
         public readonly ?int $status = null,
         public readonly ?int $retryAfter = null,
+        public readonly ?string $providerCode = null,
     ) {
         parent::__construct($message);
     }

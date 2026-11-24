@@ -37,6 +37,10 @@ final class MailboxUrlGuardPass implements CompilerPassInterface
         if ($mode === 'required' && !$has) {
             throw new LogicException('nowo_mail_kit.mailboxes.graph.outbound_url_guard is "required" but the nowo-tech/outbound-url-guard-bundle bundle is not enabled.');
         }
+        if ($mode === 'auto' && !$has) {
+            // Audit ZAT-I2: no silent downgrade. TLS still protects the token; use "required" in production.
+            $container->log($this, 'nowo_mail_kit.mailboxes.graph.outbound_url_guard is "auto" but the OutboundUrlGuard bundle is not enabled: graph.microsoft.com is not pinned. Enable the bundle and set "required" in production.');
+        }
         if ($mode !== 'off' && $has) {
             $container->setDefinition(GuardedGraphRequestOptions::class, (new Definition(GuardedGraphRequestOptions::class))->setArguments([new Reference(OutboundUrlGuard::class)]));
             $container->getDefinition(NowoMailKitExtension::MAILBOX_GRAPH_CLIENT_ID)->replaceArgument(5, new Reference(GuardedGraphRequestOptions::class));

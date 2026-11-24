@@ -38,7 +38,8 @@ final readonly class SyncedMessage
      * @param string $text plain text (the text body, or derived from the sanitised HTML)
      * @param string|null $html sanitised HTML, or null for a text-only message
      * @param int $remoteImagesBlocked remote images whose URL moved to `data-mail-kit-remote-src`
-     * @param bool $fromMailbox the mailbox itself is the From address
+     * @param bool $fromMailbox the From address is the mailbox's own address. From is set by the sender and can be
+     *                          spoofed: this is not authentication (use the folder, `$origin` or `$authentication`)
      * @param string|null $listId List-Id without angle brackets, or null
      * @param list<AttachmentRef> $attachments
      * @param bool $oversized over `limits.max_message_bytes`: no body, headers or attachments were read

@@ -142,6 +142,11 @@ final class GraphMailboxGatewayTest extends TestCase
             self::assertInstanceOf(MailboxProviderFailure::class, $failure);
             self::assertSame([$kind, $retryAfter], [$failure->reason, $failure->retryAfter]);
         }
+        // Only grant / consent / scope 403s pause; another 403 ends the call (audit ZAT-I4).
+        $other = GraphMailboxGateway::failure(new GraphException('x', GraphException::REASON_API, 403, 'ErrorItemAccessDenied'), 'get_message');
+        self::assertInstanceOf(MailboxProviderFailure::class, $other);
+        self::assertSame(['ErrorItemAccessDenied', MailboxProviderFailure::REFUSED], [$other->providerCode, $other->reason]);
+        self::assertInstanceOf(MailboxProviderFailure::class, GraphMailboxGateway::failure(new GraphException('x', GraphException::REASON_API, 403), 'get_message'));
         // A refused subscription is not a grant failure (personal accounts stay sweep-only, Q-MB-21).
         self::assertInstanceOf(MailboxProviderFailure::class, GraphMailboxGateway::failure(new GraphException('x', GraphException::REASON_API, 403), 'subscribe', true));
     }
@@ -212,10 +217,39 @@ final class GraphMailboxGatewayTest extends TestCase
         $this->expectFailure(MailboxProviderFailure::REFUSED, fn (): ChangePage => $this->gateway->changes($session, FolderRef::inbox(), null, 0, 25));
     }
 
+    public function testDeltaLinksAreBoundToTheCursorFolder(): void
+    {
+        $session = $this->session();
+        // Graph may name the folder by its id: accepted when it is this folder's id (read once per operation).
+        $this->gateway->changes($session, FolderRef::inbox(), MailboxGraphFake::BASE . "/me/mailFolders('FOLDER-inbox')/messages/delta?\$deltatoken=x", 0, 25);
+        $this->gateway->changes($session, FolderRef::inbox(), MailboxGraphFake::BASE . "/me/mailFolders('FOLDER-inbox')/messages/delta?\$deltatoken=x", 0, 25);
+        self::assertCount(1, $this->graph->matching('/me/mailFolders/inbox?$select=id'));
+        $this->expectFailure(MailboxProviderFailure::REFUSED, fn (): ChangePage => $this->gateway->changes($session, FolderRef::inbox(), MailboxGraphFake::BASE . "/me/mailFolders('sentitems')/messages/delta?\$deltatoken=x", 0, 25));
+        $this->expectFailure(MailboxProviderFailure::REFUSED, fn (): ChangePage => $this->gateway->changes($session, FolderRef::inbox(), MailboxGraphFake::BASE . "/me/mailFolders('FOLDER-archive')/messages/delta?\$deltatoken=x", 0, 25));
+        $this->graph->override = static fn (string $method, string $path): ?MockResponse => str_contains($path, '/me/mailFolders/archive') ? MailboxGraphFake::json(['id' => 'bad id']) : null;
+        $this->expectFailure(MailboxProviderFailure::REFUSED, fn (): ChangePage => $this->gateway->changes($this->session(), new FolderRef('archive'), MailboxGraphFake::BASE . "/me/mailFolders('x')/messages/delta?\$deltatoken=x", 0, 25));
+    }
+
+    public function testRemovalsAreConfirmedWithGraph(): void
+    {
+        $this->graph->messages['moved'] = MailboxGraphFake::message('moved');
+        $this->graph->messages['other'] = MailboxGraphFake::message('else');
+        self::assertTrue($this->gateway->stillExists($this->session(), new ProviderMessageId('moved')));
+        self::assertFalse($this->gateway->stillExists($this->session(), new ProviderMessageId('gone')));
+        self::assertFalse($this->gateway->stillExists($this->session(), new ProviderMessageId('other')));
+        $this->graph->override = static fn (): MockResponse => MailboxGraphFake::json(['error' => ['code' => 'x']], 503);
+        $this->expectFailure(MailboxProviderFailure::TRANSIENT, fn (): bool => $this->gateway->stillExists($this->session(), new ProviderMessageId('moved')));
+    }
+
     public function testDeltaFailures(): void
     {
-        foreach ([410 => null, 500 => MailboxProviderFailure::TRANSIENT, 0 => MailboxProviderFailure::REFUSED] as $status => $kind) {
-            $this->graph->override = static fn (): MockResponse => $status === 0 ? MailboxGraphFake::json(['value' => []]) : MailboxGraphFake::json(['error' => ['code' => 'syncStateNotFound']], $status);
+        foreach ([410 => null, 500 => MailboxProviderFailure::TRANSIENT, 0 => MailboxProviderFailure::REFUSED, 400 => null, 401 => MailboxProviderFailure::REFUSED] as $status => $kind) {
+            $this->graph->override = static fn (): MockResponse => match ($status) {
+                0       => MailboxGraphFake::json(['value' => []]),
+                400     => MailboxGraphFake::json(['error' => ['code' => 'ErrorInvalidSyncStateData']], 400),
+                401     => MailboxGraphFake::json(['error' => ['code' => 'BadRequest']], 400),
+                default => MailboxGraphFake::json(['error' => ['code' => 'syncStateNotFound']], $status),
+            };
             if ($kind !== null) {
                 $this->expectFailure($kind, fn (): ChangePage => $this->gateway->changes($this->session(), FolderRef::inbox(), null, 0, 25));
 

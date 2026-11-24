@@ -20,11 +20,13 @@ final readonly class RenewMailboxSubscriptions
      * @param string|null $mailboxId one mailbox, or null for every active one
      * @param string|null $reason null, {@see REAUTHORIZE} or {@see REMOVED}
      * @param string|null $subscriptionId the subscription a lifecycle event names
+     * @param int $attempt delayed re-enqueues after Retry-After answers (bounded by the handler)
      */
     public function __construct(
         public ?string $mailboxId = null,
         public ?string $reason = null,
         public ?string $subscriptionId = null,
+        public int $attempt = 0,
     ) {
     }
 }

@@ -7,6 +7,7 @@ namespace Nowo\MailKitBundle\Mailbox\Port;
 use Nowo\MailKitBundle\Mailbox\Value\FolderRef;
 use Nowo\MailKitBundle\Mailbox\Value\MailboxId;
 use Nowo\MailKitBundle\Mailbox\Value\ProviderMessageId;
+use Nowo\MailKitBundle\Mailbox\Value\RemovalReason;
 use Nowo\MailKitBundle\Mailbox\Value\StoreOutcome;
 use Nowo\MailKitBundle\Mailbox\Value\SyncedMessage;
 
@@ -25,8 +26,12 @@ interface MailboxMessageSinkInterface
     public function store(SyncedMessage $message): StoreOutcome;
 
     /**
-     * The message left a followed folder or was deleted in the mailbox (Q-MB-5). The host decides what to do; it may
-     * be called for a message the host never stored (or twice).
+     * The message left the followed folder `$folder` (Q-MB-5), scoped to that folder: {@see RemovalReason::Deleted}
+     * when it no longer exists in the mailbox, {@see RemovalReason::MovedOut} when it still exists elsewhere. A message
+     * moved between two followed folders keeps its id: it reaches removed() for the source folder and store() for the
+     * target (answering Duplicate), in either order. So update the folder membership on a Duplicate (and clear any
+     * "deleted in mailbox" mark), and never hard-delete on removed(). It may be called for a message the host never
+     * stored, or twice.
      */
-    public function removed(MailboxId $mailbox, ProviderMessageId $message, FolderRef $folder): void;
+    public function removed(MailboxId $mailbox, ProviderMessageId $message, FolderRef $folder, RemovalReason $reason): void;
 }

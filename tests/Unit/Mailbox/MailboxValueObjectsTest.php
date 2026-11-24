@@ -51,6 +51,7 @@ use function print_r;
 use function serialize;
 use function str_repeat;
 use function substr;
+use function var_export;
 
 /**
  * 2.5.0 delegated-mailbox value objects: every constructor validates and bounds its input; the access token never
@@ -134,6 +135,8 @@ final class MailboxValueObjectsTest extends TestCase
         self::assertSame(['Mail.ReadWrite'], $token->scopes);
         self::assertStringNotContainsString('fake-payload', print_r($token, true));
         self::assertSame('[redacted]', $token->__debugInfo()['value']);
+        self::assertStringNotContainsString('fake-payload', var_export($token, true));
+        self::assertStringNotContainsString('fake-payload', print_r((array) $token, true));
 
         try {
             serialize($token);

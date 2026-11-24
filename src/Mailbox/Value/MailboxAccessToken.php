@@ -9,8 +9,11 @@ use InvalidArgumentException;
 use LogicException;
 use Nowo\MailKitBundle\Mailbox\Port\MailboxTokenProviderInterface;
 use SensitiveParameter;
+use SensitiveParameterValue;
 
+use function assert;
 use function hash;
+use function is_string;
 use function preg_match;
 use function strlen;
 use function substr;
@@ -28,7 +31,8 @@ final class MailboxAccessToken
     /** Longest accepted token. */
     public const MAX_LENGTH = 16_384;
 
-    private readonly string $value;
+    /** The token, wrapped so that var_export(), (array) casts and reflection dumps never show it (audit ZAT-I1). */
+    private readonly SensitiveParameterValue $value;
 
     /**
      * @param string $value the bearer token
@@ -46,7 +50,7 @@ final class MailboxAccessToken
         if (strlen($value) > self::MAX_LENGTH || preg_match('/^[A-Za-z0-9\-._~+\/]+=*\z/', $value) !== 1) {
             throw new InvalidArgumentException('The mailbox access token is not a bearer token (RFC 6750 characters, at most 16 KiB).');
         }
-        $this->value = $value;
+        $this->value = new SensitiveParameterValue($value);
     }
 
     /**
@@ -54,7 +58,10 @@ final class MailboxAccessToken
      */
     public function reveal(): string
     {
-        return $this->value;
+        $value = $this->value->getValue();
+        assert(is_string($value));
+
+        return $value;
     }
 
     /**
@@ -63,7 +70,7 @@ final class MailboxAccessToken
      */
     public function fingerprint(): string
     {
-        return substr(hash('sha256', $this->value), 0, 12);
+        return substr(hash('sha256', $this->reveal()), 0, 12);
     }
 
     /**

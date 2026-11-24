@@ -22,6 +22,7 @@ use Nowo\MailKitBundle\Mailbox\Value\MailboxSettings;
 use Nowo\MailKitBundle\Mailbox\Value\MessageEnvelope;
 use Nowo\MailKitBundle\Mailbox\Value\ProviderCall;
 use Nowo\MailKitBundle\Mailbox\Value\ProviderMessageId;
+use Nowo\MailKitBundle\Mailbox\Value\RemovalReason;
 use Nowo\MailKitBundle\Mailbox\Value\StoreOutcome;
 use Nowo\MailKitBundle\Mailbox\Value\SyncedMessage;
 
@@ -142,9 +143,9 @@ final class MemoryMailboxPorts implements MailboxTokenProviderInterface, Mailbox
         return StoreOutcome::Stored;
     }
 
-    public function removed(MailboxId $mailbox, ProviderMessageId $message, FolderRef $folder): void
+    public function removed(MailboxId $mailbox, ProviderMessageId $message, FolderRef $folder, RemovalReason $reason): void
     {
-        $this->removedMessages[] = $mailbox->value . "\n" . $message->value . "\n" . $folder->key;
+        $this->removedMessages[] = $mailbox->value . "\n" . $message->value . "\n" . $folder->key . "\n" . $reason->value;
     }
 
     public function decide(MessageEnvelope $envelope): ExclusionDecision

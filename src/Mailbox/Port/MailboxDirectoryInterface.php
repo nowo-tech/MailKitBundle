@@ -15,7 +15,9 @@ use Nowo\MailKitBundle\Mailbox\Value\MailboxSettings;
 interface MailboxDirectoryInterface
 {
     /**
-     * Settings of one mailbox, or null when the host no longer knows it (MailKit then stops and deletes its rows).
+     * Settings of one mailbox, or null when the host no longer knows it. A null is final: MailKit stops, deletes the
+     * remote subscriptions and every MailKit row of the mailbox (disconnect). On a transient lookup failure (a database
+     * or tenant-filter problem in a worker) **throw** instead of returning null; the message is then retried.
      */
     public function mailbox(MailboxId $mailbox): ?MailboxSettings;
 

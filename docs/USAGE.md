@@ -1096,11 +1096,16 @@ final class MailboxTokens implements MailboxTokenProviderInterface
 ```
 
 - `MailboxDirectoryInterface::mailbox()` returns `MailboxSettings` (provider, address, followed folders, host pause,
-  optional first-sweep window) or `null` when you no longer know the mailbox (MailKit then deletes its rows).
+  optional first-sweep window) or `null` when you no longer know the mailbox. A `null` is final: MailKit disconnects
+  the mailbox (remote subscriptions and every MailKit row). On a transient lookup failure (database, tenant filter not
+  set in a worker) **throw** instead of returning `null`.
 - `MailboxMessageSinkInterface::store(SyncedMessage)` stores one message **idempotently**: a unique key on
   `(mailbox id, provider message id)` and a caught violation that answers `StoreOutcome::Duplicate`. Duplicate
-  notifications, a notification plus a sweep, retries and two workers all end there. `removed()` tells you a message
-  left a followed folder or was deleted.
+  notifications, a notification plus a sweep, retries and two workers all end there. `removed()` is scoped to one
+  folder and carries a `RemovalReason`: `Deleted` (the id no longer exists in the mailbox; MailKit checks with Graph)
+  or `MovedOut` (it still exists elsewhere). A message moved between two followed folders keeps its id: it reaches
+  `removed(…, MovedOut)` for the source and `store()` → `Duplicate` for the target, in either order. Update the
+  folder membership on a `Duplicate` (clearing any "deleted in mailbox" mark) and never hard-delete on `removed()`.
 - `MailboxExclusionPolicyInterface::decide(MessageEnvelope)` (optional) keeps a sender, domain, list or folder out:
   an excluded message is never normalised, logged or stored. It runs before the fetch when the delta page gives the
   sender (`$envelope->complete === false`) and always after the fetch.
@@ -1121,17 +1126,22 @@ $mailboxSync->disconnect($id);                              // remote subscripti
 `start()` checks that the account behind the token has the directory's address and binds the mailbox to that
 account (SHA-256 of the Graph account id); another account later pauses the mailbox `AccountMismatch`.
 
-A revoked grant, missing consent or scope, a mailbox without Exchange Online, or an account mismatch pauses the
-mailbox **once**: one `MailboxGrantFailedEvent` (listen to it for the bell notice), the failing Messenger message is
-unrecoverable, queued work is dropped, nothing retries until you call `resume()`. Throttling, 5xx and timeouts never
-pause; they are retried (Retry-After honoured, at most one hour).
+A revoked grant, missing consent or scope, a mailbox without Exchange Online, or an account mismatch (checked at
+start, resume, every renewal and every sweep run) pauses the mailbox **once**: one `MailboxGrantFailedEvent` (listen
+to it for the bell notice). The failing Messenger message is **acknowledged** (logged, not thrown), so a
+`doctrine_transaction` middleware commits the pause; queued work is dropped on the status check and nothing retries
+until you call `resume()`. A 403 on one item or attachment ends that call only. Throttling, 5xx and timeouts never
+pause: a sweep is acknowledged (the next scheduled sweep covers the folder), a fetch or renewal with Retry-After is
+re-enqueued after that delay (at most one hour) up to 10 times, then handed to your transport's retry strategy and
+failure transport. An invalid or expired sync state (Graph 410, or 400 with a sync-state code) resyncs the folder.
 
 ### What you receive
 
 `SyncedMessage` carries the mailbox, folder, provider id, thread key (`provider:graph:<conversationId>`, else the
 References root, In-Reply-To or Message-ID), the threading ids, addresses (`Sender\MailAddress`), subject, snippet,
 text, **sanitised HTML**, dates, List-Id, `AuthenticationResults` (Exchange-received mail only), attachment references
-and its origin (`Sync`, `Resync`). With `html.remote_images: blocked` the HTML has no remote `src`: the URL of each
+and its origin (`Sync`, `Resync`). `fromMailbox` compares the From address, which any sender can set, with the
+mailbox address: it is not authentication. With `html.remote_images: blocked` the HTML has no remote `src`: the URL of each
 remote image is in `data-mail-kit-remote-src` (counted in `$remoteImagesBlocked`); load it through your own image
 proxy when the reader asks to show images, so your CSP keeps `img-src 'self'`. `cid:` images reference inline
 `AttachmentRef`s (`$contentId`). Treat every field as untrusted input.

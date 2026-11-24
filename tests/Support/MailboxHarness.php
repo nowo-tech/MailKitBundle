@@ -83,7 +83,7 @@ trait MailboxHarness
             $this->clock,
             $this->log,
         );
-        $this->handler = new MailboxMessageHandler($this->engine, $this->log);
+        $this->handler = new MailboxMessageHandler($this->engine, $this->bus, $this->log);
     }
 
     /**

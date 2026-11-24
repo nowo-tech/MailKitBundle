@@ -189,7 +189,8 @@ processing-register entry (Beacon spec 230: on by default with opt-out, 90-day r
 Off by default (`mailboxes.enabled`). Threat model: design section 17.
 
 - **Tokens.** MailKit runs no OAuth flow and never stores, caches, logs or serialises an access token:
-  `MailboxAccessToken` keeps its value private, dumps `[redacted]`, refuses `serialize()`, and accepts only RFC 6750
+  `MailboxAccessToken` keeps its value in a private `SensitiveParameterValue` (hidden from `var_export()`, array casts
+  and reflection too), dumps `[redacted]`, refuses `serialize()`, and accepts only RFC 6750
   bearer characters (no header injection). The token goes only in the `Authorization` header to
   `https://graph.microsoft.com/v1.0` and is kept for one Messenger message. A 401 tells the host the token's
   fingerprint (12 hex of its SHA-256) and retries once with a fresh one. Exceptions carry the operation, status,
@@ -198,8 +199,9 @@ Off by default (`mailboxes.enabled`). Threat model: design section 17.
   reach another person's mail. Delta / next links are followed only when they are `https://graph.microsoft.com/v1.0/`
   mail-folder message deltas of `/me`, of the mailbox's address or of the bound account (no `.` / `..`, `;`, other
   port, user info or fragment, even after a second decoding). No redirects. With `mailboxes.graph.outbound_url_guard`
-  (`auto` by default) the Graph host is pinned to the public address OutboundUrlGuard resolved; private answers are
-  refused.
+  (`auto` by default; use `required` in production) the Graph host is pinned to the public address OutboundUrlGuard
+  resolved; private answers are refused. Without the guard, `auto` logs a build warning and TLS certificate validation
+  still protects the token.
 - **Cross-mailbox confusion.** The account behind the token must have the directory's address and stay the account
   first bound (SHA-256 of the Graph account id); otherwise the mailbox pauses `AccountMismatch`. The webhook takes the
   mailbox and folder from MailKit's subscription row, never from the payload.
@@ -219,7 +221,12 @@ Off by default (`mailboxes.enabled`). Threat model: design section 17.
   before the download when the declared size is larger; type detected by finfo; file names neutralised and given an
   extension that matches the detected type. MailKit never stores or renders them.
 - **Grant failures.** Only grant, consent, scope, mailbox and account errors pause (one conditional transition, one
-  event, unrecoverable message); transient errors retry with backoff, so a dead grant never causes a retry storm.
+  event; the Messenger message is acknowledged so the pause survives a `doctrine_transaction` middleware). Any other
+  403 (one item or attachment refused) ends that call only. Transient errors retry a bounded number of times, so a
+  dead grant or a long throttling never causes a retry storm or a growing queue. The account behind the token is
+  checked on every sweep run, so a token of another account never stores foreign mail under the mailbox.
+- **Folder binding.** Delta links must name the cursor's own folder (its key or its Graph id); removals are confirmed
+  with Graph (`Deleted` vs `MovedOut`) so a move is never reported as a deletion.
 - **Personal data.** MailKit's tables hold no address, subject, body, token or recipient; `disconnect()` deletes the
   remote subscriptions (best effort) and every MailKit row of the mailbox. Logs carry the mailbox id and counts only.
 

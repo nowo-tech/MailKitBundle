@@ -17,12 +17,14 @@ final readonly class FetchMailboxMessage
      * @param string $folderKey followed folder key
      * @param string $messageId provider message id
      * @param string $origin {@see MessageOrigin} value
+     * @param int $attempt delayed re-enqueues after Retry-After answers (bounded by the handler)
      */
     public function __construct(
         public string $mailboxId,
         public string $folderKey,
         public string $messageId,
         public string $origin = MessageOrigin::Sync->value,
+        public int $attempt = 0,
     ) {
     }
 }

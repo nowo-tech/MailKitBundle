@@ -19,6 +19,8 @@ use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Definition;
 use Symfony\Component\DependencyInjection\Reference;
 
+use function implode;
+
 /**
  * 2.5.0 `mailboxes` configuration: off by default with the design's defaults, the build-time checks, and the
  * OutboundUrlGuard host pin (auto | required | off).
@@ -96,6 +98,7 @@ final class MailboxConfigurationTest extends TestCase
 
         $container = $this->container('auto', false);
         (new MailboxUrlGuardPass())->process($container);
+        self::assertStringContainsString('graph.microsoft.com is not pinned', implode("\n", $container->getCompiler()->getLog()));
         self::assertFalse($container->hasDefinition(GuardedGraphRequestOptions::class));
 
         $this->expectException(LogicException::class);

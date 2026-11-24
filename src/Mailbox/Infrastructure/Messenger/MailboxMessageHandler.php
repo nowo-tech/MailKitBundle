@@ -14,8 +14,9 @@ use Nowo\MailKitBundle\Mailbox\Value\MailboxId;
 use Nowo\MailKitBundle\Mailbox\Value\MessageOrigin;
 use Nowo\MailKitBundle\Mailbox\Value\ProviderMessageId;
 use Psr\Log\LoggerInterface;
-use Symfony\Component\Messenger\Exception\RecoverableMessageHandlingException;
 use Symfony\Component\Messenger\Exception\UnrecoverableMessageHandlingException;
+use Symfony\Component\Messenger\MessageBusInterface;
+use Symfony\Component\Messenger\Stamp\DelayStamp;
 
 use function min;
 
@@ -23,9 +24,14 @@ use function min;
  * Messenger handler of the three delegated-mailbox messages (2.5.0; one `messenger.message_handler` tag per message).
  * Malformed ids are dropped with a warning. Failures become Messenger's retry decisions (design section 13):
  *
- * - a grant failure (the mailbox was paused, one event) is **unrecoverable**: nothing retries until resume();
- * - throttling / a busy token endpoint with Retry-After is retried after that delay (at most one hour);
- * - other transient failures are rethrown for the transport's retry strategy (backoff);
+ * - a grant failure has already paused the mailbox (one event): the message is **acknowledged** (logged, not thrown),
+ *   so a `doctrine_transaction` middleware around the handler commits the pause instead of rolling it back (audit
+ *   ZAT-M1); nothing retries until resume();
+ * - a transient failure of a **sweep** acknowledges it: the next scheduled sweep covers the folder, so sweeps never
+ *   pile up during throttling (audit ZAT-L2);
+ * - a transient failure of a fetch or a renewal with Retry-After is re-enqueued after that delay (at most one hour)
+ *   for at most {@see MAX_DELAYED_ATTEMPTS} attempts; then, and without Retry-After, it is rethrown for the transport's
+ *   bounded retry strategy and failure transport;
  * - any other provider refusal (untrusted link, oversized answer, missing id) is unrecoverable.
  *
  * Stateless.
@@ -35,11 +41,15 @@ final readonly class MailboxMessageHandler
     /** Longest Retry-After honoured, in seconds. */
     public const MAX_RETRY_AFTER = 3600;
 
+    /** Delayed re-enqueues of one fetch or renewal after Retry-After answers. */
+    public const MAX_DELAYED_ATTEMPTS = 10;
+
     /**
-     * Wires the engine.
+     * @param MessageBusInterface $bus bus of the delayed re-enqueues (`mailboxes.bus`)
      */
     public function __construct(
         private MailboxSyncEngine $engine,
+        private MessageBusInterface $bus,
         private ?LoggerInterface $logger = null,
     ) {
     }
@@ -51,7 +61,7 @@ final readonly class MailboxMessageHandler
     {
         $mailbox = $this->mailbox($message->mailboxId);
         if ($mailbox instanceof MailboxId) {
-            $this->run(fn () => $this->engine->sweepFolder($mailbox, $message->folderKey));
+            $this->run($mailbox, fn () => $this->engine->sweepFolder($mailbox, $message->folderKey), null, 0);
         }
     }
 
@@ -68,12 +78,17 @@ final readonly class MailboxMessageHandler
         } catch (InvalidArgumentException) {
             $id = null;
         }
-        if (!$mailbox instanceof MailboxId || !$id instanceof ProviderMessageId || $origin === null) {
+        if (!$mailbox instanceof MailboxId || !$id instanceof ProviderMessageId || !$origin instanceof MessageOrigin) {
             $this->logger?->warning('Mailbox fetch message dropped: malformed ids.', ['bundle' => 'NowoMailKitBundle']);
 
             return;
         }
-        $this->run(fn () => $this->engine->fetchMessage($mailbox, $message->folderKey, $id, $origin));
+        $this->run(
+            $mailbox,
+            fn () => $this->engine->fetchMessage($mailbox, $message->folderKey, $id, $origin),
+            static fn (int $attempt): FetchMailboxMessage => new FetchMailboxMessage($message->mailboxId, $message->folderKey, $message->messageId, $message->origin, $attempt),
+            $message->attempt,
+        );
     }
 
     /**
@@ -88,34 +103,40 @@ final readonly class MailboxMessageHandler
         }
         $mailbox = $this->mailbox($message->mailboxId);
         if ($mailbox instanceof MailboxId) {
-            $this->run(fn () => $this->engine->renew($mailbox, $message->reason, $message->subscriptionId));
+            $this->run(
+                $mailbox,
+                fn () => $this->engine->renew($mailbox, $message->reason, $message->subscriptionId),
+                static fn (int $attempt): RenewMailboxSubscriptions => new RenewMailboxSubscriptions($message->mailboxId, $message->reason, $message->subscriptionId, $attempt),
+                $message->attempt,
+            );
         }
     }
 
     /**
      * @param Closure(): void $work
+     * @param (Closure(int): object)|null $again the message for a delayed re-enqueue; null = acknowledge transient failures
+     * @param int $attempt delayed re-enqueues so far
      */
-    private function run(Closure $work): void
+    private function run(MailboxId $mailbox, Closure $work, ?Closure $again, int $attempt): void
     {
         try {
             $work();
         } catch (MailboxGrantFailure $failure) {
-            throw new UnrecoverableMessageHandlingException($failure->getMessage(), $failure->getCode(), $failure);
-        } catch (MailboxTokenUnavailable $failure) {
-            if ($failure->retryAfter === null) {
+            // The engine recorded the pause (and its winner dispatched the event): acknowledge, so it commits.
+            $this->logger?->warning('Mailbox message acknowledged: the grant failed and the mailbox is paused.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value, 'reason' => $failure->reason->value]);
+        } catch (MailboxTokenUnavailable|MailboxProviderFailure $failure) {
+            if ($failure instanceof MailboxProviderFailure && !$failure->isRetryable()) {
+                throw new UnrecoverableMessageHandlingException($failure->getMessage(), 0, $failure);
+            }
+            if (!$again instanceof Closure) {
+                $this->logger?->notice('Mailbox sweep acknowledged after a transient failure; the next scheduled sweep covers the folder.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value]);
+
+                return;
+            }
+            if ($failure->retryAfter === null || $attempt + 1 >= self::MAX_DELAYED_ATTEMPTS) {
                 throw $failure;
             }
-
-            throw new RecoverableMessageHandlingException($failure->getMessage(), 0, null, min(self::MAX_RETRY_AFTER, $failure->retryAfter) * 1000);
-        } catch (MailboxProviderFailure $failure) {
-            if (!$failure->isRetryable()) {
-                throw new UnrecoverableMessageHandlingException($failure->getMessage(), $failure->getCode(), $failure);
-            }
-            if ($failure->retryAfter === null) {
-                throw $failure;
-            }
-
-            throw new RecoverableMessageHandlingException($failure->getMessage(), 0, null, min(self::MAX_RETRY_AFTER, $failure->retryAfter) * 1000);
+            $this->bus->dispatch($again($attempt + 1), [new DelayStamp(min(self::MAX_RETRY_AFTER, $failure->retryAfter) * 1000)]);
         }
     }
 

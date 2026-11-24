@@ -400,7 +400,7 @@ nowo_mail_kit:
 | `html.remote_images` | `blocked` | `blocked`: remote image URLs move to `data-mail-kit-remote-src` (load them through your image proxy on *Show images*); `dropped`: removed; `allowed`: kept (tracking pixels reach the sender). |
 | `graph.enabled` | `false` | The Microsoft Graph delegated provider; needs `mailboxes.enabled`. |
 | `graph.renew_before` | `P1D` | Renew a subscription expiring within this duration (shorter than 6 days). |
-| `graph.outbound_url_guard` | `auto` | Pin `graph.microsoft.com` to the public address OutboundUrlGuard resolves: `auto` when the bundle is enabled, `required` fails the build without it, `off`. |
+| `graph.outbound_url_guard` | `auto` | Pin `graph.microsoft.com` to the public address OutboundUrlGuard resolves: `auto` when the bundle is enabled (without it the build logs a warning in the container compiler log), `required` fails the build without it, `off`. **Use `required` in production.** A guard with a host allow-list must allow `graph.microsoft.com`, or every call fails closed. |
 | `graph.webhook.path` | `/hooks/mail-kit/v1/mailbox/graph` | Route of the loader `nowo_mail_kit_mailbox_webhook` (POST, stateless). |
 | `graph.webhook.notification_url` | `null` | Public HTTPS URL given to Graph; `null` = no subscriptions, sweep only. |
 | `graph.webhook.max_body_bytes` / `max_notifications` | `1048576` / `200` | Request caps (413 above). |

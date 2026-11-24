@@ -22,6 +22,7 @@ use Nowo\MailKitBundle\Mailbox\Infrastructure\Command\MailboxStatusCommand;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Command\MailboxSubscriptionsCommand;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Command\MailboxSweepCommand;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\FetchMailboxMessage;
+use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\MailboxMessageHandler;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\RenewMailboxSubscriptions;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\SyncMailboxFolder;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Store\MailboxSchemaListener;
@@ -42,8 +43,8 @@ use PHPUnit\Framework\TestCase;
 use RuntimeException;
 use Symfony\Component\Console\Tester\CommandTester;
 use Symfony\Component\HttpClient\Response\MockResponse;
-use Symfony\Component\Messenger\Exception\RecoverableMessageHandlingException;
 use Symfony\Component\Messenger\Exception\UnrecoverableMessageHandlingException;
+use Symfony\Component\Messenger\Stamp\DelayStamp;
 use Throwable;
 
 use function str_repeat;
@@ -91,12 +92,22 @@ final class MailboxRunnersTest extends TestCase
             self::assertSame(MailboxProviderFailure::TOO_LARGE, $failure->reason);
         }
 
+        // A 403 on one attachment never pauses the mailbox (audit ZAT-I4).
         $this->graph->override = static fn (): MockResponse => MailboxGraphFake::json(['error' => ['code' => 'ErrorAccessDenied']], 403);
+        try {
+            $reader->open($this->ana, new ProviderMessageId('m1'), new ProviderAttachmentId('a1'), 10);
+            self::fail('Expected a refusal.');
+        } catch (MailboxProviderFailure $failure) {
+            self::assertSame(MailboxProviderFailure::REFUSED, $failure->reason);
+        }
+        self::assertSame(MailboxStatus::Active, $this->engine->status($this->ana)->status);
+
+        $this->graph->override = static fn (): MockResponse => MailboxGraphFake::json(['error' => ['code' => 'InvalidAuthenticationToken']], 401);
         try {
             $reader->open($this->ana, new ProviderMessageId('m1'), new ProviderAttachmentId('a1'), 10);
             self::fail('Expected the grant failure.');
         } catch (MailboxGrantFailure $failure) {
-            self::assertSame(GrantFailureReason::ConsentMissing, $failure->reason);
+            self::assertSame(GrantFailureReason::Revoked, $failure->reason);
         }
         self::assertCount(1, $this->events->of(MailboxGrantFailedEvent::class));
         self::assertSame(MailboxStatus::PausedGrant, $this->engine->status($this->ana)->status);
@@ -117,28 +128,49 @@ final class MailboxRunnersTest extends TestCase
         $this->handler->renew(new RenewMailboxSubscriptions('bad id'));
         self::assertTrue($this->log->has('malformed'));
 
-        $cases = [
-            [MailboxGraphFake::json(['error' => ['code' => 'x']], 429, ['retry-after' => '99999']), RecoverableMessageHandlingException::class, 3_600_000],
-            [MailboxGraphFake::json(['error' => ['code' => 'x']], 503, ['retry-after' => '5']), RecoverableMessageHandlingException::class, 5000],
-            [MailboxGraphFake::json(['error' => ['code' => 'x']], 500), MailboxProviderFailure::class, null],
-            [MailboxGraphFake::json(['error' => ['code' => 'x']], 400), UnrecoverableMessageHandlingException::class, null],
-        ];
-        foreach ($cases as [$response, $class, $delay]) {
-            $this->graph->override = static fn (): MockResponse => $response;
-            $failure               = $this->failure(fn () => $this->handler->fetch(new FetchMailboxMessage('mbx-ana', 'inbox', 'm1')));
-            self::assertInstanceOf($class, $failure);
-            if ($failure instanceof RecoverableMessageHandlingException) {
-                self::assertSame($delay, $failure->getRetryDelay());
-            }
+        // Retry-After: a delayed copy of the message (at most one hour), up to the bounded number of attempts.
+        foreach ([['99999', 3_600_000], ['5', 5000]] as [$retryAfter, $delay]) {
+            $this->bus->messages   = [];
+            $this->bus->stamps     = [];
+            $this->graph->override = static fn (): MockResponse => MailboxGraphFake::json(['error' => ['code' => 'x']], 429, ['retry-after' => $retryAfter]);
+            $this->handler->fetch(new FetchMailboxMessage('mbx-ana', 'inbox', 'm1', 'sync', 3));
+            self::assertEquals([new FetchMailboxMessage('mbx-ana', 'inbox', 'm1', 'sync', 4)], $this->bus->messages);
+            $stamp = $this->firstStamp();
+            self::assertInstanceOf(DelayStamp::class, $stamp);
+            self::assertSame($delay, $stamp->getDelay());
         }
+        $this->bus->messages = [];
+        self::assertInstanceOf(MailboxProviderFailure::class, $this->failure(fn () => $this->handler->fetch(new FetchMailboxMessage('mbx-ana', 'inbox', 'm1', 'sync', MailboxMessageHandler::MAX_DELAYED_ATTEMPTS - 1))));
+        self::assertSame([], $this->bus->messages, 'the last attempt goes to the transport retry strategy');
+
+        // A sweep acknowledges a transient failure: the next scheduled sweep covers the folder.
+        self::assertNull($this->failure(fn () => $this->handler->sync(new SyncMailboxFolder('mbx-ana', 'inbox'))));
+        self::assertTrue($this->log->has('Mailbox sweep acknowledged after a transient failure'));
+
+        $this->graph->override = static fn (): MockResponse => MailboxGraphFake::json(['error' => ['code' => 'x']], 500);
+        self::assertInstanceOf(MailboxProviderFailure::class, $this->failure(fn () => $this->handler->fetch(new FetchMailboxMessage('mbx-ana', 'inbox', 'm1'))));
+        $this->graph->override = static fn (): MockResponse => MailboxGraphFake::json(['error' => ['code' => 'x']], 400);
+        $refused               = $this->failure(fn () => $this->handler->fetch(new FetchMailboxMessage('mbx-ana', 'inbox', 'm2')));
+        self::assertInstanceOf(UnrecoverableMessageHandlingException::class, $refused);
         $this->graph->override = null;
 
         $this->ports->tokenOverride = static fn (): never => throw new MailboxTokenUnavailable();
-        self::assertInstanceOf(MailboxTokenUnavailable::class, $this->failure(fn () => $this->handler->sync(new SyncMailboxFolder('mbx-ana', 'inbox'))));
+        self::assertNull($this->failure(fn () => $this->handler->sync(new SyncMailboxFolder('mbx-ana', 'inbox'))));
+        self::assertInstanceOf(MailboxTokenUnavailable::class, $this->failure(fn () => $this->handler->renew(new RenewMailboxSubscriptions('mbx-ana'))));
         $this->ports->tokenOverride = static fn (): never => throw new MailboxTokenUnavailable(retryAfter: 30);
-        $failure                    = $this->failure(fn () => $this->handler->renew(new RenewMailboxSubscriptions('mbx-ana')));
-        self::assertInstanceOf(RecoverableMessageHandlingException::class, $failure);
-        self::assertSame(30_000, $failure->getRetryDelay());
+        $this->bus->messages        = [];
+        $this->bus->stamps          = [];
+        self::assertNull($this->failure(fn () => $this->handler->renew(new RenewMailboxSubscriptions('mbx-ana'))));
+        self::assertEquals([new RenewMailboxSubscriptions('mbx-ana', null, null, 1)], $this->bus->messages);
+        $stamp = $this->firstStamp();
+        self::assertInstanceOf(DelayStamp::class, $stamp);
+        self::assertSame(30_000, $stamp->getDelay());
+
+        // A grant failure is acknowledged (the pause is recorded): nothing is thrown.
+        $this->ports->tokenOverride      = null;
+        $this->ports->revoked['mbx-ana'] = GrantFailureReason::Revoked;
+        self::assertNull($this->failure(fn () => $this->handler->fetch(new FetchMailboxMessage('mbx-ana', 'inbox', 'm1'))));
+        self::assertSame(MailboxStatus::PausedGrant, $this->engine->status($this->ana)->status);
     }
 
     public function testTheSessionAsksOnceAndIgnoresObserverFailures(): void
@@ -254,6 +286,13 @@ final class MailboxRunnersTest extends TestCase
 
         $this->expectException(RuntimeException::class);
         $loader->load('.');
+    }
+
+    private function firstStamp(): mixed
+    {
+        $stamps = $this->bus->stamps;
+
+        return $stamps[0][0] ?? null;
     }
 
     /**

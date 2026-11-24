@@ -726,7 +726,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             $mailboxes['limits']['max_attachment_bytes'],
         ]))->setPublic(true));
         $container->setAlias(MailboxAttachmentReaderInterface::class, MailboxAttachmentReader::class)->setPublic(true);
-        $container->setDefinition(MailboxMessageHandler::class, (new Definition(MailboxMessageHandler::class, [new Reference(MailboxSyncEngine::class), $logger]))
+        $container->setDefinition(MailboxMessageHandler::class, (new Definition(MailboxMessageHandler::class, [new Reference(MailboxSyncEngine::class), $bus, $logger]))
             ->addTag('messenger.message_handler', ['handles' => SyncMailboxFolder::class, 'method' => 'sync'])
             ->addTag('messenger.message_handler', ['handles' => FetchMailboxMessage::class, 'method' => 'fetch'])
             ->addTag('messenger.message_handler', ['handles' => RenewMailboxSubscriptions::class, 'method' => 'renew']));

@@ -90,7 +90,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-01-15T10:01:58+00:00"
+            "time": "2026-01-15T10:01:58+00:00",
+            "published-time": "2026-01-15T18:29:37+00:00"
         },
         {
             "name": "doctrine/dbal",
@@ -245,7 +246,8 @@
                 "issues": "https://github.com/doctrine/deprecations/issues",
                 "source": "https://github.com/doctrine/deprecations/tree/1.2.0"
             },
-            "time": "2026-11-11T10:04:49+00:00"
+            "time": "2026-11-11T10:04:49+00:00",
+            "published-time": "2026-11-11T10:12:24+00:00"
         },
         {
             "name": "doctrine/doctrine-bundle",
@@ -857,16 +859,16 @@
         },
         {
             "name": "nowo-tech/form-kit-bundle",
-            "version": "v2.24.0",
+            "version": "v2.25.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/FormKitBundle.git",
-                "reference": "4725ea02f88eceb6f5ff01f0d884a69c98958047"
+                "reference": "2f977c46099d637b591798e08a19e54e369e3593"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/FormKitBundle/zipball/4725ea02f88eceb6f5ff01f0d884a69c98958047",
-                "reference": "4725ea02f88eceb6f5ff01f0d884a69c98958047",
+                "url": "https://api.github.com/repos/nowo-tech/FormKitBundle/zipball/2f977c46099d637b591798e08a19e54e369e3593",
+                "reference": "2f977c46099d637b591798e08a19e54e369e3593",
                 "shasum": ""
             },
             "require": {
@@ -885,7 +887,7 @@
             },
             "require-dev": {
                 "friendsofphp/php-cs-fixer": "^3.95.11",
-                "igor-php/igor-php": "^0.10.0",
+                "igor-php/igor-php": "^0.10.0 || ^0.11.0",
                 "nowo-tech/phpstan-frankenphp": "^1.0",
                 "nowo-tech/ui-kit-bundle": "^2.64",
                 "phpstan/extension-installer": "^1.2",
@@ -970,7 +972,8 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-11-22T08:35:57+00:00"
+            "time": "2026-11-23T17:46:47+00:00",
+            "published-time": "2026-11-23T17:47:58+00:00"
         },
         {
             "name": "nowo-tech/migrations-kit-contracts",
@@ -1130,23 +1133,28 @@
         },
         {
             "name": "nowo-tech/transaction-contract",
-            "version": "v1.0.1",
+            "version": "v1.1.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/transaction-contract.git",
-                "reference": "dfb6566338d726719f23699d7109d70c08c45050"
+                "reference": "4f009b79a6fbe742538be037b17d70bbfeefbc53"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/transaction-contract/zipball/dfb6566338d726719f23699d7109d70c08c45050",
-                "reference": "dfb6566338d726719f23699d7109d70c08c45050",
+                "url": "https://api.github.com/repos/nowo-tech/transaction-contract/zipball/4f009b79a6fbe742538be037b17d70bbfeefbc53",
+                "reference": "4f009b79a6fbe742538be037b17d70bbfeefbc53",
                 "shasum": ""
             },
             "require": {
                 "php": ">=8.2 <8.6"
             },
+            "conflict": {
+                "nowo-tech/transaction-doctrine": "<1.10"
+            },
             "require-dev": {
                 "friendsofphp/php-cs-fixer": "^3.0",
+                "igor-php/igor-php": "^0.10.0 || ^0.11.0",
+                "nowo-tech/phpstan-frankenphp": "^1.4",
                 "phpstan/phpstan": "^2.0",
                 "phpstan/phpstan-phpunit": "^2.0",
                 "phpunit/phpunit": "^10.0 || ^11.0",
@@ -1155,7 +1163,7 @@
             "type": "library",
             "extra": {
                 "branch-alias": {
-                    "dev-main": "1.0.x-dev"
+                    "dev-main": "1.1.x-dev"
                 }
             },
             "autoload": {
@@ -1179,7 +1187,7 @@
                     "homepage": "https://nowo.tech"
                 }
             ],
-            "description": "Framework-free transaction port: TransactionRunnerInterface::run(callable) and the TransientStorageFailure exception with a Retry-After hint. No dependencies beyond PHP: no Symfony, no Doctrine.",
+            "description": "Framework-free transaction port: TransactionRunnerInterface::run(callable), the TransientStorageFailure exception with a Retry-After hint, and the conflict types (ConflictCode, TransientFailureKind, ConcurrencyConflict, LockConflictExceptionInterface). No dependencies beyond PHP: no Symfony, no Doctrine.",
             "homepage": "https://github.com/nowo-tech/transaction-contract",
             "keywords": [
                 "contracts",
@@ -1195,25 +1203,32 @@
                 "issues": "https://github.com/nowo-tech/transaction-contract/issues",
                 "source": "https://github.com/nowo-tech/transaction-contract"
             },
-            "time": "2026-11-15T08:04:23+00:00"
+            "funding": [
+                {
+                    "url": "https://github.com/HecFranco",
+                    "type": "github"
+                }
+            ],
+            "time": "2026-11-24T06:06:44+00:00",
+            "published-time": "2026-11-24T06:07:24+00:00"
         },
         {
             "name": "nowo-tech/transaction-doctrine",
-            "version": "v1.9.3",
+            "version": "v1.10.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/transaction-doctrine.git",
-                "reference": "d6a3176e8c09f10ef0f94223088c30f03fd51fd5"
+                "reference": "cdd906bebbbfed00e4e1603fc582702abeb46f9d"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/transaction-doctrine/zipball/d6a3176e8c09f10ef0f94223088c30f03fd51fd5",
-                "reference": "d6a3176e8c09f10ef0f94223088c30f03fd51fd5",
+                "url": "https://api.github.com/repos/nowo-tech/transaction-doctrine/zipball/cdd906bebbbfed00e4e1603fc582702abeb46f9d",
+                "reference": "cdd906bebbbfed00e4e1603fc582702abeb46f9d",
                 "shasum": ""
             },
             "require": {
                 "doctrine/dbal": "^3.8.2 || ^4.0",
-                "nowo-tech/transaction-contract": "^1.0",
+                "nowo-tech/transaction-contract": "^1.1",
                 "php": ">=8.2 <8.6",
                 "psr/log": "^1.0 || ^2.0 || ^3.0"
             },
@@ -1225,7 +1240,7 @@
                 "doctrine/orm": "^3.0",
                 "doctrine/persistence": "^3.1 || ^4.0",
                 "friendsofphp/php-cs-fixer": "^3.0",
-                "igor-php/igor-php": "^0.10.0",
+                "igor-php/igor-php": "^0.10.0 || ^0.11.0",
                 "nowo-tech/phpstan-frankenphp": "^1.0",
                 "phpstan/extension-installer": "^1.4",
                 "phpstan/phpstan": "^2.0",
@@ -1261,10 +1276,13 @@
             "type": "library",
             "extra": {
                 "branch-alias": {
-                    "dev-main": "1.3.x-dev"
+                    "dev-main": "1.10.x-dev"
                 }
             },
             "autoload": {
+                "files": [
+                    "aliases.php"
+                ],
                 "psr-4": {
                     "Nowo\\TransactionDoctrine\\": "src/",
                     "Nowo\\TransactionDoctrine\\WriteUnit\\Dbal\\Dbal3\\": "compat/dbal3/"
@@ -1305,20 +1323,21 @@
                 "issues": "https://github.com/nowo-tech/transaction-doctrine/issues",
                 "source": "https://github.com/nowo-tech/transaction-doctrine"
             },
-            "time": "2026-11-21T17:23:37+00:00"
+            "time": "2026-11-24T06:20:02+00:00",
+            "published-time": "2026-11-24T06:23:48+00:00"
         },
         {
             "name": "nowo-tech/ui-kit-bundle",
-            "version": "v2.66.1",
+            "version": "v2.71.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/UiKitBundle.git",
-                "reference": "7f8bbe514c0f9679f8bd13b49f46526bdf272f13"
+                "reference": "68fd4b3127a84ff390fbf76e28973d74119b7816"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/UiKitBundle/zipball/7f8bbe514c0f9679f8bd13b49f46526bdf272f13",
-                "reference": "7f8bbe514c0f9679f8bd13b49f46526bdf272f13",
+                "url": "https://api.github.com/repos/nowo-tech/UiKitBundle/zipball/68fd4b3127a84ff390fbf76e28973d74119b7816",
+                "reference": "68fd4b3127a84ff390fbf76e28973d74119b7816",
                 "shasum": ""
             },
             "require": {
@@ -1339,7 +1358,7 @@
             },
             "require-dev": {
                 "friendsofphp/php-cs-fixer": "^3.0",
-                "igor-php/igor-php": "^0.9.7 || ^0.10.0",
+                "igor-php/igor-php": "^0.9.7 || ^0.10.0 || ^0.11.0",
                 "nowo-tech/brand-contracts": "^1.0",
                 "nowo-tech/phpstan-frankenphp": "^1.0",
                 "phpstan/extension-installer": "^1.0",
@@ -1408,7 +1427,8 @@
                 "issues": "https://github.com/nowo-tech/UiKitBundle/issues",
                 "source": "https://github.com/nowo-tech/UiKitBundle"
             },
-            "time": "2026-11-22T20:19:55+00:00"
+            "time": "2026-11-23T15:34:01+00:00",
+            "published-time": "2026-11-23T15:38:24+00:00"
         },
         {
             "name": "psr/cache",
@@ -1558,7 +1578,8 @@
                 "issues": "https://github.com/php-fig/container/issues",
                 "source": "https://github.com/php-fig/container/tree/2.0.2"
             },
-            "time": "2021-11-05T16:47:00+00:00"
+            "time": "2021-11-05T16:47:00+00:00",
+            "published-time": "2021-11-05T16:53:27+00:00"
         },
         {
             "name": "psr/event-dispatcher",
@@ -1731,7 +1752,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-03-24T13:12:05+00:00"
+            "time": "2026-03-24T13:12:05+00:00",
+            "published-time": "2026-03-31T21:09:42+00:00"
         },
         {
             "name": "symfony/cache",
@@ -2324,7 +2346,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-09-16T14:15:10+00:00"
+            "time": "2026-09-16T14:15:10+00:00",
+            "published-time": "2026-11-04T11:25:34+00:00"
         },
         {
             "name": "symfony/doctrine-bridge",
@@ -3786,7 +3809,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-03-24T13:12:05+00:00"
+            "time": "2026-03-24T13:12:05+00:00",
+            "published-time": "2026-03-31T21:10:21+00:00"
         },
         {
             "name": "symfony/polyfill-ctype",
@@ -3869,7 +3893,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-04-10T16:19:22+00:00"
+            "time": "2026-04-10T16:19:22+00:00",
+            "published-time": "2026-04-26T14:44:50+00:00"
         },
         {
             "name": "symfony/polyfill-intl-grapheme",
@@ -3951,7 +3976,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-10-15T09:18:53+00:00"
+            "time": "2026-10-15T09:18:53+00:00",
+            "published-time": "2026-10-28T10:07:44+00:00"
         },
         {
             "name": "symfony/polyfill-intl-icu",
@@ -4296,7 +4322,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-10-28T09:35:49+00:00"
+            "time": "2026-10-28T09:35:49+00:00",
+            "published-time": "2026-10-28T10:07:45+00:00"
         },
         {
             "name": "symfony/polyfill-php83",
@@ -4456,7 +4483,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-09-23T22:01:09+00:00"
+            "time": "2026-09-23T22:01:09+00:00",
+            "published-time": "2026-09-30T10:23:33+00:00"
         },
         {
             "name": "symfony/polyfill-php85",
@@ -4765,7 +4793,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-11-01T19:17:22+00:00"
+            "time": "2026-11-01T19:17:22+00:00",
+            "published-time": "2026-11-04T11:28:09+00:00"
         },
         {
             "name": "symfony/property-info",
@@ -4855,7 +4884,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-11-02T10:56:49+00:00"
+            "time": "2026-11-02T10:56:49+00:00",
+            "published-time": "2026-11-04T11:28:19+00:00"
         },
         {
             "name": "symfony/rate-limiter",
@@ -5358,7 +5388,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-10-23T16:51:52+00:00"
+            "time": "2026-10-23T16:51:52+00:00",
+            "published-time": "2026-10-28T18:21:18+00:00"
         },
         {
             "name": "symfony/translation",
@@ -5828,7 +5859,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-11-02T09:31:16+00:00"
+            "time": "2026-11-02T09:31:16+00:00",
+            "published-time": "2026-11-04T11:27:49+00:00"
         },
         {
             "name": "symfony/uid",
@@ -6258,16 +6290,16 @@
         },
         {
             "name": "twig/extra-bundle",
-            "version": "v3.29.0",
+            "version": "v3.31.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/twigphp/twig-extra-bundle.git",
-                "reference": "aaa2993e19293a99240c4c61aa461d743b0dd569"
+                "reference": "c97881570a39593c7aa78bdd6b5e9838fb081fbf"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/twigphp/twig-extra-bundle/zipball/aaa2993e19293a99240c4c61aa461d743b0dd569",
-                "reference": "aaa2993e19293a99240c4c61aa461d743b0dd569",
+                "url": "https://api.github.com/repos/twigphp/twig-extra-bundle/zipball/c97881570a39593c7aa78bdd6b5e9838fb081fbf",
+                "reference": "c97881570a39593c7aa78bdd6b5e9838fb081fbf",
                 "shasum": ""
             },
             "require": {
@@ -6278,7 +6310,7 @@
             },
             "require-dev": {
                 "league/commonmark": "^2.7",
-                "symfony/phpunit-bridge": "^6.4|^7.0",
+                "symfony/phpunit-bridge": "^7.4|^8.0",
                 "twig/cache-extra": "^3.0",
                 "twig/cssinliner-extra": "^3.0",
                 "twig/html-extra": "^3.0",
@@ -6316,7 +6348,7 @@
                 "twig"
             ],
             "support": {
-                "source": "https://github.com/twigphp/twig-extra-bundle/tree/v3.29.0"
+                "source": "https://github.com/twigphp/twig-extra-bundle/tree/v3.31.0"
             },
             "funding": [
                 {
@@ -6328,7 +6360,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-09-11T08:59:50+00:00"
+            "time": "2026-11-23T11:36:10+00:00",
+            "published-time": "2026-11-23T16:31:50+00:00"
         },
         {
             "name": "twig/string-extra",
@@ -6399,16 +6432,16 @@
         },
         {
             "name": "twig/twig",
-            "version": "v3.30.0",
+            "version": "v3.31.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/twigphp/Twig.git",
-                "reference": "8c737079b726af72ff8ef3c595be9f6a810ea1ef"
+                "reference": "fdcda27cbcd5880ddc2c4c2dc5858fb9ea8a0cda"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/twigphp/Twig/zipball/8c737079b726af72ff8ef3c595be9f6a810ea1ef",
-                "reference": "8c737079b726af72ff8ef3c595be9f6a810ea1ef",
+                "url": "https://api.github.com/repos/twigphp/Twig/zipball/fdcda27cbcd5880ddc2c4c2dc5858fb9ea8a0cda",
+                "reference": "fdcda27cbcd5880ddc2c4c2dc5858fb9ea8a0cda",
                 "shasum": ""
             },
             "require": {
@@ -6463,7 +6496,7 @@
             ],
             "support": {
                 "issues": "https://github.com/twigphp/Twig/issues",
-                "source": "https://github.com/twigphp/Twig/tree/v3.30.0"
+                "source": "https://github.com/twigphp/Twig/tree/v3.31.0"
             },
             "funding": [
                 {
@@ -6475,7 +6508,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-09-25T13:20:01+00:00"
+            "time": "2026-11-23T16:31:30+00:00",
+            "published-time": "2026-11-23T16:31:44+00:00"
         }
     ],
     "packages-dev": [
@@ -7965,16 +7999,16 @@
         },
         {
             "name": "nowo-tech/auth-kit-bundle",
-            "version": "v2.0.0",
+            "version": "v2.2.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/AuthKitBundle.git",
-                "reference": "be29f3cf6bcecd8779a1074c445c8e986eb2dad7"
+                "reference": "3009b2ef63457d866409388050e7b50e0cf17290"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/AuthKitBundle/zipball/be29f3cf6bcecd8779a1074c445c8e986eb2dad7",
-                "reference": "be29f3cf6bcecd8779a1074c445c8e986eb2dad7",
+                "url": "https://api.github.com/repos/nowo-tech/AuthKitBundle/zipball/3009b2ef63457d866409388050e7b50e0cf17290",
+                "reference": "3009b2ef63457d866409388050e7b50e0cf17290",
                 "shasum": ""
             },
             "require": {
@@ -7982,6 +8016,7 @@
                 "doctrine/orm": "^3.7",
                 "nowo-tech/doctrine-encrypt-bundle": "^2.3",
                 "nowo-tech/form-kit-bundle": "^2.14",
+                "nowo-tech/migrations-kit-contracts": "^1.0",
                 "nowo-tech/transaction-contract": "^1.0",
                 "nowo-tech/transaction-doctrine": "^1.9",
                 "nowo-tech/ui-kit-bundle": "^2.26",
@@ -8017,6 +8052,7 @@
                 "endroid/qr-code": "^6.0",
                 "friendsofphp/php-cs-fixer": "^3.0",
                 "igor-php/igor-php": "^0.10.0",
+                "nowo-tech/migrations-kit-bundle": "^2.8",
                 "nowo-tech/otp-input-bundle": "^1.9",
                 "nowo-tech/password-strength-bundle": "^2.0",
                 "nowo-tech/password-toggle-bundle": "^2.0.0",
@@ -8092,7 +8128,8 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-11-22T14:09:19+00:00"
+            "time": "2026-11-23T09:17:26+00:00",
+            "published-time": "2026-11-23T09:34:42+00:00"
         },
         {
             "name": "nowo-tech/brand-contracts",
@@ -8601,16 +8638,16 @@
         },
         {
             "name": "nowo-tech/user-kit-bundle",
-            "version": "v1.23.1",
+            "version": "v1.24.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/UserKitBundle.git",
-                "reference": "dd85c8a6dcd82700bbac970a7404711b40c1f057"
+                "reference": "67b5188d632e7c7ce2679414894110fcfe2d75e5"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/UserKitBundle/zipball/dd85c8a6dcd82700bbac970a7404711b40c1f057",
-                "reference": "dd85c8a6dcd82700bbac970a7404711b40c1f057",
+                "url": "https://api.github.com/repos/nowo-tech/UserKitBundle/zipball/67b5188d632e7c7ce2679414894110fcfe2d75e5",
+                "reference": "67b5188d632e7c7ce2679414894110fcfe2d75e5",
                 "shasum": ""
             },
             "require": {
@@ -8618,6 +8655,7 @@
                 "doctrine/doctrine-bundle": "^2.10 || ^3.0",
                 "doctrine/orm": "^2.16 || ^3.0",
                 "nowo-tech/form-kit-bundle": "^2.17",
+                "nowo-tech/migrations-kit-contracts": "^1.0",
                 "nowo-tech/transaction-contract": "^1.0",
                 "nowo-tech/transaction-doctrine": "^1.8.1",
                 "nowo-tech/ui-kit-bundle": "^2.20",
@@ -8651,6 +8689,7 @@
                 "igor-php/igor-php": "^0.10.0",
                 "league/flysystem-memory": "^3.29",
                 "nowo-tech/audit-kit-bundle": "^1.16 || ^2.0",
+                "nowo-tech/migrations-kit-bundle": "^2.8",
                 "nowo-tech/phpstan-frankenphp": "^1.4",
                 "nowo-tech/storage-kit-bundle": "^1.6.1 || ^2.0",
                 "phpstan/extension-installer": "^1.0",
@@ -8719,7 +8758,8 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-11-22T10:02:11+00:00"
+            "time": "2026-11-23T04:13:21+00:00",
+            "published-time": "2026-11-23T04:22:46+00:00"
         },
         {
             "name": "paragonie/constant_time_encoding",
@@ -12235,7 +12275,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-09-25T15:50:05+00:00"
+            "time": "2026-09-25T15:50:05+00:00",
+            "published-time": "2026-09-30T10:23:35+00:00"
         },
         {
             "name": "symfony/polyfill-php81",
@@ -12315,7 +12356,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-05-26T12:45:58+00:00"
+            "time": "2026-05-26T12:45:58+00:00",
+            "published-time": "2026-05-26T13:40:34+00:00"
         },
         {
             "name": "symfony/polyfill-php86",
@@ -12395,7 +12437,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-09-25T15:46:47+00:00"
+            "time": "2026-09-25T15:46:47+00:00",
+            "published-time": "2026-09-30T10:23:43+00:00"
         },
         {
             "name": "symfony/scaleway-mailer",
@@ -12670,7 +12713,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-11-04T08:27:22+00:00"
+            "time": "2026-11-04T08:27:22+00:00",
+            "published-time": "2026-11-04T11:28:39+00:00"
         },
         {
             "name": "symfony/sendgrid-mailer",
@@ -12876,5 +12920,5 @@
     "platform-overrides": {
         "php": "8.2.0"
     },
-    "plugin-api-version": "2.9.0"
+    "plugin-api-version": "2.11.0"
 }

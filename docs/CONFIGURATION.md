@@ -347,6 +347,7 @@ nowo_mail_kit:
         sink: ~                  # required: Mailbox\Port\MailboxMessageSinkInterface
         exclusion_policy: ~      # optional: MailboxExclusionPolicyInterface (default: keep all)
         call_observer: ~         # optional: MailboxCallObserverInterface (default: none)
+        message_index: ~         # optional: MailboxMessageIndexInterface (default: fetch every changed message)
         http_client: http_client
         connection: ~            # DBAL connection of the mailbox tables (null = default)
         bus: messenger.default_bus
@@ -365,9 +366,21 @@ nowo_mail_kit:
             max_attachment_bytes: 26214400
         html:
             remote_images: blocked   # blocked | dropped | allowed
+        send:
+            stale_claim_seconds: 300
+            retention: P7D
+            max_recipients: 100
+            max_attachments: 50
+            max_attachment_bytes: 36700160
+            max_message_bytes: 36700160
+            max_html_bytes: 1048576
+            max_text_bytes: 1048576
+            max_attempts: 5
+            sent_copy: { delay_ms: 5000, attempts: 3 }
         graph:
             enabled: false
             renew_before: P1D
+            upload_hosts: [outlook.office.com, outlook.office365.com]
             outbound_url_guard: auto # auto | required | off
             webhook:
                 path: /hooks/mail-kit/v1/mailbox/graph
@@ -384,9 +397,10 @@ nowo_mail_kit:
 | `enabled` | `false` | Registers the ports, the engine (`MailboxSyncInterface`), the attachment reader, the Messenger handler, the commands and the route loader content. Literal boolean. |
 | `token_provider`, `directory`, `sink` | — | Your port services; all three are required when enabled (the build fails otherwise). |
 | `exclusion_policy`, `call_observer` | `null` | Optional ports; without them every message is kept and no call is metered. |
+| `message_index` | `null` | Optional `MailboxMessageIndexInterface`: asked once per change page which messages you already store in that folder; those are not fetched again. Without it every changed message is fetched and the sink answers `Duplicate`. |
 | `http_client` | `http_client` | Keep the decorated client so HttpLog counts the calls under the provider you declare for `graph.microsoft.com`. |
-| `connection` | `null` | DBAL connection of the tables (never the host's entity manager; nothing is flushed). |
-| `bus` | `messenger.default_bus` | Receives `SyncMailboxFolder`, `FetchMailboxMessage`, `RenewMailboxSubscriptions`. Route them to an async transport. |
+| `connection` | `null` | DBAL connection of the tables (never the host's entity manager; nothing is flushed). `MailboxSenderInterface::send()` refuses to run inside a transaction on it: use a dedicated connection when your handlers run in a `doctrine_transaction` middleware. |
+| `bus` | `messenger.default_bus` | Receives `SyncMailboxFolder`, `FetchMailboxMessage`, `RenewMailboxSubscriptions`, `DeliverSentCopy`, `ReconcileMailboxSend`. Route them to an async transport (the last two use a `DelayStamp`). |
 | `timeout` | `30.0` | Idle deadline of one Graph call, in seconds. |
 | `max_folders` | `10` | Most followed folders per mailbox (1 – 100); more is refused by `start()` / `resume()`. |
 | `sync.initial_window` | `P7D` | Window of a folder's first sweep (Q-MB-11); a mailbox may ask for its own (`MailboxSettings::$initialWindow`) up to `max_initial_window`. ISO 8601 days / hours. |
@@ -398,7 +412,16 @@ nowo_mail_kit:
 | `limits.max_html_bytes` | `1048576` | HTML passed to the sanitiser (longer: cut). |
 | `limits.max_attachment_bytes` | `26214400` | Ceiling of `MailboxAttachmentReaderInterface::open($maxBytes)`. |
 | `html.remote_images` | `blocked` | `blocked`: remote image URLs move to `data-mail-kit-remote-src` (load them through your image proxy on *Show images*); `dropped`: removed; `allowed`: kept (tracking pixels reach the sender). |
+| `send.stale_claim_seconds` | `300` | A send without progress for this long may be taken over by the next call with its key; an ambiguous submit is reconciled by its draft state after it (30 – 3600). Must exceed 8 × `timeout` (a call may last 4 × `timeout`, and its retry with a fresh token as long again), so no other worker reads the draft state while a submit is still in flight. A holder never submits later than half of it after `sending` was written. Worker clocks should be NTP-synced (skew well under half of it). |
+| `send.retention` | `P7D` | Settled send rows (`sent`, `failed`, `unknown`, `released`) are deleted by `nowo:mail-kit:mailbox:purge` after this; a key reused later is sent again. |
+| `send.max_recipients` | `100` | To + Cc + Bcc of one message (at most 500). |
+| `send.max_attachments` / `send.max_attachment_bytes` | `50` / `36700160` | Attachments of one message and the largest one (upload sessions from 2.9 MB; Graph allows 150 MiB). |
+| `send.max_message_bytes` | `36700160` | Bodies plus attachments (Exchange applies its own limit, 35 MB by default). |
+| `send.max_html_bytes` / `send.max_text_bytes` | `1048576` / `1048576` | Largest HTML and text body (at most 2 000 000; a new message's MIME stays under 2.9 MB). The HTML is sanitised; remote images are dropped unless `html.remote_images: allowed`. |
+| `send.max_attempts` | `5` | Reconcile takeovers of one key before its outcome is reported unknown (it is never sent again). |
+| `send.sent_copy.delay_ms` / `attempts` | `5000` / `3` | Delay of `DeliverSentCopy` after a send and between its tries while Graph has not filed the message yet. |
 | `graph.enabled` | `false` | The Microsoft Graph delegated provider; needs `mailboxes.enabled`. |
+| `graph.upload_hosts` | `outlook.office.com`, `outlook.office365.com` | Hosts accepted for attachment upload session URLs of the send path (exact, HTTPS on 443, lower case). The upload URL is pre-authenticated and never receives the token. With `outbound_url_guard` the upload host is pinned like Graph, so a guard with a host allow-list must allow these hosts too. |
 | `graph.renew_before` | `P1D` | Renew a subscription expiring within this duration (shorter than 6 days). |
 | `graph.outbound_url_guard` | `auto` | Pin `graph.microsoft.com` to the public address OutboundUrlGuard resolves: `auto` when the bundle is enabled (without it the build logs a warning in the container compiler log), `required` fails the build without it, `off`. **Use `required` in production.** A guard with a host allow-list must allow `graph.microsoft.com`, or every call fails closed. |
 | `graph.webhook.path` | `/hooks/mail-kit/v1/mailbox/graph` | Route of the loader `nowo_mail_kit_mailbox_webhook` (POST, stateless). |

@@ -43,6 +43,8 @@ use Nowo\MigrationsKitContracts\Collation\ExactKeyColumnsInterface;
  *   (a provider folder id is case-sensitive base64).
  * - `mail_kit_mailbox_subscription.subscription_id` (2.5.0) — a Graph subscription id: a notification is resolved to
  *   a mailbox and folder by it.
+ * - `mail_kit_mailbox_send.mailbox_id`, `mail_kit_mailbox_send.idempotency_key` (2.5.0) — the primary key of one send:
+ *   whether a message is sent once or twice is decided on `WHERE mailbox_id = ? AND idempotency_key = ?`.
  *
  * Deliberately **not** declared, because a declaration is a claim about identity and an untrue one is worse than
  * none (on a server without a NO PAD collation it would report `fallback` about a column that does not want NO PAD):
@@ -55,8 +57,9 @@ use Nowo\MigrationsKitContracts\Collation\ExactKeyColumnsInterface;
  *   never matched (`log_id` appears only in `SET log_id = ?`).
  * - `mail_kit_tracking_send.last_open_ip` / `.last_open_ua` — a truncated address and a user-agent family kept for
  *   the report; they are telemetry, not keys.
- * - `mail_kit_mailbox.account_hash`, `mail_kit_mailbox_subscription.client_state_hash`, `mail_kit_mailbox_cursor.lease_owner`
- *   (2.5.0) — read back and compared with `hash_equals()`, or a random run id MailKit writes and matches itself.
+ * - `mail_kit_mailbox.account_hash`, `mail_kit_mailbox_subscription.client_state_hash`, `mail_kit_mailbox_cursor.lease_owner`,
+ *   `mail_kit_mailbox_send.payload_hash`, `mail_kit_mailbox_send.claim_token` (2.5.0) — read back and compared with
+ *   `hash_equals()`, or a random run id / claim token MailKit writes and matches itself (lower-case hex).
  *
  * The table names are resolved from `nowo_mail_kit.doctrine.table_prefix` on the stores' own unprefixed names, never
  * literals, and the columns of a feature that is off are declared **inactive** (reported as skipped with the setting
@@ -113,6 +116,7 @@ final readonly class MailKitExactKeyColumns implements ExactKeyColumnsInterface
         $mailbox      = $this->tablePrefix . MailboxStore::MAILBOX_TABLE;
         $cursor       = $this->tablePrefix . MailboxStore::CURSOR_TABLE;
         $mailboxSub   = $this->tablePrefix . MailboxStore::SUBSCRIPTION_TABLE;
+        $mailboxSend  = $this->tablePrefix . MailboxStore::SEND_TABLE;
 
         return [
             new ExactKeyColumn($send, 'send_id', self::OWNER, 'id of one tracked send: the open is counted with WHERE send_id = ?', $tracking, $this->tracking),
@@ -129,6 +133,8 @@ final readonly class MailKitExactKeyColumns implements ExactKeyColumnsInterface
             new ExactKeyColumn($mailboxSub, 'subscription_id', self::OWNER, 'Microsoft Graph subscription id: a notification is resolved to a mailbox and folder by it', $mailboxes, $this->mailboxes),
             new ExactKeyColumn($mailboxSub, 'mailbox_id', self::OWNER, 'delegated mailbox of the subscription', $mailboxes, $this->mailboxes),
             new ExactKeyColumn($mailboxSub, 'folder_key', self::OWNER, 'followed folder of the subscription', $mailboxes, $this->mailboxes),
+            new ExactKeyColumn($mailboxSend, 'mailbox_id', self::OWNER, 'delegated mailbox of the send (primary key)', $mailboxes, $this->mailboxes),
+            new ExactKeyColumn($mailboxSend, 'idempotency_key', self::OWNER, 'idempotency key of one send: sent once or twice is decided on it (primary key)', $mailboxes, $this->mailboxes),
         ];
     }
 }

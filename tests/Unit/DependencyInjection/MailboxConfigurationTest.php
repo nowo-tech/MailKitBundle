@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\MailKitBundle\Tests\Unit\DependencyInjection;
 
 use LogicException;
+use Nowo\MailKitBundle\DependencyInjection\Compiler\MailboxSendTransactionPass;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\MailboxUrlGuardPass;
 use Nowo\MailKitBundle\DependencyInjection\Configuration;
 use Nowo\MailKitBundle\DependencyInjection\NowoMailKitExtension;
@@ -44,6 +45,20 @@ final class MailboxConfigurationTest extends TestCase
         self::assertNull($mailboxes['graph']['webhook']['notification_url']);
         self::assertSame(['limit' => 600, 'interval' => '1 minute'], $mailboxes['graph']['webhook']['rate_limit']);
         self::assertSame(['limit' => 60, 'interval' => '1 minute'], $mailboxes['graph']['webhook']['client_rate_limit']);
+        self::assertNull($mailboxes['message_index']);
+        self::assertSame(GraphApiClient::DEFAULT_UPLOAD_HOSTS, $mailboxes['graph']['upload_hosts']);
+        self::assertSame([
+            'stale_claim_seconds'  => 300,
+            'retention'            => 'P7D',
+            'max_recipients'       => 100,
+            'max_attachments'      => 50,
+            'max_attachment_bytes' => 36_700_160,
+            'max_message_bytes'    => 36_700_160,
+            'max_html_bytes'       => 1_048_576,
+            'max_text_bytes'       => 1_048_576,
+            'max_attempts'         => 5,
+            'sent_copy'            => ['delay_ms' => 5000, 'attempts' => 3],
+        ], $mailboxes['send']);
 
         $on = $this->process(['enabled' => true, 'graph' => ['enabled' => true, 'webhook' => ['notification_url' => 'https://app.example.com/hooks/mail-kit/v1/mailbox/graph', 'allowed_ips' => ['203.0.113.0/24']]], 'sync' => ['initial_window' => 'PT12H']] + self::PORTS);
         self::assertTrue($on['graph']['enabled']);
@@ -69,6 +84,12 @@ final class MailboxConfigurationTest extends TestCase
         yield 'bad ip' => [['graph' => ['webhook' => ['allowed_ips' => ['not-an-ip']]]]];
         yield 'bad interval' => [['graph' => ['webhook' => ['rate_limit' => ['interval' => 'soon']]]]];
         yield 'too many folders' => [['max_folders' => 101]];
+        yield 'send retention' => [['send' => ['retention' => 'P1W']]];
+        yield 'send recipients' => [['send' => ['max_recipients' => 501]]];
+        yield 'send stale claim' => [['send' => ['stale_claim_seconds' => 5]]];
+        yield 'send stale claim within a call' => [['send' => ['stale_claim_seconds' => 240]]];
+        yield 'upload host' => [['graph' => ['upload_hosts' => ['Outlook.Office.com']]]];
+        yield 'no upload host' => [['graph' => ['upload_hosts' => []]]];
     }
 
     /**
@@ -103,6 +124,29 @@ final class MailboxConfigurationTest extends TestCase
 
         $this->expectException(LogicException::class);
         (new MailboxUrlGuardPass())->process($this->container('required', false));
+    }
+
+    public function testTheTransactionPassWarnsAboutADoctrineTransactionBusOnTheDefaultConnection(): void
+    {
+        $container = new ContainerBuilder();
+        (new MailboxSendTransactionPass())->process($container);
+        self::assertSame([], $container->getCompiler()->getLog());
+
+        $container->setParameter(NowoMailKitExtension::MAILBOX_CONNECTION_PARAMETER, null);
+        $container->setParameter('kernel.debug', false);
+        $container->setParameter('messenger.bus.plain.middleware', [['id' => 'add_bus_name_stamp_middleware'], 'odd']);
+        (new MailboxSendTransactionPass())->process($container);
+        self::assertSame([], $container->getCompiler()->getLog());
+
+        $container->setParameter('messenger.bus.default.middleware', [['id' => 'doctrine_transaction']]);
+        (new MailboxSendTransactionPass())->process($container);
+        self::assertStringContainsString('"messenger.bus.default" runs the doctrine_transaction middleware', implode("\n", $container->getCompiler()->getLog()));
+
+        $dedicated = new ContainerBuilder();
+        $dedicated->setParameter(NowoMailKitExtension::MAILBOX_CONNECTION_PARAMETER, 'mail_kit');
+        $dedicated->setParameter('messenger.bus.default.middleware', [['id' => 'doctrine_transaction']]);
+        (new MailboxSendTransactionPass())->process($dedicated);
+        self::assertSame([], $dedicated->getCompiler()->getLog());
     }
 
     private function container(string $mode, bool $guard): ContainerBuilder

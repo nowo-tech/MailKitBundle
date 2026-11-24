@@ -1064,8 +1064,8 @@ and counts — never addresses, subjects, bodies or file names.
 
 MailKit syncs the folders a person follows in **their own** Outlook mailbox (Microsoft Graph, delegated permissions)
 into your storage. It is plumbing only: you own the OAuth connection, the tokens, the message storage, encryption,
-retention and the UI. Design: [`docs/design/DELEGATED_MAILBOXES.md`](design/DELEGATED_MAILBOXES.md). Sending from a
-delegated mailbox arrives with the second part of 2.5.0.
+retention and the UI. It also sends new messages, replies, replies to all and forwards from that mailbox. Design:
+[`docs/design/DELEGATED_MAILBOXES.md`](design/DELEGATED_MAILBOXES.md).
 
 ### The ports you implement
 
@@ -1111,6 +1111,11 @@ final class MailboxTokens implements MailboxTokenProviderInterface
   sender (`$envelope->complete === false`) and always after the fetch.
 - `MailboxCallObserverInterface::called(ProviderCall)` (optional) meters every Graph call per mailbox (operation,
   status, duration, bytes, Retry-After; never a URL, id, address or body). It must not throw.
+- `MailboxMessageIndexInterface::contains(MailboxId, FolderRef, list<ProviderMessageId>)` (optional,
+  `message_index`) answers which messages of a change page you already store **in that folder**. The sweep asks once
+  per page and does not fetch those again (a read flag or a category change then costs no fetch). Answer by folder:
+  a message moved between two followed folders keeps its id, and you learn its new folder only from the `store()` of
+  the target folder. A failing index is logged and the whole page is fetched.
 
 ### Starting, pausing, disconnecting
 
@@ -1144,7 +1149,7 @@ the sweep is acknowledged, and the next good sweep clears it. The mailbox and it
 `SyncedMessage` carries the mailbox, folder, provider id, thread key (`provider:graph:<conversationId>`, else the
 References root, In-Reply-To or Message-ID), the threading ids, addresses (`Sender\MailAddress`), subject, snippet,
 text, **sanitised HTML**, dates, List-Id, `AuthenticationResults` (Exchange-received mail only), attachment references
-and its origin (`Sync`, `Resync`). `fromMailbox` compares the From address, which any sender can set, with the
+and its origin (`Sync`, `Resync`, or `SentCopy` for a message sent through MailKit). `fromMailbox` compares the From address, which any sender can set, with the
 mailbox address: it is not authentication. With `html.remote_images: blocked` the HTML has no remote `src`: the URL of each
 remote image is in `data-mail-kit-remote-src` (counted in `$remoteImagesBlocked`); load it through your own image
 proxy when the reader asks to show images, so your CSP keeps `img-src 'self'`. `cid:` images reference inline
@@ -1158,6 +1163,75 @@ $file = $attachmentReader->open($mailbox, $message->id, $ref->id, 10 * 1024 * 10
 ```
 
 Attached e-mails and OneDrive links are listed (`AttachmentKind::Item` / `Reference`) but not downloadable.
+
+### Sending from the mailbox
+
+```php
+use Nowo\MailKitBundle\Mailbox\Exception\{MailboxSendFailed, MailboxSendInProgress, MailboxSendOutcomeUnknown};
+use Nowo\MailKitBundle\Mailbox\Value\{OutgoingAttachment, OutgoingKind, OutgoingMailboxMail, ProviderMessageId};
+use Nowo\MailKitBundle\Sender\MailAddress;
+
+$mail = new OutgoingMailboxMail(
+    kind: OutgoingKind::Reply,                          // New, Reply, ReplyAll, Forward
+    inResponseTo: new ProviderMessageId($stored->providerId), // null for New
+    to: [new MailAddress('pedro@example.org', 'Pedro')],
+    cc: [],
+    bcc: [],
+    subject: null,                                      // null keeps Outlook's "RE: …" (a new message needs one)
+    text: $plain,
+    html: $html,                                        // your body (with your own quote) replaces Outlook's
+    attachments: [OutgoingAttachment::fromPath($path, 'offer.pdf', 'application/pdf')],
+    idempotencyKey: 'draft-' . $draft->id() . '-' . $draft->version(), // mandatory, 16 – 128 of [A-Za-z0-9_.:-]
+);
+
+try {
+    $sent = $mailboxSender->send($mailboxId, $mail); // SentMessage: id, internetMessageId, thread, sentAt, replayed
+} catch (MailboxSendInProgress $e) {
+    // Another call holds the key, or the outcome is being reconciled ($e->reconciling): retry later, SAME key (409).
+} catch (MailboxSendFailed $e) {
+    // Graph refused it for good ($e->reason, e.g. "refused:ErrorInvalidRecipients"): nothing was sent.
+} catch (MailboxSendOutcomeUnknown $e) {
+    // It cannot be proven whether it left: never sent again. Ask the person to check Sent Items.
+}
+```
+
+- **Draft + send** (Q-MB-1): a new message is a MIME draft (Message-ID derived from the mailbox and the key, Bcc set
+  afterwards); a reply / reply all / forward is `createReply` / `createReplyAll` / `createForward` on the original,
+  so Outlook sets the threading headers and the conversation, then your recipients, subject and body replace Outlook's
+  (Q-MB-7). Attachments are streamed: up to 2.9 MB in one request, larger ones in 3.75 MiB chunks of an upload
+  session. The HTML is sanitised (no script, style or event handler; remote images dropped unless
+  `html.remote_images: allowed`); reference inline images with `cid:` and an inline `OutgoingAttachment`.
+- **At most once per key** (Q-MB-20). The key is scoped to the mailbox. A second call with the same key and the same
+  message answers the stored ids with `replayed: true`; with another message `MailboxSendKeyConflict`. A transient or
+  grant failure **before** the submit releases the key (retry with it at once); a submit whose outcome is ambiguous
+  (timeout, 5xx, 429) is never resent blindly: MailKit reads the draft state after `send.stale_claim_seconds`
+  (`ReconcileMailboxSend`, or your next `send()` with the key) and submits **that same draft** again only while Graph
+  still reports it as a draft (one draft item is delivered at most once).
+- **Every submit is fenced** (audit ZAV-L1): before each `POST …/send`, the retry after a 401 included, MailKit takes
+  the token (a slow refresh of yours happens here), refuses to submit later than `send.stale_claim_seconds / 2` after
+  the key went `sending` (it is then reconciled), and renews its claim with a conditional heartbeat; a worker that
+  lost the claim submits nothing. MailKit retries a 401 on the submit itself, not the HTTP client.
+- **Clocks**: staleness compares the worker's clock with the time another worker stored. Keep your workers on NTP;
+  a skew must stay well under `send.stale_claim_seconds / 2`.
+- **Do not reuse a key that was in flight after `disconnect()`**: the disconnect deletes the send rows, so MailKit no
+  longer knows that key, and an earlier attempt may have left (or may still leave) its draft. Use a new key.
+- **Leftover drafts**: an attempt abandoned after its draft was created (a crash, a failed delete) can leave that
+  draft in the mailbox's Drafts folder; it is never submitted. `nowo:mail-kit:mailbox:purge --drafts` deletes the
+  drafts that settled `released` / `failed` rows still name, each only after Graph reads it as a draft; a row whose
+  draft could not be dealt with (paused mailbox, unreadable state, failed delete) is kept for the next run.
+- **Account check before every send**: a token of another account pauses the mailbox `AccountMismatch` and nothing
+  is sent.
+- **The sent copy** is delivered only for a key MailKit recorded as `sent` with that id. It reaches your sink as `SyncedMessage` with `origin: SentCopy` and folder `sentitems`, a few seconds
+  later (`DeliverSentCopy`), whether you follow Sent Items or not (Q-MB-6), without the exclusion policy. If you also
+  follow Sent Items the sweep delivers it once more and your sink answers `Duplicate`.
+- **Not in the sent-mail log** (Q-MB-14): your thread is the record.
+- **Transactions**: call `send()` outside a transaction on the mailbox connection (it refuses otherwise): a rollback
+  after Graph sent would forget the send and a retry would send again. In a Messenger handler wrapped by
+  `doctrine_transaction`, give MailKit its own `mailboxes.connection` (the container build logs a warning when a bus
+  runs that middleware and `mailboxes.connection` is not set). A `ReconcileMailboxSend` that meets such a transaction is
+  logged and acknowledged; the next `send()` with the key reconciles it.
+- **The fingerprint** of a message includes the SHA-256 of each attachment's bytes (streamed), so a key reused with
+  other attachment content is refused.
 
 ### Wiring
 
@@ -1174,12 +1248,14 @@ framework:
             Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\SyncMailboxFolder: async
             Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\FetchMailboxMessage: async
             Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\RenewMailboxSubscriptions: async
+            Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\DeliverSentCopy: async
+            Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\ReconcileMailboxSend: async
 ```
 
 Make the webhook path public and stateless in the firewall and keep it out of your HTTP log. Schedule
 `nowo:mail-kit:mailbox:sweep` every 5 minutes (a lost notification costs at most one interval) and
-`nowo:mail-kit:mailbox:subscriptions` hourly. `nowo:mail-kit:mailbox:status <id>` prints the status without personal
-data. Without `graph.webhook.notification_url` MailKit creates no subscriptions and the sweep is the only reader.
+`nowo:mail-kit:mailbox:subscriptions` hourly and `nowo:mail-kit:mailbox:purge` daily (send rows after
+`send.retention`). `nowo:mail-kit:mailbox:status <id>` prints the status without personal data. Without `graph.webhook.notification_url` MailKit creates no subscriptions and the sweep is the only reader.
 
 ### Concurrency and worker mode
 
@@ -1189,6 +1265,11 @@ fetches are enqueued; a worker whose lease expired stops without writing. Status
 updates, so one worker wins a grant failure and dispatches its event right after that statement (MailKit has no
 commit hook: call `start()` / `resume()` outside your own transaction if a listener must only see committed state).
 Inside your transaction MailKit's statements run in savepoints. No service keeps per-mailbox state: a token is asked once per Messenger message and dropped with it.
+
+A send claims its key with one insert (a caught duplicate reads the row instead) and moves it by conditional updates
+on the claim token and state; every update changes the token, the state or a row version, so MySQL / MariaDB count
+the row even within one second. Two workers with the same key: one sends, the other gets `MailboxSendInProgress`
+and later the stored result.
 
 ## Open and click tracking
 

@@ -71,12 +71,14 @@
 ### Delegated mailboxes (2.5.0, opt-in)
 
 Nothing changes unless you set `nowo_mail_kit.mailboxes.enabled: true`. Then you implement the host ports, create
-three tables and schedule two commands. Usage: [USAGE — Delegated Outlook mailboxes](USAGE.md#delegated-outlook-mailboxes-250).
+four tables and schedule three commands. Usage: [USAGE — Delegated Outlook mailboxes](USAGE.md#delegated-outlook-mailboxes-250).
 
 1. Implement `MailboxTokenProviderInterface` (your OAuth connection: MailKit only asks for the current access token;
    scopes `Mail.ReadWrite`, `Mail.Send`, `offline_access`, `User.Read`), `MailboxDirectoryInterface` and
    `MailboxMessageSinkInterface` (with a **unique key on mailbox id + provider message id**: a second `store()` must
-   answer `StoreOutcome::Duplicate`). Optionally `MailboxExclusionPolicyInterface` and `MailboxCallObserverInterface`.
+   answer `StoreOutcome::Duplicate`). Optionally `MailboxExclusionPolicyInterface`, `MailboxCallObserverInterface` and
+   `MailboxMessageIndexInterface` (`message_index`: the messages of a page you already store in that folder are not
+   fetched again).
 2. Configure:
 
    ```yaml
@@ -93,9 +95,14 @@ three tables and schedule two commands. Usage: [USAGE — Delegated Outlook mail
    ```
 
 3. Import the route loader `nowo_mail_kit_mailbox_webhook` and make its path public, stateless and outside your HTTP
-   log; route `SyncMailboxFolder`, `FetchMailboxMessage` and `RenewMailboxSubscriptions` to an async transport.
-4. Schedule `nowo:mail-kit:mailbox:sweep` every 5 minutes and `nowo:mail-kit:mailbox:subscriptions` hourly.
-5. Create the tables: with the ORM the `postGenerateSchema` listener adds them to `doctrine:migrations:diff`;
+   log; route `SyncMailboxFolder`, `FetchMailboxMessage`, `RenewMailboxSubscriptions`, `DeliverSentCopy` and
+   `ReconcileMailboxSend` to an async transport that supports delays (the last two are sent with a `DelayStamp`).
+4. Schedule `nowo:mail-kit:mailbox:sweep` every 5 minutes, `nowo:mail-kit:mailbox:subscriptions` hourly and
+   `nowo:mail-kit:mailbox:purge` daily (settled send rows after `send.retention`).
+5. Sending (`MailboxSenderInterface`): call `send()` **outside** a transaction on the mailbox connection. If your
+   Messenger handlers run inside a `doctrine_transaction` middleware, point `mailboxes.connection` at a dedicated
+   DBAL connection (the same database is fine) so the send rows commit on their own.
+6. Create the tables: with the ORM the `postGenerateSchema` listener adds them to `doctrine:migrations:diff`;
    otherwise run `nowo:mail-kit:mailbox:schema --force`, or apply the DDL below (no table prefix shown; key columns
    use the binary NO PAD collation, REQ-SEC-006).
 
@@ -105,6 +112,7 @@ MySQL 8.4:
 CREATE TABLE mail_kit_mailbox (mailbox_id VARCHAR(128) CHARACTER SET utf8mb4 NOT NULL COLLATE `utf8mb4_0900_bin`, provider VARCHAR(16) NOT NULL, status VARCHAR(16) NOT NULL, reason VARCHAR(32) DEFAULT NULL, account_hash VARCHAR(64) DEFAULT NULL, updated_at BIGINT NOT NULL, PRIMARY KEY (mailbox_id));
 CREATE TABLE mail_kit_mailbox_cursor (mailbox_id VARCHAR(128) CHARACTER SET utf8mb4 NOT NULL COLLATE `utf8mb4_0900_bin`, folder_key VARCHAR(255) CHARACTER SET utf8mb4 NOT NULL COLLATE `utf8mb4_0900_bin`, cursor_value LONGTEXT DEFAULT NULL, cursor_version INT DEFAULT 0 NOT NULL, lease_owner VARCHAR(32) DEFAULT NULL, lease_until BIGINT DEFAULT NULL, rerun SMALLINT DEFAULT 0 NOT NULL, last_complete_at BIGINT DEFAULT NULL, sync_error VARCHAR(32) DEFAULT NULL, sync_error_at BIGINT DEFAULT NULL, PRIMARY KEY (mailbox_id, folder_key));
 CREATE TABLE mail_kit_mailbox_subscription (subscription_id VARCHAR(128) CHARACTER SET utf8mb4 NOT NULL COLLATE `utf8mb4_0900_bin`, mailbox_id VARCHAR(128) CHARACTER SET utf8mb4 NOT NULL COLLATE `utf8mb4_0900_bin`, folder_key VARCHAR(255) CHARACTER SET utf8mb4 NOT NULL COLLATE `utf8mb4_0900_bin`, client_state_hash VARCHAR(64) NOT NULL, expires_at BIGINT NOT NULL, created_at BIGINT NOT NULL, UNIQUE INDEX uniq_mail_kit_mailbox_sub_folder (mailbox_id, folder_key), PRIMARY KEY (subscription_id));
+CREATE TABLE mail_kit_mailbox_send (mailbox_id VARCHAR(128) CHARACTER SET utf8mb4 NOT NULL COLLATE `utf8mb4_0900_bin`, idempotency_key VARCHAR(128) CHARACTER SET utf8mb4 NOT NULL COLLATE `utf8mb4_0900_bin`, payload_hash VARCHAR(64) NOT NULL, status VARCHAR(16) NOT NULL, claim_token VARCHAR(32) NOT NULL, provider_message_id VARCHAR(512) DEFAULT NULL, internet_message_id VARCHAR(512) DEFAULT NULL, thread_id VARCHAR(512) DEFAULT NULL, reason VARCHAR(128) DEFAULT NULL, attempts INT DEFAULT 1 NOT NULL, row_version INT DEFAULT 0 NOT NULL, claimed_at BIGINT NOT NULL, updated_at BIGINT NOT NULL, sent_at BIGINT DEFAULT NULL, INDEX idx_mail_kit_mailbox_send_updated (updated_at), INDEX idx_mail_kit_mailbox_send_message (mailbox_id, provider_message_id), PRIMARY KEY (mailbox_id, idempotency_key));
 ```
 
 MariaDB 11.4: the same with `utf8mb4_nopad_bin` instead of `utf8mb4_0900_bin`.
@@ -116,14 +124,21 @@ CREATE TABLE mail_kit_mailbox (mailbox_id VARCHAR(128) NOT NULL, provider VARCHA
 CREATE TABLE mail_kit_mailbox_cursor (mailbox_id VARCHAR(128) NOT NULL, folder_key VARCHAR(255) NOT NULL, cursor_value TEXT DEFAULT NULL, cursor_version INT DEFAULT 0 NOT NULL, lease_owner VARCHAR(32) DEFAULT NULL, lease_until BIGINT DEFAULT NULL, rerun SMALLINT DEFAULT 0 NOT NULL, last_complete_at BIGINT DEFAULT NULL, sync_error VARCHAR(32) DEFAULT NULL, sync_error_at BIGINT DEFAULT NULL, PRIMARY KEY (mailbox_id, folder_key));
 CREATE TABLE mail_kit_mailbox_subscription (subscription_id VARCHAR(128) NOT NULL, mailbox_id VARCHAR(128) NOT NULL, folder_key VARCHAR(255) NOT NULL, client_state_hash VARCHAR(64) NOT NULL, expires_at BIGINT NOT NULL, created_at BIGINT NOT NULL, PRIMARY KEY (subscription_id));
 CREATE UNIQUE INDEX uniq_mail_kit_mailbox_sub_folder ON mail_kit_mailbox_subscription (mailbox_id, folder_key);
+CREATE TABLE mail_kit_mailbox_send (mailbox_id VARCHAR(128) NOT NULL, idempotency_key VARCHAR(128) NOT NULL, payload_hash VARCHAR(64) NOT NULL, status VARCHAR(16) NOT NULL, claim_token VARCHAR(32) NOT NULL, provider_message_id VARCHAR(512) DEFAULT NULL, internet_message_id VARCHAR(512) DEFAULT NULL, thread_id VARCHAR(512) DEFAULT NULL, reason VARCHAR(128) DEFAULT NULL, attempts INT DEFAULT 1 NOT NULL, row_version INT DEFAULT 0 NOT NULL, claimed_at BIGINT NOT NULL, updated_at BIGINT NOT NULL, sent_at BIGINT DEFAULT NULL, PRIMARY KEY (mailbox_id, idempotency_key));
+CREATE INDEX idx_mail_kit_mailbox_send_updated ON mail_kit_mailbox_send (updated_at);
+CREATE INDEX idx_mail_kit_mailbox_send_message ON mail_kit_mailbox_send (mailbox_id, provider_message_id);
 ```
 
-SQLite: as PostgreSQL, with `cursor_value CLOB` and `cursor_version INTEGER`.
+SQLite: as PostgreSQL, with `cursor_value CLOB` and `INTEGER` for `cursor_version`, `attempts` and `row_version`.
+
+The send table (2.5.0 part 2) is new in this version; 2.5.0 is not tagged yet, so no migration from a released
+version is needed.
 
 #### For code that used internal classes
 
 `Graph\GraphApiClient` (`@internal`) now accepts `?GraphTokenProvider` and a trailing `?GraphRequestOptionsInterface`,
-and its `call()`, `callUrl()` and `download()` take `GraphMailbox|GraphCredentialInterface`.
+and its `call()`, `callUrl()`, `download()`, `uploadChunk()` and `cancelUpload()` take
+`GraphMailbox|GraphCredentialInterface`; `call()` takes a trailing `bool $retryUnauthorized = true`.
 `Graph\Inbound\GraphMessageNormalizer` takes any `Mailbox\Html\MailHtmlSanitizer` (an `InboundHtmlSanitizer` still
 fits). Public 1.x / 2.x classes are unchanged.
 

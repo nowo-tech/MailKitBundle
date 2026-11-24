@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * PHP-CS-Fixer configuration (PSR-12 + Symfony canonical).
+ * PHP-CS-Fixer configuration (PER Coding Style + Symfony canonical, REQ-CS-009).
  * Standard for Nowo bundles. Run: make cs-check | make cs-fix
  */
 use PhpCsFixer\Config;
@@ -14,7 +14,8 @@ return (new Config())
     ->setParallelConfig(new ParallelConfig(2))
     ->setRiskyAllowed(true)
     ->setRules([
-        '@PSR12' => true,
+        '@PER-CS' => true,
+        '@PER-CS:risky' => true,
         '@Symfony' => true,
         '@Symfony:risky' => true,
         'declare_strict_types' => true,
@@ -96,5 +97,7 @@ return (new Config())
     ->setFinder(
         (new Finder())
             ->in(__DIR__)
-            ->exclude(['demo', 'vendor', 'var', 'coverage', '.phpunit.cache'])
+            ->exclude(['vendor', 'var', 'coverage', '.phpunit.cache', 'node_modules'])
+            // Generated or maintained by Symfony Flex in the demos.
+            ->notPath(['#^demo/[^/]+/config/(?:bundles|reference)\.php$#'])
     );

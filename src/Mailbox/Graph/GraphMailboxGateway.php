@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\MailKitBundle\Mailbox\Graph;
 
+use Closure;
 use DateTimeImmutable;
 use DateTimeZone;
 use Exception;
@@ -16,17 +17,22 @@ use Nowo\MailKitBundle\Graph\Inbound\InboundAddress;
 use Nowo\MailKitBundle\Graph\Inbound\InboundFileTypes;
 use Nowo\MailKitBundle\Graph\Send\AttachmentFilename;
 use Nowo\MailKitBundle\Graph\Send\GraphAttachment;
+use Nowo\MailKitBundle\Graph\Send\GraphMailSender;
 use Nowo\MailKitBundle\Mailbox\Engine\ChangeItem;
 use Nowo\MailKitBundle\Mailbox\Engine\ChangePage;
 use Nowo\MailKitBundle\Mailbox\Engine\CursorExpired;
+use Nowo\MailKitBundle\Mailbox\Engine\DraftRef;
+use Nowo\MailKitBundle\Mailbox\Engine\DraftState;
 use Nowo\MailKitBundle\Mailbox\Engine\FetchedMessage;
 use Nowo\MailKitBundle\Mailbox\Engine\MailboxGatewayInterface;
 use Nowo\MailKitBundle\Mailbox\Engine\MailboxSession;
 use Nowo\MailKitBundle\Mailbox\Engine\ProviderAccount;
 use Nowo\MailKitBundle\Mailbox\Engine\RemoteSubscription;
+use Nowo\MailKitBundle\Mailbox\Engine\SubmitTokenRejected;
 use Nowo\MailKitBundle\Mailbox\Exception\MailboxGrantFailure;
 use Nowo\MailKitBundle\Mailbox\Exception\MailboxProviderFailure;
 use Nowo\MailKitBundle\Mailbox\Html\MailHtmlSanitizer;
+use Nowo\MailKitBundle\Mailbox\Html\RemoteImages;
 use Nowo\MailKitBundle\Mailbox\Value\AttachmentKind;
 use Nowo\MailKitBundle\Mailbox\Value\AttachmentRef;
 use Nowo\MailKitBundle\Mailbox\Value\FetchedAttachment;
@@ -35,6 +41,9 @@ use Nowo\MailKitBundle\Mailbox\Value\GrantFailureReason;
 use Nowo\MailKitBundle\Mailbox\Value\MailboxProvider;
 use Nowo\MailKitBundle\Mailbox\Value\MessageEnvelope;
 use Nowo\MailKitBundle\Mailbox\Value\MessageOrigin;
+use Nowo\MailKitBundle\Mailbox\Value\OutgoingAttachment;
+use Nowo\MailKitBundle\Mailbox\Value\OutgoingKind;
+use Nowo\MailKitBundle\Mailbox\Value\OutgoingMailboxMail;
 use Nowo\MailKitBundle\Mailbox\Value\ProviderAttachmentId;
 use Nowo\MailKitBundle\Mailbox\Value\ProviderCall;
 use Nowo\MailKitBundle\Mailbox\Value\ProviderMessageId;
@@ -43,10 +52,15 @@ use Nowo\MailKitBundle\Mailbox\Value\ThreadKey;
 use Nowo\MailKitBundle\Sender\MailAddress;
 use Psr\Log\LoggerInterface;
 use SensitiveParameter;
+use Symfony\Component\Mime\Address;
+use Symfony\Component\Mime\Email;
+use Symfony\Component\Mime\Exception\ExceptionInterface as MimeException;
+use Throwable;
 
 use function array_slice;
 use function array_values;
 use function assert;
+use function base64_encode;
 use function fclose;
 use function fopen;
 use function fread;
@@ -58,7 +72,9 @@ use function is_bool;
 use function is_numeric;
 use function is_resource;
 use function is_string;
+use function max;
 use function mb_substr;
+use function min;
 use function parse_url;
 use function preg_match;
 use function preg_replace;
@@ -81,6 +97,14 @@ use const PHP_URL_PATH;
  * delta of `/me` or of the bound account. Every remote field is validated and bounded; HTML goes through the mail
  * sanitiser. Graph errors become grant failures (pause) only for grant, consent and account problems (design
  * section 13); everything else is a {@see MailboxProviderFailure}, transient or not. Stateless.
+ *
+ * Send (2.5.0 part 2, Q-MB-1): draft + send, never `sendMail`. A new message is a MIME draft (the 1.8 path: own
+ * Message-ID, Bcc by a PATCH); a reply / reply all / forward is `createReply` / `createReplyAll` / `createForward` on
+ * the original, then the host's recipients, subject and body are PATCHed over Outlook's (Q-MB-7). Attachments below
+ * 2.9 MB are one POST; larger ones go through an upload session whose URL is checked against the upload host
+ * allow-list before use and never receives the token. Outgoing HTML goes through the mail sanitiser with remote images
+ * dropped (no script, style or event handler leaves the mailbox; no remote image is sent). These calls never resend:
+ * the sender reads the draft state after any failure of the submit.
  */
 final class GraphMailboxGateway implements MailboxGatewayInterface
 {
@@ -123,17 +147,23 @@ final class GraphMailboxGateway implements MailboxGatewayInterface
     /** Bytes of an attachment read for the content type detection. */
     private const SNIFF_BYTES = 65_536;
 
+    /** The outgoing HTML sanitiser of a gateway built without one. */
+    private readonly MailHtmlSanitizer $outgoing;
+
     /**
      * @param GraphApiClient $api the 1.8 client (built for delegated calls: host pin, no app-only tokens needed)
      * @param GraphMessageNormalizer $normalizer the 1.9 normaliser with the mailbox HTML sanitiser
      * @param int $maxMessageBytes `mailboxes.limits.max_message_bytes`
+     * @param MailHtmlSanitizer|null $outgoingSanitizer sanitiser of outgoing HTML (null: remote images dropped, 2 MB)
      */
     public function __construct(
         private readonly GraphApiClient $api,
         private readonly GraphMessageNormalizer $normalizer,
         private readonly int $maxMessageBytes = 26_214_400,
         private readonly ?LoggerInterface $logger = null,
+        ?MailHtmlSanitizer $outgoingSanitizer = null,
     ) {
+        $this->outgoing = $outgoingSanitizer ?? new MailHtmlSanitizer(RemoteImages::Dropped, 2_000_000);
     }
 
     /**
@@ -457,6 +487,242 @@ final class GraphMailboxGateway implements MailboxGatewayInterface
         $name     = AttachmentFilename::neutralise(is_string($meta['name'] ?? null) ? $meta['name'] : null);
 
         return new FetchedAttachment($stream, $size, $detected, InboundFileTypes::safeFilename($name, $detected));
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function createDraft(MailboxSession $session, OutgoingMailboxMail $mail, string $messageId): DraftRef
+    {
+        $prefer = ['Prefer' => 'IdType="ImmutableId"'];
+        if (!$mail->inResponseTo instanceof ProviderMessageId) {
+            $answer = $this->call($session, 'POST', '/me/messages', [
+                'headers' => ['Content-Type' => 'text/plain'] + $prefer,
+                'body'    => base64_encode($this->mime($session, $mail, $messageId)),
+            ], [201], 'create_draft', $this->maxMessageBytes);
+        } else {
+            $action = match ($mail->kind) {
+                OutgoingKind::Reply    => 'createReply',
+                OutgoingKind::ReplyAll => 'createReplyAll',
+                default                => 'createForward',
+            };
+            // The draft carries the original's quoted body (and, for a forward, its attachments' metadata).
+            $answer = $this->call($session, 'POST', '/me/messages/' . rawurlencode($mail->inResponseTo->value) . '/' . $action, [
+                'headers' => ['Content-Type' => 'application/json'] + $prefer,
+                'body'    => '{}',
+            ], [201], 'create_draft', $this->maxMessageBytes);
+        }
+        $id = is_string($answer['id'] ?? null) ? $answer['id'] : '';
+        if (preg_match(ProviderMessageId::PATTERN, $id) !== 1) {
+            throw new MailboxProviderFailure('Microsoft Graph create_draft returned no usable id.', MailboxProviderFailure::REFUSED, 201);
+        }
+        $internetId = is_string($answer['internetMessageId'] ?? null) ? trim($answer['internetMessageId'], '<> ') : '';
+        $thread     = is_string($answer['conversationId'] ?? null) && preg_match(ProviderMessageId::PATTERN, $answer['conversationId']) === 1 ? $answer['conversationId'] : null;
+
+        return new DraftRef(new ProviderMessageId($id), preg_match('/^[^<>\s]{1,500}\z/', $internetId) === 1 ? $internetId : '', $thread);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function updateDraft(MailboxSession $session, DraftRef $draft, OutgoingMailboxMail $mail): void
+    {
+        if ($mail->kind === OutgoingKind::New) {
+            // The MIME draft carries To, Cc, subject and bodies; MIME never carries Bcc.
+            if ($mail->bcc !== []) {
+                $this->call($session, 'PATCH', '/me/messages/' . rawurlencode($draft->id->value), ['headers' => ['Prefer' => 'IdType="ImmutableId"'], 'json' => ['bccRecipients' => $this->recipientsJson($mail->bcc)]], [200], 'update_draft', $this->maxMessageBytes);
+            }
+
+            return;
+        }
+        // Q-MB-7: the host's recipients and body win over the ones Outlook put on the draft (its quote included).
+        $patch = [
+            'toRecipients'  => $this->recipientsJson($mail->to),
+            'ccRecipients'  => $this->recipientsJson($mail->cc),
+            'bccRecipients' => $this->recipientsJson($mail->bcc),
+            'body'          => $mail->html !== null ? ['contentType' => 'html', 'content' => $this->outgoing->sanitize($mail->html)] : ['contentType' => 'text', 'content' => $mail->text],
+        ];
+        if ($mail->subject !== null) {
+            $patch['subject'] = $mail->subject;
+        }
+        $this->call($session, 'PATCH', '/me/messages/' . rawurlencode($draft->id->value), ['headers' => ['Prefer' => 'IdType="ImmutableId"'], 'json' => $patch], [200], 'update_draft', $this->maxMessageBytes);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function addAttachment(MailboxSession $session, DraftRef $draft, OutgoingAttachment $attachment, Closure $progress): void
+    {
+        $path   = '/me/messages/' . rawurlencode($draft->id->value) . '/attachments';
+        $item   = ['name' => $attachment->filename, 'contentType' => $attachment->contentType, 'isInline' => $attachment->inline] + ($attachment->contentId !== null ? ['contentId' => $attachment->contentId] : []);
+        $handle = $attachment->open();
+
+        try {
+            if ($attachment->size < GraphMailSender::LARGE_ATTACHMENT_BYTES) {
+                $this->call($session, 'POST', $path, ['json' => ['@odata.type' => '#microsoft.graph.fileAttachment', 'contentBytes' => base64_encode($this->read($handle, $attachment->size))] + $item], [201], 'upload', self::MAX_SMALL_BYTES, true);
+                $progress();
+
+                return;
+            }
+            $this->upload($session, $path, $attachment, $item, $handle, $progress);
+        } finally {
+            $attachment->close($handle);
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function sendDraft(MailboxSession $session, ProviderMessageId $draft): void
+    {
+        // One request only (audit ZAV-L1): a 401 is not retried here, so the sender renews its claim before the retry.
+        try {
+            $this->api->call(new DelegatedGraphCredential($session), 'POST', '/me/messages/' . rawurlencode($draft->value) . '/send', ['headers' => ['Prefer' => 'IdType="ImmutableId"'], 'body' => ''], [202], 'send', self::MAX_SMALL_BYTES, false);
+        } catch (GraphException $failure) {
+            if ($failure->status === 401) {
+                throw new SubmitTokenRejected();
+            }
+
+            throw self::failure($failure, 'send');
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function draftState(MailboxSession $session, ProviderMessageId $draft): DraftState
+    {
+        try {
+            $data = $this->call($session, 'GET', '/me/messages/' . rawurlencode($draft->value) . '?$select=id,isDraft', ['headers' => ['Prefer' => 'IdType="ImmutableId"']], [200], 'get_message', self::MAX_SMALL_BYTES, true);
+        } catch (MailboxProviderFailure $failure) {
+            return $failure->reason === MailboxProviderFailure::NOT_FOUND ? DraftState::Gone : DraftState::Unreadable;
+        }
+        if (($data['id'] ?? null) !== $draft->value || !is_bool($data['isDraft'] ?? null)) {
+            return DraftState::Unreadable;
+        }
+
+        return $data['isDraft'] ? DraftState::Draft : DraftState::Sent;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function deleteDraft(MailboxSession $session, ProviderMessageId $draft): void
+    {
+        $this->call($session, 'DELETE', '/me/messages/' . rawurlencode($draft->value), [], [204, 404], 'delete_draft', self::MAX_SMALL_BYTES, true);
+    }
+
+    /**
+     * The MIME of a new message from the mailbox's own address (the 1.8 rules: Symfony Mime builds every header from
+     * validated values; Bcc is never in the MIME).
+     */
+    private function mime(MailboxSession $session, OutgoingMailboxMail $mail, string $messageId): string
+    {
+        try {
+            $email = (new Email())->from(new Address((string) $session->address))->subject((string) $mail->subject)->text($mail->text);
+            foreach ($mail->to as $recipient) {
+                $email->addTo(new Address($recipient->email, $recipient->name ?? ''));
+            }
+            foreach ($mail->cc as $recipient) {
+                $email->addCc(new Address($recipient->email, $recipient->name ?? ''));
+            }
+            if ($mail->html !== null) {
+                $email->html($this->outgoing->sanitize($mail->html));
+            }
+            $email->getHeaders()->addIdHeader('Message-ID', $messageId);
+            if ($mail->to === [] && $mail->cc === []) {
+                // Bcc-only: Mime renders no message without a To, Cc or Bcc header; toString() strips the Bcc again.
+                $email->addBcc(new Address($mail->bcc[0]->email));
+            }
+            $mime = $email->toString();
+        } catch (MimeException) {
+            throw new MailboxProviderFailure('The message could not be rendered as MIME (invalid address).', MailboxProviderFailure::REFUSED);
+        }
+        if (strlen($mime) > GraphMailSender::MAX_MIME_BYTES) {
+            throw new MailboxProviderFailure('The message bodies are too large for one Microsoft Graph draft.', MailboxProviderFailure::TOO_LARGE);
+        }
+
+        return $mime;
+    }
+
+    /**
+     * An upload session (URL checked against the upload host allow-list, never given the token) fed in chunks read
+     * from the stream; cancelled on any failure.
+     *
+     * @param array<string, mixed> $item
+     * @param resource $handle
+     * @param Closure(): void $progress
+     */
+    private function upload(MailboxSession $session, string $path, OutgoingAttachment $attachment, array $item, mixed $handle, Closure $progress): void
+    {
+        $answer     = $this->call($session, 'POST', $path . '/createUploadSession', ['json' => ['AttachmentItem' => ['attachmentType' => 'file', 'size' => $attachment->size] + $item]], [201], 'upload', self::MAX_SMALL_BYTES, true);
+        $url        = is_string($answer['uploadUrl'] ?? null) ? $answer['uploadUrl'] : '';
+        $credential = new DelegatedGraphCredential($session);
+
+        try {
+            $this->api->assertUploadUrl($url);
+        } catch (GraphException $failure) {
+            throw self::failure($failure, 'upload', true);
+        }
+
+        try {
+            $offset = 0;
+            $status = 0;
+            while ($offset < $attachment->size) {
+                $chunk  = $this->read($handle, min(GraphMailSender::CHUNK_BYTES, $attachment->size - $offset));
+                $status = $this->api->uploadChunk($credential, $url, $chunk, $offset, $attachment->size);
+                $offset += strlen($chunk);
+                $progress();
+                if ($status === 201 && $offset < $attachment->size) {
+                    throw new MailboxProviderFailure('Microsoft Graph attachment upload ended before the last chunk.', MailboxProviderFailure::REFUSED, 201);
+                }
+            }
+            if ($status !== 201) {
+                throw new MailboxProviderFailure('Microsoft Graph attachment upload did not complete.', MailboxProviderFailure::REFUSED, $status);
+            }
+        } catch (GraphException $failure) {
+            $this->api->cancelUpload($credential, $url);
+
+            throw self::failure($failure, 'upload', true);
+        } catch (Throwable $failure) {
+            $this->api->cancelUpload($credential, $url);
+
+            throw $failure;
+        }
+    }
+
+    /**
+     * Reads exactly `$length` bytes (a shorter stream is refused: the declared size was wrong).
+     *
+     * @param resource $handle
+     */
+    private function read(mixed $handle, int $length): string
+    {
+        $data = '';
+        while (strlen($data) < $length) {
+            $part = fread($handle, max(1, $length - strlen($data)));
+            if ($part === false || $part === '') {
+                throw new MailboxProviderFailure('An attachment is shorter than its declared size.', MailboxProviderFailure::REFUSED);
+            }
+            $data .= $part;
+        }
+
+        return $data;
+    }
+
+    /**
+     * @param list<MailAddress> $recipients
+     *
+     * @return list<array{emailAddress: array{address: string, name?: string}}>
+     */
+    private function recipientsJson(array $recipients): array
+    {
+        $list = [];
+        foreach ($recipients as $recipient) {
+            $list[] = ['emailAddress' => ['address' => $recipient->email] + ($recipient->name !== null ? ['name' => $recipient->name] : [])];
+        }
+
+        return $list;
     }
 
     /**

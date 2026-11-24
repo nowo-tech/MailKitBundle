@@ -10,6 +10,7 @@ use Nowo\MailKitBundle\Mailbox\Exception\MailboxGrantFailure;
 use Nowo\MailKitBundle\Mailbox\Port\MailboxCallObserverInterface;
 use Nowo\MailKitBundle\Mailbox\Port\MailboxDirectoryInterface;
 use Nowo\MailKitBundle\Mailbox\Port\MailboxExclusionPolicyInterface;
+use Nowo\MailKitBundle\Mailbox\Port\MailboxMessageIndexInterface;
 use Nowo\MailKitBundle\Mailbox\Port\MailboxMessageSinkInterface;
 use Nowo\MailKitBundle\Mailbox\Port\MailboxTokenProviderInterface;
 use Nowo\MailKitBundle\Mailbox\Value\ExclusionDecision;
@@ -31,10 +32,10 @@ use function array_values;
 
 /**
  * In-memory host ports of the delegated mailboxes (a DDD host's adapters in tests): token provider (fake tokens built
- * at runtime: `fake-<mailbox>-<n>`), directory, idempotent sink (unique by mailbox + provider id), exclusion policy
- * and call observer.
+ * at runtime: `fake-<mailbox>-<n>`), directory, idempotent sink (unique by mailbox + provider id), exclusion policy,
+ * call observer and message index (the stored messages of a folder).
  */
-final class MemoryMailboxPorts implements MailboxTokenProviderInterface, MailboxDirectoryInterface, MailboxMessageSinkInterface, MailboxExclusionPolicyInterface, MailboxCallObserverInterface
+final class MemoryMailboxPorts implements MailboxTokenProviderInterface, MailboxDirectoryInterface, MailboxMessageSinkInterface, MailboxExclusionPolicyInterface, MailboxCallObserverInterface, MailboxMessageIndexInterface
 {
     /** @var array<string, MailboxSettings> */
     public array $mailboxes = [];
@@ -158,5 +159,18 @@ final class MemoryMailboxPorts implements MailboxTokenProviderInterface, Mailbox
     public function called(ProviderCall $call): void
     {
         $this->calls[] = $call;
+    }
+
+    public function contains(MailboxId $mailbox, FolderRef $folder, array $messages): array
+    {
+        $known = [];
+        foreach ($messages as $message) {
+            $stored = $this->stored[$mailbox->value . "\n" . $message->value] ?? null;
+            if ($stored !== null && $stored->folder->equals($folder)) {
+                $known[] = $message;
+            }
+        }
+
+        return $known;
     }
 }

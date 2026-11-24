@@ -9,6 +9,7 @@ use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
 
 use function array_key_exists;
+use function base64_decode;
 use function count;
 use function is_array;
 use function is_string;
@@ -39,7 +40,7 @@ final class MailboxGraphFake
 
     public const ACCOUNT_ID = '00000000-0000-4000-8000-0000000000aa';
 
-    /** @var list<array{method: string, url: string, path: string, authorization: string, body: array<mixed>}> */
+    /** @var list<array{method: string, url: string, path: string, authorization: string, body: array<mixed>, raw: string}> */
     public array $requests = [];
 
     /** @var (Closure(string, string, array<mixed>): ?MockResponse)|null method, path (+ query), JSON body */
@@ -72,6 +73,30 @@ final class MailboxGraphFake
     /** @var array<string, true> subscriptions Graph no longer knows */
     public array $goneSubscriptions = [];
 
+    /** @var list<string> drafts created (ids), in order */
+    public array $drafts = [];
+
+    /** @var array<string, list<array<mixed>>> draft id => PATCH bodies */
+    public array $patches = [];
+
+    /** @var array<string, list<array<mixed>>> draft id => attachments added (POST bodies and upload sessions) */
+    public array $added = [];
+
+    /** @var array<string, string> draft id => raw MIME of a new message */
+    public array $mime = [];
+
+    /** @var list<string> drafts delivered (a draft is delivered at most once, as in Exchange) */
+    public array $delivered = [];
+
+    /** @var list<string> /send calls (draft ids), delivered or not */
+    public array $sendCalls = [];
+
+    /** @var list<string> drafts deleted */
+    public array $deleted = [];
+
+    /** @var array<string, string> upload URL => bytes received */
+    public array $uploads = [];
+
     public function client(): MockHttpClient
     {
         return new MockHttpClient(fn (string $method, string $url, array $options): MockResponse => $this->answer($method, $url, $options));
@@ -80,7 +105,7 @@ final class MailboxGraphFake
     /**
      * Requests whose path contains a fragment.
      *
-     * @return list<array{method: string, url: string, path: string, authorization: string, body: array<mixed>}>
+     * @return list<array{method: string, url: string, path: string, authorization: string, body: array<mixed>, raw: string}>
      */
     public function matching(string $fragment, ?string $method = null): array
     {
@@ -131,11 +156,12 @@ final class MailboxGraphFake
                 $authorization = $m[1];
             }
         }
-        $body             = is_string($options['body'] ?? null) && $options['body'] !== '' ? json_decode($options['body'], true) : [];
+        $raw              = is_string($options['body'] ?? null) ? $options['body'] : '';
+        $body             = $raw !== '' ? json_decode($raw, true) : [];
         $body             = is_array($body) ? $body : [];
         $path             = rawurldecode((string) parse_url($url, PHP_URL_PATH));
         $query            = (string) parse_url($url, PHP_URL_QUERY);
-        $request          = ['method' => $method, 'url' => $url, 'path' => $path, 'authorization' => $authorization, 'body' => $body];
+        $request          = ['method' => $method, 'url' => $url, 'path' => $path, 'authorization' => $authorization, 'body' => $body, 'raw' => $raw];
         $this->requests[] = $request;
 
         if ($this->override instanceof Closure) {
@@ -144,10 +170,25 @@ final class MailboxGraphFake
                 return $response;
             }
         }
+        if (str_starts_with($url, 'https://outlook.office.com/upload/')) {
+            if ($method === 'DELETE') {
+                unset($this->uploads[$url]);
+
+                return new MockResponse('', ['http_code' => 204]);
+            }
+            $this->uploads[$url] = ($this->uploads[$url] ?? '') . $raw;
+            $total               = preg_match('#/(\d+)$#', (string) $this->header($options, 'content-range'), $m) === 1 ? (int) $m[1] : 0;
+
+            return strlen($this->uploads[$url]) >= $total ? self::json(['id' => 'att'], 201) : self::json(['nextExpectedRanges' => [strlen($this->uploads[$url]) . '-']]);
+        }
         if (!str_starts_with($url, self::BASE . '/')) {
             return self::json(['error' => ['code' => 'NotGraph']], 400);
         }
         $path = substr($path, strlen('/v1.0'));
+        $send = $this->sendRoutes($method, $path, $raw, $body);
+        if ($send instanceof MockResponse) {
+            return $send;
+        }
 
         if ($method === 'GET' && $path === '/me') {
             return self::json($this->account);
@@ -217,6 +258,95 @@ final class MailboxGraphFake
         }
 
         return self::json(['error' => ['code' => 'UnexpectedCall']], 400);
+    }
+
+    /**
+     * Draft, update, attachments, upload session, send and delete of the send path (2.5.0 part 2).
+     *
+     * @param array<mixed> $body
+     */
+    private function sendRoutes(string $method, string $path, string $raw, array $body): ?MockResponse
+    {
+        if ($method === 'POST' && $path === '/me/messages') {
+            $this->mime[$id = $this->newDraft([])] = (string) base64_decode($raw, true);
+
+            return self::json($this->messages[$id], 201);
+        }
+        if ($method === 'POST' && preg_match('#^/me/messages/([^/]+)/(createReply|createReplyAll|createForward)$#', $path, $m) === 1) {
+            if (!isset($this->messages[$m[1]])) {
+                return self::json(['error' => ['code' => 'ErrorItemNotFound']], 404);
+            }
+            $id = $this->newDraft(['conversationId' => $this->messages[$m[1]]['conversationId'] ?? 'conv-' . $m[1], 'subject' => ($m[2] === 'createForward' ? 'FW: ' : 'RE: ') . ($this->messages[$m[1]]['subject'] ?? '')]);
+
+            return self::json($this->messages[$id], 201);
+        }
+        if ($method === 'PATCH' && preg_match('#^/me/messages/([^/]+)$#', $path, $m) === 1 && isset($this->messages[$m[1]])) {
+            $this->patches[$m[1]][] = $body;
+
+            return self::json($this->messages[$m[1]] + $body);
+        }
+        if ($method === 'POST' && preg_match('#^/me/messages/([^/]+)/attachments(/createUploadSession)?$#', $path, $m) === 1) {
+            $this->added[$m[1]][] = $body;
+            if (($m[2] ?? '') !== '') {
+                return self::json(['uploadUrl' => 'https://outlook.office.com/upload/REDACTED-TEST-upload-capability-' . count($this->added[$m[1]])], 201);
+            }
+
+            return self::json(['id' => 'att-' . count($this->added[$m[1]])], 201);
+        }
+        if ($method === 'POST' && preg_match('#^/me/messages/([^/]+)/send$#', $path, $m) === 1) {
+            $this->sendCalls[] = $m[1];
+            if (($this->messages[$m[1]]['isDraft'] ?? null) !== true) {
+                return self::json(['error' => ['code' => 'ErrorItemNotFound']], 404);
+            }
+            $this->deliver($m[1]);
+
+            return new MockResponse('', ['http_code' => 202]);
+        }
+        if ($method === 'DELETE' && preg_match('#^/me/messages/([^/]+)$#', $path, $m) === 1) {
+            $this->deleted[] = $m[1];
+            unset($this->messages[$m[1]]);
+
+            return new MockResponse('', ['http_code' => 204]);
+        }
+
+        return null;
+    }
+
+    /**
+     * Delivers a draft (once): it leaves Drafts as a sent message with the same immutable id.
+     */
+    public function deliver(string $id): void
+    {
+        $this->delivered[]              = $id;
+        $this->messages[$id]['isDraft'] = false;
+        $this->messages[$id]['from']    = ['emailAddress' => ['address' => 'ana@example.com', 'name' => 'Ana']];
+        $this->messages[$id]['sender']  = ['emailAddress' => ['address' => 'ana@example.com', 'name' => 'Ana']];
+    }
+
+    /**
+     * @param array<string, mixed> $resource
+     */
+    private function newDraft(array $resource): string
+    {
+        $id                  = 'DRAFT-' . (count($this->drafts) + 1);
+        $this->drafts[]      = $id;
+        $this->messages[$id] = self::message($id, $resource + ['isDraft' => true, 'from' => null, 'sender' => null, 'internetMessageId' => '<' . $id . '@ana.example.com>']);
+
+        return $id;
+    }
+
+    /**
+     * @param array<string, mixed> $options
+     */
+    private function header(array $options, string $name): ?string
+    {
+        foreach (is_array($options['headers'] ?? null) ? $options['headers'] : [] as $line) {
+            if (is_string($line) && preg_match('/^' . $name . ':\s*(.*)$/i', $line, $m) === 1) {
+                return $m[1];
+            }
+        }
+
+        return null;
     }
 
     /**

@@ -33,6 +33,8 @@ final class MailKitExactKeyColumnsTest extends TestCase
             'mail_kit_mailbox_subscription.subscription_id',
             'mail_kit_mailbox_subscription.mailbox_id',
             'mail_kit_mailbox_subscription.folder_key',
+            'mail_kit_mailbox_send.mailbox_id',
+            'mail_kit_mailbox_send.idempotency_key',
         ], array_map(static fn (ExactKeyColumn $column): string => $column->describe(), $columns));
 
         foreach ($columns as $column) {
@@ -57,7 +59,7 @@ final class MailKitExactKeyColumnsTest extends TestCase
         // Both off is the default configuration: nothing is registered, and there is no table either.
         $columns = (new MailKitExactKeyColumns())->exactKeyColumns();
 
-        self::assertCount(14, $columns);
+        self::assertCount(16, $columns);
         foreach ($columns as $column) {
             self::assertFalse($column->active, $column->describe());
             self::assertSame(

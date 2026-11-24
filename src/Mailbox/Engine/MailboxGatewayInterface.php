@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\MailKitBundle\Mailbox\Engine;
 
+use Closure;
 use Nowo\MailKitBundle\Mailbox\Exception\MailboxGrantFailure;
 use Nowo\MailKitBundle\Mailbox\Exception\MailboxProviderFailure;
 use Nowo\MailKitBundle\Mailbox\Exception\MailboxTokenUnavailable;
@@ -12,6 +13,8 @@ use Nowo\MailKitBundle\Mailbox\Value\FetchedAttachment;
 use Nowo\MailKitBundle\Mailbox\Value\FolderRef;
 use Nowo\MailKitBundle\Mailbox\Value\MailboxProvider;
 use Nowo\MailKitBundle\Mailbox\Value\MessageOrigin;
+use Nowo\MailKitBundle\Mailbox\Value\OutgoingAttachment;
+use Nowo\MailKitBundle\Mailbox\Value\OutgoingMailboxMail;
 use Nowo\MailKitBundle\Mailbox\Value\ProviderAttachmentId;
 use Nowo\MailKitBundle\Mailbox\Value\ProviderMessageId;
 use Nowo\MailKitBundle\Mailbox\Value\SyncedMessage;
@@ -20,7 +23,8 @@ use Nowo\MailKitBundle\Mailbox\Value\SyncedMessage;
  * One provider behind the delegated-mailbox engine (2.5.0: Microsoft Graph; Gmail in 2.6.0 implements the same
  * interface). Every method fails with {@see MailboxGrantFailure} (grant, consent or account errors only),
  * {@see MailboxTokenUnavailable} (from the host's port) or {@see MailboxProviderFailure}; never with a provider or
- * HTTP type. The send PR adds the draft / send operations next to these.
+ * HTTP type. The send operations (draft, update, upload, send, draft state, delete) never resend by themselves: the
+ * sender decides from the draft state (design section 9.4).
  *
  * @internal
  */
@@ -91,4 +95,43 @@ interface MailboxGatewayInterface
      * Streams one file attachment into a capped temporary stream.
      */
     public function open(MailboxSession $session, ProviderMessageId $message, ProviderAttachmentId $attachment, int $maxBytes): FetchedAttachment;
+
+    /**
+     * Creates the draft of an outgoing message: a MIME draft with `$messageId` for a new message, `createReply` /
+     * `createReplyAll` / `createForward` on the original otherwise (the provider sets the threading headers).
+     *
+     * @param string $messageId Message-ID of a new message, without angle brackets
+     */
+    public function createDraft(MailboxSession $session, OutgoingMailboxMail $mail, string $messageId): DraftRef;
+
+    /**
+     * Puts the host's recipients, subject and body on a reply / forward draft, or the Bcc on a new one (Q-MB-7).
+     */
+    public function updateDraft(MailboxSession $session, DraftRef $draft, OutgoingMailboxMail $mail): void;
+
+    /**
+     * Adds one attachment to a draft, streamed (an upload session in chunks from the provider's threshold).
+     *
+     * @param Closure(): void $progress called after every chunk (the sender extends its claim; it throws when the claim
+     *                                  was lost, which ends the upload)
+     */
+    public function addAttachment(MailboxSession $session, DraftRef $draft, OutgoingAttachment $attachment, Closure $progress): void;
+
+    /**
+     * Submits a draft with one request (never retried here). A failure tells nothing about the outcome on its own: the
+     * caller reads {@see draftState()}.
+     *
+     * @throws SubmitTokenRejected the provider answered 401 (the token was dropped; the caller may retry once)
+     */
+    public function sendDraft(MailboxSession $session, ProviderMessageId $draft): void;
+
+    /**
+     * Whether a draft MailKit created is still a draft, was sent, is gone, or cannot be read right now.
+     */
+    public function draftState(MailboxSession $session, ProviderMessageId $draft): DraftState;
+
+    /**
+     * Deletes a draft (an unknown one counts as deleted). Call it only for an item read as {@see DraftState::Draft}.
+     */
+    public function deleteDraft(MailboxSession $session, ProviderMessageId $draft): void;
 }

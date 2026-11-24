@@ -17,7 +17,9 @@ The bundle makes the Symfony mailer runtime-configurable on top of Instance Sett
 optional `resend`) settings sections, resolves the DSN on every send (framework transport as fallback, also for
 Messenger), validates DSNs (scheme allow-list, SSRF-safe hosts) and senders, audits changes without secrets, offers a
 test e-mail and a Resend key check, keeps a privacy-aware sent-mail log with retention and erasure, and exposes
-`isOutboundMailReady()` (Twig, AuthKit adapter). It is safe in FrankenPHP worker mode.
+`isOutboundMailReady()` (Twig, AuthKit adapter). Opt-in features add branded layouts, Microsoft Graph sending and
+inbound mail for shared mailboxes, open and click tracking, and (2.5.0) delegated Outlook mailboxes: sync into the
+host's sink and sending with a mandatory idempotency key. It is safe in FrankenPHP worker mode.
 
 ---
 
@@ -73,6 +75,13 @@ MailKit's.
 **Given** an unsafe or incomplete setup (no Instance Settings, no framework mailer, UI without SecurityBundle or form
 CSRF, empty roles, demo switch outside debug, forbidden scheme, env placeholder switch), **Then** the container refuses
 to compile with a message naming the fix; routes exist only through the `nowo_mail_kit` loader.
+
+### US-9 — Delegated Outlook mailbox (P1, 2.5.0)
+
+**Given** an active delegated mailbox following Inbox, **When** a message arrives, **Then** the host's sink receives it
+once as a `SyncedMessage` (later deliveries answer `Duplicate`); **When** the host sends a reply twice with the same
+idempotency key, **Then** Graph delivers it once, the second call answers `replayed: true` and the sent copy reaches the
+sink. Details: [spec 005](../005-delegated-mailboxes/spec.md).
 
 ---
 
@@ -206,9 +215,37 @@ to compile with a message naming the fix; routes exist only through the `nowo_ma
 - **FR-TRK-006** — `TrackingStore` + schema listener; CLI `nowo:mail-kit:tracking:schema`, `:purge` (retention).
 - **FR-TRK-007** — GDPR export / erasure of tracking data (`EmailTrackingPersonalDataInterface`, UserKit providers).
 
+### Delegated mailboxes (2.5.0, [spec 005](../005-delegated-mailboxes/spec.md))
+
+- **FR-MBX-001** — Host ports (`MailboxTokenProviderInterface`, `MailboxDirectoryInterface`, `MailboxMessageSinkInterface`,
+  optional `MailboxExclusionPolicyInterface`, `MailboxCallObserverInterface`, `MailboxMessageIndexInterface`; defaults
+  `KeepAllExclusionPolicy`, `NullMailboxCallObserver`) and the services `MailboxSyncInterface` and
+  `MailboxAttachmentReaderInterface`; bundle value objects only (REQ-ARCH-001 rule 3).
+- **FR-MBX-002** — `MailboxSyncEngine`: start / pause / resume / sweep / status / disconnect, per-folder lease with
+  `rerun`, cursor compare-and-set, resync, account check on every run, grant-failure pause with one event, on-demand
+  attachments (`MailboxAttachmentReader`), per-operation `MailboxSession` (worker mode).
+- **FR-MBX-003** — Value objects of the mailbox layer (`MailboxId`, `MailboxSettings`, `FolderRef`, `MailboxAccessToken`
+  (redacted, not serialisable), `SyncedMessage`, `ThreadKey`, `ProviderCall`, …).
+- **FR-MBX-004** — Microsoft Graph provider: `GraphMailboxGateway` (`/me` paths only, delta-link guard, failure
+  mapping), `DelegatedGraphCredential`, the credential / request-option abstractions of `GraphApiClient`, the optional
+  OutboundUrlGuard pin (`MailboxUrlGuardPass`).
+- **FR-MBX-005** — `MailHtmlSanitizer` with `RemoteImages` modes (`blocked` by default).
+- **FR-MBX-006** — Webhook (`MailboxGraphWebhookController`, `MailboxWebhookRouteLoader`, shared
+  `AbstractGraphWebhookController`): validation echo, hashed client state, enqueue only.
+- **FR-MBX-007** — Messenger messages and handler (bounded retries) and the CLI `nowo:mail-kit:mailbox:schema`,
+  `:subscriptions`, `:sweep`, `:status`, `:purge`.
+- **FR-MBX-008** — `MailboxStore` (mailbox, cursor, subscription and send tables; conditional transitions, savepoints)
+  and its schema listener.
+- **FR-MBX-009** — Send: `MailboxSenderInterface` / `MailboxSender` (draft + send, mandatory idempotency key, the
+  `SendState` machine with fenced submits, reconcile by draft state, sent copy), `OutgoingMailboxMail`,
+  `OutgoingAttachment`, `OutgoingKind`, `SentMessage`, the send exceptions, `DeliverSentCopy`, `ReconcileMailboxSend`,
+  the purge command and the build-time transaction warning.
+- **FR-MBX-010** — Events (`MailboxGrantFailedEvent`, `MailboxResyncedEvent`, `MailboxFolderSyncFailedEvent`) and the
+  exceptions of the mailbox layer.
+
 ---
 
 ## Success criteria
 
 - 100% statement and element coverage of `src/` (CI gate), PHPStan max with empty `ignoreErrors`, Igor clean.
-- Every file of `src/` listed in [`code-inventory.md`](code-inventory.md): **188 / 188** mapped (1.12.2, audited 2026-11-16).
+- Every file of `src/` listed in [`code-inventory.md`](code-inventory.md): **282 / 282** mapped (2.5.0, audited 2026-11-24).

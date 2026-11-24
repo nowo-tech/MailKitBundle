@@ -53,8 +53,7 @@ All notable changes to this project are documented here. The format follows
   `rerun` coalescing and cursor compare-and-set, exclusion before the fetch when the delta page gives the sender,
   thread key, removals reported to the sink, grant-failure pause, per-call metering. Commands
   `nowo:mail-kit:mailbox:schema`, `…:mailbox:subscriptions`, `…:mailbox:sweep`, `…:mailbox:status`. Three DBAL tables
-  (`mail_kit_mailbox`, `_cursor`, `_subscription`) with no address, subject, body, token or recipient. Sending from a
-  delegated mailbox follows in part 2 of 2.5.0. Audit ZAT fixes before release: a grant failure acknowledges its
+  (`mail_kit_mailbox`, `_cursor`, `_subscription`) with no address, subject, body, token or recipient. Audit ZAT fixes before release: a grant failure acknowledges its
   Messenger message (the pause survives a `doctrine_transaction` middleware); the account is checked on every sweep;
   bounded retries (sweeps acknowledge transient failures; Retry-After re-enqueues at most 10 times); `removed()`
   carries a `RemovalReason` (`Deleted` / `MovedOut`, confirmed with Graph); delta links bound to their folder; only
@@ -67,6 +66,40 @@ All notable changes to this project are documented here. The format follows
   (delta links included).
   Verification ZAT-R4: a lease extension in the same second (no row changed on MySQL / MariaDB) is confirmed by a read
   of the owner instead of being taken for a lost lease; ZAT-R5: store write parameters are sensitive.
+- **Delegated mailboxes, send side (2.5.0 part 2).** `Mailbox\Service\MailboxSenderInterface::send(MailboxId,
+  OutgoingMailboxMail): SentMessage` sends a new message, a reply, a reply to all or a forward (`OutgoingKind`) from
+  the mailbox's own address through Microsoft Graph **draft + send** (Q-MB-1: a MIME draft with a Message-ID derived
+  from the key for a new message; `createReply` / `createReplyAll` / `createForward` on the original, then the host's
+  recipients, subject and body PATCHed over Outlook's, Q-MB-7), with streamed attachments (upload sessions from
+  2.9 MB, upload URLs checked against `mailboxes.graph.upload_hosts` and never given the token). The idempotency key is
+  **mandatory** (Q-MB-20): one row per mailbox and key in the new `mail_kit_mailbox_send` table moves by conditional
+  statements only (`drafting` → `sending` → `sent`; `released`, `failed`, `unknown`), and once `sending` is written only
+  that one draft is ever submitted again, and only after Graph reports it still is a draft: a retried, concurrent or
+  ambiguous send never delivers twice. An ambiguous submit (timeout, 5xx, 429) or an unreadable draft state answers
+  `MailboxSendInProgress` (`reconciling`) and is reconciled by its draft state after `send.stale_claim_seconds`
+  (`ReconcileMailboxSend`, or the next `send()` with the key); a draft that is gone, or `send.max_attempts` takeovers,
+  end in `MailboxSendOutcomeUnknown` and nothing is sent again. The account behind the token is checked before every
+  send (another account pauses the mailbox `AccountMismatch`). New exceptions `MailboxSendInProgress`,
+  `MailboxSendKeyConflict`, `MailboxSendFailed`, `MailboxSendOutcomeUnknown`; VOs `OutgoingMailboxMail` (header
+  injection and size bounds), `OutgoingKind`, `OutgoingAttachment`, `SentMessage`. The sent copy reaches the sink as
+  `MessageOrigin::SentCopy` through `DeliverSentCopy` whether Sent Items is followed or not (Q-MB-6), without the
+  exclusion policy. Delegated sends are not written to the sent-mail log (Q-MB-14); outgoing HTML is sanitised with
+  remote images dropped. Configuration `mailboxes.send.*` and `mailboxes.graph.upload_hosts`; command
+  `nowo:mail-kit:mailbox:purge` (settled send rows after `send.retention`, `P7D`). `send()` refuses to run inside a
+  transaction on the mailbox connection (a rollback would forget a delivered send). Audit ZAV fixes: every submit
+  (the 401 retry included, now made by the sender, not `GraphApiClient`) follows a conditional heartbeat and is refused
+  later than `send.stale_claim_seconds / 2` after `sending` was written (L1); the message fingerprint includes the
+  SHA-256 of the attachment bytes (I1); `DeliverSentCopy` needs a `sent` row with that id (I2); a `ReconcileMailboxSend`
+  inside a transaction is logged and acknowledged, and the build warns about a `doctrine_transaction` bus without a
+  dedicated `mailboxes.connection` (I3); `nowo:mail-kit:mailbox:purge --drafts` deletes leftover drafts after reading
+  them as drafts and keeps a row whose draft could not be dealt with, so the next run retries it (I4). ZAV-F1: after a
+  refused or vanished submit the `failed` / `unknown` transition is written first and the draft deleted only while the
+  call still holds the key; a holder that lost the key answers the row's outcome (replay, failure, unknown or in
+  progress). Index on (`mailbox_id`, `provider_message_id`). ZAV-F2: a failure before the submit whose
+  `released` / `failed` write finds the key taken over answers the new holder's outcome (a replay when it sent).
+- `Mailbox\Port\MailboxMessageIndexInterface` (optional, `mailboxes.message_index`; owner answer Q1 of 2026-11-24):
+  which messages of a change page the host already stores in that folder; the sweep asks once per page and fetches
+  only the others. No default implementation.
 - `Mailbox\Html\MailHtmlSanitizer`: the 1.9 inbound sanitiser, provider-neutral, with `html.remote_images: blocked`
   (default for mailboxes): remote image URLs move to `data-mail-kit-remote-src` for the host's image proxy; no
   `style`, script or event handler in any mode. `Graph\Inbound\InboundHtmlSanitizer` is now a thin subclass (no BC
@@ -75,13 +108,16 @@ All notable changes to this project are documented here. The format follows
   `auto` | `required` | `off`, the CrmKit 0.10 pattern).
 - `GraphInboundMessage::$listId` (List-Id, optional trailing constructor argument) and
   `GraphMessageNormalizer::listIdOf()`.
-- REQ-SEC-006: `MailKitExactKeyColumns` declares the mailbox key columns (inactive unless `mailboxes.enabled`).
+- REQ-SEC-006: `MailKitExactKeyColumns` declares the mailbox key columns (inactive unless `mailboxes.enabled`),
+  including `mail_kit_mailbox_send.mailbox_id` / `idempotency_key`.
 
 ### Changed
 
 - `Graph\GraphApiClient` (`@internal`) takes a shared-mailbox profile or a `GraphCredentialInterface` per call, reports
-  every call (status 0 on transport errors) and accepts optional per-request options (host pin). The 1.8 / 1.9
-  behaviour is unchanged.
+  every call (status 0 on transport errors) and accepts optional per-request options (host pin); `uploadChunk()` and
+  `cancelUpload()` take a credential too (the delegated path meters each chunk as `upload`), and `call()` takes a trailing
+  `$retryUnauthorized` (false for the delegated submit: the sender retries a 401 itself). The 1.8 / 1.9 behaviour
+  is unchanged. `ProviderCall::OPERATIONS` gains `delete_draft`.
 - The 1.9 webhook controller's HTTP flow moved to `Graph\Inbound\Webhook\AbstractGraphWebhookController`, shared
   with the delegated-mailbox route; savepoint writes moved to `Concurrency\SavepointWrites`. No behaviour change.
 

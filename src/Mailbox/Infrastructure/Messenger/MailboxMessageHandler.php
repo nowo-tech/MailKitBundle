@@ -6,12 +6,15 @@ namespace Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger;
 
 use Closure;
 use InvalidArgumentException;
+use LogicException;
+use Nowo\MailKitBundle\Mailbox\Engine\MailboxSender;
 use Nowo\MailKitBundle\Mailbox\Engine\MailboxSyncEngine;
 use Nowo\MailKitBundle\Mailbox\Exception\MailboxGrantFailure;
 use Nowo\MailKitBundle\Mailbox\Exception\MailboxProviderFailure;
 use Nowo\MailKitBundle\Mailbox\Exception\MailboxTokenUnavailable;
 use Nowo\MailKitBundle\Mailbox\Value\MailboxId;
 use Nowo\MailKitBundle\Mailbox\Value\MessageOrigin;
+use Nowo\MailKitBundle\Mailbox\Value\OutgoingMailboxMail;
 use Nowo\MailKitBundle\Mailbox\Value\ProviderMessageId;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Messenger\Exception\UnrecoverableMessageHandlingException;
@@ -20,9 +23,11 @@ use Symfony\Component\Messenger\Stamp\DelayStamp;
 
 use function max;
 use function min;
+use function preg_match;
 
 /**
- * Messenger handler of the three delegated-mailbox messages (2.5.0; one `messenger.message_handler` tag per message).
+ * Messenger handler of the delegated-mailbox messages (2.5.0; one `messenger.message_handler` tag per message): sync,
+ * fetch and renewal, and from the send path (part 2) the sent copy and the reconcile of an ambiguous send.
  * Malformed ids are dropped with a warning. Failures become Messenger's retry decisions (design section 13):
  *
  * - a grant failure has already paused the mailbox (one event): the message is **acknowledged** (logged, not thrown),
@@ -34,7 +39,10 @@ use function min;
  *   for at most {@see MAX_DELAYED_ATTEMPTS} attempts; then, and without Retry-After, it is rethrown for the transport's
  *   bounded retry strategy and failure transport (on a synchronous bus the DelayStamp is ignored, so these attempts run
  *   back to back);
- * - any other provider refusal (untrusted link, oversized answer, missing id) is unrecoverable.
+ * - any other provider refusal (untrusted link, oversized answer, missing id) is unrecoverable;
+ * - a sent copy the provider has not filed yet is tried again after `send.sent_copy.delay_ms`, at most
+ *   `send.sent_copy.attempts` times; a send still being reconciled is tried again after its stale delay, at most
+ *   {@see MAX_DELAYED_ATTEMPTS} times (then the next send() with the key reconciles it).
  *
  * Stateless.
  */
@@ -48,11 +56,18 @@ final readonly class MailboxMessageHandler
 
     /**
      * @param MessageBusInterface $bus bus of the delayed re-enqueues (`mailboxes.bus`)
+     * @param int $sentCopyAttempts `send.sent_copy.attempts`
+     * @param int $sentCopyDelayMs `send.sent_copy.delay_ms`
+     * @param int $reconcileDelayMs delay before a send is reconciled again (`send.stale_claim_seconds` + 1 s)
      */
     public function __construct(
         private MailboxSyncEngine $engine,
         private MessageBusInterface $bus,
         private ?LoggerInterface $logger = null,
+        private ?MailboxSender $sender = null,
+        private int $sentCopyAttempts = 3,
+        private int $sentCopyDelayMs = 5000,
+        private int $reconcileDelayMs = 301_000,
     ) {
     }
 
@@ -112,6 +127,78 @@ final readonly class MailboxMessageHandler
                 $message->attempt,
             );
         }
+    }
+
+    /**
+     * Delivers the copy of a sent message to the sink (tried again later while the provider has not filed it).
+     */
+    public function sentCopy(DeliverSentCopy $message): void
+    {
+        $mailbox = $this->mailbox($message->mailboxId);
+
+        try {
+            $id = new ProviderMessageId($message->messageId);
+        } catch (InvalidArgumentException) {
+            $id = null;
+        }
+        if (!$mailbox instanceof MailboxId || !$id instanceof ProviderMessageId) {
+            $this->logger?->warning('Mailbox sent copy dropped: malformed ids.', ['bundle' => 'NowoMailKitBundle']);
+
+            return;
+        }
+        $again = static fn (int $attempt): DeliverSentCopy => new DeliverSentCopy($message->mailboxId, $message->messageId, $attempt);
+        $this->run($mailbox, function () use ($mailbox, $id, $message, $again): void {
+            if ($this->engine->deliverSentCopy($mailbox, $id)) {
+                return;
+            }
+            $attempt = max(0, $message->attempt) + 1;
+            if ($attempt >= $this->sentCopyAttempts) {
+                $this->logger?->notice('Mailbox sent copy not found after the last attempt; a sweep of a followed Sent Items delivers it.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value]);
+
+                return;
+            }
+            $this->bus->dispatch($again($attempt), [new DelayStamp($this->sentCopyDelayMs)]);
+        }, $again, $message->attempt);
+    }
+
+    /**
+     * Reconciles a send whose outcome was ambiguous (tried again later while it is not settled).
+     */
+    public function reconcile(ReconcileMailboxSend $message): void
+    {
+        $mailbox = $this->mailbox($message->mailboxId);
+        $sender  = $this->sender;
+        if (!$mailbox instanceof MailboxId || preg_match(OutgoingMailboxMail::KEY_PATTERN, $message->idempotencyKey) !== 1 || !$sender instanceof MailboxSender) {
+            $this->logger?->warning('Mailbox send reconcile dropped: malformed ids or no sender.', ['bundle' => 'NowoMailKitBundle']);
+
+            return;
+        }
+        $again = static fn (int $attempt): ReconcileMailboxSend => new ReconcileMailboxSend($message->mailboxId, $message->idempotencyKey, $attempt);
+        $this->run($mailbox, function () use ($mailbox, $sender, $message, $again): void {
+            try {
+                $settled = $sender->reconcile($mailbox, $message->idempotencyKey);
+            } catch (LogicException $logic) {
+                if ($logic instanceof InvalidArgumentException) {
+                    throw $logic;
+                }
+                // Audit ZAV-I3: the handler runs inside a transaction on the mailbox connection (a doctrine_transaction
+                // middleware without a dedicated mailboxes.connection). Retrying cannot help: acknowledge once; the
+                // next send() with the key reconciles it.
+                $this->logger?->warning('Mailbox send reconcile skipped: it runs inside a transaction on the mailbox connection; configure a dedicated nowo_mail_kit.mailboxes.connection.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value]);
+
+                return;
+            }
+            if ($settled) {
+                return;
+            }
+            $attempt = max(0, $message->attempt) + 1;
+            if ($attempt >= self::MAX_DELAYED_ATTEMPTS) {
+                $this->logger?->notice('Mailbox send still unsettled after the last background reconcile; the next send() with the key reconciles it.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value]);
+
+                return;
+            }
+            $this->bus->dispatch($again($attempt), [new DelayStamp($this->reconcileDelayMs)]);
+        }, $again, $message->attempt);
     }
 
     /**

@@ -92,18 +92,20 @@ final class GraphApiClient
      * @param list<int> $expected accepted statuses
      * @param string $operation fixed label for errors and logs ("create draft", "send"...)
      * @param int $maxBytes largest response body read (a longer one fails with {@see GraphException::REASON_TOO_LARGE})
+     * @param bool $retryUnauthorized retry once with a fresh token after a 401 (false: the 401 is reported to the
+     *                                credential and returned as a GraphException; the caller decides, 2.5.0 send)
      *
      * @throws GraphException
      *
      * @return array<mixed>
      */
-    public function call(GraphMailbox|GraphCredentialInterface $mailbox, string $method, string $path, #[SensitiveParameter] array $options, array $expected, string $operation, int $maxBytes = self::MAX_RESPONSE_BYTES): array
+    public function call(GraphMailbox|GraphCredentialInterface $mailbox, string $method, string $path, #[SensitiveParameter] array $options, array $expected, string $operation, int $maxBytes = self::MAX_RESPONSE_BYTES, bool $retryUnauthorized = true): array
     {
         if (!str_starts_with($path, '/')) {
             throw GraphException::untrustedUrl($operation);
         }
 
-        return $this->authorized($this->credential($mailbox), $method, self::BASE_URL . $path, $options, $expected, $operation, $maxBytes, null);
+        return $this->authorized($this->credential($mailbox), $method, self::BASE_URL . $path, $options, $expected, $operation, $maxBytes, null, $retryUnauthorized);
     }
 
     /**
@@ -187,7 +189,7 @@ final class GraphApiClient
      *
      * @return array<mixed>
      */
-    private function authorized(GraphCredentialInterface $credential, string $method, #[SensitiveParameter] string $url, #[SensitiveParameter] array $options, array $expected, string $operation, int $maxBytes, mixed $sink): array
+    private function authorized(GraphCredentialInterface $credential, string $method, #[SensitiveParameter] string $url, #[SensitiveParameter] array $options, array $expected, string $operation, int $maxBytes, mixed $sink, bool $retryUnauthorized = true): array
     {
         $context = ['bundle' => 'NowoMailKitBundle'] + $credential->logContext();
         for ($attempt = 0;; ++$attempt) {
@@ -206,8 +208,9 @@ final class GraphApiClient
             $credential->called($operation, $status, $this->elapsedMs($started), $bytes, $retryAfter, $attempt + 1);
             if ($status === 401 && $attempt === 0) {
                 $credential->rejected();
-
-                continue;
+                if ($retryUnauthorized) {
+                    continue;
+                }
             }
             if (in_array($status, $expected, true)) {
                 return $data;
@@ -234,21 +237,35 @@ final class GraphApiClient
     }
 
     /**
-     * PUTs one chunk to an upload session URL (no Authorization header) and returns the status (200 or 201).
+     * PUTs one chunk to an upload session URL (no Authorization header) and returns the status (200 or 201). 2.5.0: a
+     * delegated credential gets the call reported (operation `upload`); it never gives the token to the upload host.
      *
      * @throws GraphException
      */
-    public function uploadChunk(GraphMailbox $mailbox, #[SensitiveParameter] string $uploadUrl, string $chunk, int $start, int $total): int
+    public function uploadChunk(GraphMailbox|GraphCredentialInterface $mailbox, #[SensitiveParameter] string $uploadUrl, string $chunk, int $start, int $total): int
     {
         $this->assertUploadUrl($uploadUrl);
-        $end                                      = $start + strlen($chunk) - 1;
-        [$status, $data, $requestId, $retryAfter] = $this->send('PUT', $uploadUrl, [
-            'headers' => [
-                'Content-Type'  => 'application/octet-stream',
-                'Content-Range' => 'bytes ' . $start . '-' . $end . '/' . $total,
-            ],
-            'body' => $chunk,
-        ], 'attachment upload', ['bundle' => 'NowoMailKitBundle', 'profile' => $mailbox->profile]);
+        $end     = $start + strlen($chunk) - 1;
+        $started = hrtime(true);
+
+        try {
+            [$status, $data, $requestId, $retryAfter, $bytes] = $this->send('PUT', $uploadUrl, [
+                'headers' => [
+                    'Content-Type'  => 'application/octet-stream',
+                    'Content-Range' => 'bytes ' . $start . '-' . $end . '/' . $total,
+                ],
+                'body' => $chunk,
+            ], 'attachment upload', $this->uploadContext($mailbox));
+        } catch (GraphException $failure) {
+            if ($mailbox instanceof GraphCredentialInterface) {
+                $mailbox->called('upload', $failure->status ?? 0, $this->elapsedMs($started), 0, null, 1);
+            }
+
+            throw $failure;
+        }
+        if ($mailbox instanceof GraphCredentialInterface) {
+            $mailbox->called('upload', $status, $this->elapsedMs($started), $bytes, $retryAfter, 1);
+        }
         if ($status === 200 || $status === 201) {
             return $status;
         }
@@ -261,14 +278,24 @@ final class GraphApiClient
     /**
      * Cancels an upload session (best effort, errors ignored).
      */
-    public function cancelUpload(GraphMailbox $mailbox, #[SensitiveParameter] string $uploadUrl): void
+    public function cancelUpload(GraphMailbox|GraphCredentialInterface $mailbox, #[SensitiveParameter] string $uploadUrl): void
     {
         try {
             $this->assertUploadUrl($uploadUrl);
-            $this->send('DELETE', $uploadUrl, [], 'attachment upload cancel', ['bundle' => 'NowoMailKitBundle', 'profile' => $mailbox->profile]);
+            $this->send('DELETE', $uploadUrl, [], 'attachment upload cancel', $this->uploadContext($mailbox));
         } catch (GraphException) {
             // Best effort: the session expires by itself.
         }
+    }
+
+    /**
+     * Log context of an upload call: the profile or the mailbox id.
+     *
+     * @return array<string, string>
+     */
+    private function uploadContext(GraphMailbox|GraphCredentialInterface $mailbox): array
+    {
+        return ['bundle' => 'NowoMailKitBundle'] + ($mailbox instanceof GraphMailbox ? ['profile' => $mailbox->profile] : $mailbox->logContext());
     }
 
     /**

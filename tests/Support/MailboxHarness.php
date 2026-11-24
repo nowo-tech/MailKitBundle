@@ -9,16 +9,21 @@ use Doctrine\DBAL\DriverManager;
 use Doctrine\Persistence\ManagerRegistry;
 use Nowo\MailKitBundle\Graph\GraphApiClient;
 use Nowo\MailKitBundle\Graph\Inbound\GraphMessageNormalizer;
+use Nowo\MailKitBundle\Mailbox\Engine\MailboxSender;
+use Nowo\MailKitBundle\Mailbox\Engine\MailboxSendOptions;
 use Nowo\MailKitBundle\Mailbox\Engine\MailboxSyncEngine;
 use Nowo\MailKitBundle\Mailbox\Engine\MailboxSyncOptions;
 use Nowo\MailKitBundle\Mailbox\Graph\GraphMailboxGateway;
 use Nowo\MailKitBundle\Mailbox\Html\MailHtmlSanitizer;
 use Nowo\MailKitBundle\Mailbox\Html\RemoteImages;
+use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\DeliverSentCopy;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\FetchMailboxMessage;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\MailboxMessageHandler;
+use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\ReconcileMailboxSend;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\RenewMailboxSubscriptions;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\SyncMailboxFolder;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Store\MailboxStore;
+use Nowo\MailKitBundle\Mailbox\Port\MailboxMessageIndexInterface;
 use Symfony\Component\Clock\MockClock;
 use Throwable;
 
@@ -52,7 +57,9 @@ trait MailboxHarness
 
     private GraphMailboxGateway $gateway;
 
-    private function harness(?MailboxSyncOptions $options = null, string $prefix = ''): void
+    private MailboxSender $sender;
+
+    private function harness(?MailboxSyncOptions $options = null, string $prefix = '', ?MailboxSendOptions $sendOptions = null, ?MailboxMessageIndexInterface $index = null): void
     {
         $this->mailboxConnection = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'memory' => true]);
         $registry                = $this->createStub(ManagerRegistry::class);
@@ -82,8 +89,11 @@ trait MailboxHarness
             $this->events,
             $this->clock,
             $this->log,
+            $index,
         );
-        $this->handler = new MailboxMessageHandler($this->engine, $this->bus, $this->log);
+        $sendOptions ??= new MailboxSendOptions();
+        $this->sender  = new MailboxSender($this->engine, $this->mailboxStore, $this->bus, $sendOptions, $this->clock, $this->log);
+        $this->handler = new MailboxMessageHandler($this->engine, $this->bus, $this->log, $this->sender, $sendOptions->sentCopyAttempts, $sendOptions->sentCopyDelayMs, ($sendOptions->staleClaimSeconds + 1) * 1000);
     }
 
     /**
@@ -103,6 +113,8 @@ trait MailboxHarness
                     $message instanceof SyncMailboxFolder         => $this->handler->sync($message),
                     $message instanceof FetchMailboxMessage       => $this->handler->fetch($message),
                     $message instanceof RenewMailboxSubscriptions => $this->handler->renew($message),
+                    $message instanceof DeliverSentCopy           => $this->handler->sentCopy($message),
+                    $message instanceof ReconcileMailboxSend      => $this->handler->reconcile($message),
                     default                                       => null,
                 };
             } catch (Throwable $failure) {

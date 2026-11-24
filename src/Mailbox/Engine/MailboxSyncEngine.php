@@ -18,6 +18,7 @@ use Nowo\MailKitBundle\Mailbox\Infrastructure\Store\MailboxStore;
 use Nowo\MailKitBundle\Mailbox\Port\MailboxCallObserverInterface;
 use Nowo\MailKitBundle\Mailbox\Port\MailboxDirectoryInterface;
 use Nowo\MailKitBundle\Mailbox\Port\MailboxExclusionPolicyInterface;
+use Nowo\MailKitBundle\Mailbox\Port\MailboxMessageIndexInterface;
 use Nowo\MailKitBundle\Mailbox\Port\MailboxMessageSinkInterface;
 use Nowo\MailKitBundle\Mailbox\Port\MailboxTokenProviderInterface;
 use Nowo\MailKitBundle\Mailbox\Service\MailboxSyncInterface;
@@ -62,6 +63,11 @@ use function random_bytes;
  *   errors never pause.
  * - **Exclusion** before the fetch when the change page gives the sender, and always after the fetch, before the
  *   attachments list and the normalisation (an excluded body is dropped in memory).
+ * - **Known messages** (owner answer Q1, 2026-11-24): with the optional {@see MailboxMessageIndexInterface}, each page
+ *   asks the host once which of its messages it already stores in that folder and enqueues no fetch for them.
+ * - **Sent copy** (send path, Q-MB-6): {@see deliverSentCopy()} fetches a sent message from Sent Items whether or not
+ *   that folder is followed and stores it with `MessageOrigin::SentCopy`, without the exclusion policy (the mailbox's
+ *   own send).
  */
 final class MailboxSyncEngine implements MailboxSyncInterface
 {
@@ -81,6 +87,7 @@ final class MailboxSyncEngine implements MailboxSyncInterface
         private readonly ?EventDispatcherInterface $events = null,
         private readonly ?ClockInterface $clock = null,
         private readonly ?LoggerInterface $logger = null,
+        private readonly ?MailboxMessageIndexInterface $index = null,
     ) {
     }
 
@@ -300,17 +307,50 @@ final class MailboxSyncEngine implements MailboxSyncInterface
             return;
         }
 
+        $this->deliver($settings, $gateway, $session, $folder, $message, $origin, true);
+    }
+
+    /**
+     * Fetches a message this mailbox sent and hands it to the sink as {@see MessageOrigin::SentCopy} (Messenger
+     * `DeliverSentCopy`, Q-MB-6): read from Sent Items whether or not that folder is followed (Graph immutable ids keep
+     * the draft's id), without the exclusion policy (the mailbox's own send, design section 17). False when the message
+     * is not there yet (the handler tries again later) or the mailbox is not active.
+     *
+     * @throws MailboxGrantFailure the mailbox was paused
+     * @throws MailboxProviderFailure
+     */
+    public function deliverSentCopy(MailboxId $mailbox, ProviderMessageId $message): bool
+    {
+        $context = $this->active($mailbox);
+        if ($context === null) {
+            return true;
+        }
+        [$settings, $gateway, $session] = $context;
+
+        return $this->deliver($settings, $gateway, $session, FolderRef::sentItems(), $message, MessageOrigin::SentCopy, false);
+    }
+
+    /**
+     * Fetch, exclusion (when `$exclude`), normalisation and sink; false when the message is gone.
+     *
+     * @throws MailboxGrantFailure the mailbox was paused
+     * @throws MailboxProviderFailure
+     */
+    private function deliver(MailboxSettings $settings, MailboxGatewayInterface $gateway, MailboxSession $session, FolderRef $folder, ProviderMessageId $message, MessageOrigin $origin, bool $exclude): bool
+    {
+        $mailbox = $settings->id;
+
         try {
             $fetched = $gateway->fetch($session, $folder, $message);
             if (!$fetched instanceof FetchedMessage) {
                 $this->logger?->info('Mailbox message gone before it was read.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value]);
 
-                return;
+                return false;
             }
-            if ($this->exclusion->decide($fetched->envelope)->isExcluded()) {
+            if ($exclude && $this->exclusion->decide($fetched->envelope)->isExcluded()) {
                 $this->logger?->info('Mailbox message excluded by the host policy.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value]);
 
-                return;
+                return true;
             }
             $synced = $gateway->normalize($session, $fetched, $gateway->attachments($session, $fetched), $origin);
         } catch (MailboxGrantFailure $failure) {
@@ -319,7 +359,9 @@ final class MailboxSyncEngine implements MailboxSyncInterface
             throw $failure;
         }
         $outcome = $this->sink->store($synced);
-        $this->logger?->info('Mailbox message delivered to the sink.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value, 'outcome' => $outcome->value, 'attachments' => count($synced->attachments)]);
+        $this->logger?->info('Mailbox message delivered to the sink.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value, 'outcome' => $outcome->value, 'origin' => $origin->value, 'attachments' => count($synced->attachments)]);
+
+        return true;
     }
 
     /**
@@ -460,6 +502,7 @@ final class MailboxSyncEngine implements MailboxSyncInterface
                 continue;
             }
             ++$pages;
+            $known = $this->known($mailbox, $folder, $page);
             foreach ($page->items as $item) {
                 if ($item->removed) {
                     // Deleted or moved elsewhere (audit ZAT-L3): the sink must never treat a move as a deletion. The
@@ -470,6 +513,10 @@ final class MailboxSyncEngine implements MailboxSyncInterface
                     }
                     $this->sink->removed($mailbox, $item->id, $folder, $reason);
 
+                    continue;
+                }
+                if (isset($known[$item->id->value])) {
+                    // The host already stores it in this folder (owner answer Q1): a change only; no fetch.
                     continue;
                 }
                 if ($item->hasEnvelope && $this->exclusion->decide(new MessageEnvelope($mailbox, $folder, $item->id, $item->from, $item->sender, null, null, $item->receivedAt, false))->isExcluded()) {
@@ -489,6 +536,46 @@ final class MailboxSyncEngine implements MailboxSyncInterface
         }
 
         return true;
+    }
+
+    /**
+     * Ids of the page's new or changed messages the host already stores in the folder (one call of the optional index
+     * port per page); a failing port is logged and nothing counts as known (at least once).
+     *
+     * @return array<string, true>
+     */
+    private function known(MailboxId $mailbox, FolderRef $folder, ChangePage $page): array
+    {
+        $ids = [];
+        foreach ($page->items as $item) {
+            if (!$item->removed) {
+                $ids[] = $item->id;
+            }
+        }
+        if (!$this->index instanceof MailboxMessageIndexInterface || $ids === []) {
+            return [];
+        }
+
+        try {
+            $answer = $this->index->contains($mailbox, $folder, $ids);
+        } catch (Throwable $failure) {
+            $this->logger?->warning('Mailbox message index failed; every message of the page is fetched.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value, 'error' => $failure::class]);
+
+            return [];
+        }
+        $asked = [];
+        foreach ($ids as $id) {
+            $asked[$id->value] = true;
+        }
+        $known = [];
+        foreach ($answer as $id) {
+            // Only ids of this page count (a host answer never adds work or skips another message).
+            if ($id instanceof ProviderMessageId && isset($asked[$id->value])) {
+                $known[$id->value] = true;
+            }
+        }
+
+        return $known;
     }
 
     /**
@@ -519,9 +606,12 @@ final class MailboxSyncEngine implements MailboxSyncInterface
 
     /**
      * The account behind the token must have the directory's address and be the account first bound to the mailbox;
-     * otherwise the mailbox is paused `AccountMismatch` (false).
+     * otherwise the mailbox is paused `AccountMismatch` (false). Runs before every sweep run, renewal and send.
+     *
+     * @throws MailboxGrantFailure the token itself was refused
+     * @throws MailboxProviderFailure
      */
-    private function checkAccount(MailboxSettings $settings, MailboxGatewayInterface $gateway, MailboxSession $session): bool
+    public function checkAccount(MailboxSettings $settings, MailboxGatewayInterface $gateway, MailboxSession $session): bool
     {
         $account = $gateway->account($session);
         if (!in_array($settings->address, $account->addresses, true) || !$this->store->bindAccount($settings->id, $account->id)) {

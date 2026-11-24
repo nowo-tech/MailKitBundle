@@ -14,6 +14,8 @@ use Nowo\MailKitBundle\Graph\Send\GraphSendLimits;
 use Nowo\MailKitBundle\Log\SentMailCsvExporter;
 use Nowo\MailKitBundle\Mailbox\Html\RemoteImages;
 use Nowo\MailKitBundle\Mailbox\Value\MailboxSettings;
+use Nowo\MailKitBundle\Mailbox\Value\OutgoingAttachment;
+use Nowo\MailKitBundle\Mailbox\Value\OutgoingMailboxMail;
 use Nowo\MailKitBundle\Tracking\EmailTracker;
 use Nowo\MailKitBundle\Tracking\TrackingBaseUrl;
 use Nowo\MailKitBundle\Ui\MailKitPages;
@@ -812,6 +814,7 @@ final class Configuration implements ConfigurationInterface
                 ->append($service('sink', 'Required: service id implementing Mailbox\\Port\\MailboxMessageSinkInterface (idempotent by mailbox id + provider message id).'))
                 ->append($service('exclusion_policy', 'Optional: service id implementing Mailbox\\Port\\MailboxExclusionPolicyInterface; null = keep every message.'))
                 ->append($service('call_observer', 'Optional: service id implementing Mailbox\\Port\\MailboxCallObserverInterface (metering per mailbox); null = none.'))
+                ->append($service('message_index', 'Optional: service id implementing Mailbox\\Port\\MailboxMessageIndexInterface (which messages of a change page you already store in that folder: they are not fetched again); null = fetch every changed message.'))
                 ->scalarNode('http_client')
                     ->info('HTTP client service id. Keep the decorated "http_client" so HttpLog counts the calls under the outbound provider you declare for graph.microsoft.com (it never records bodies, query strings or headers).')
                     ->defaultValue('http_client')
@@ -850,6 +853,36 @@ final class Configuration implements ConfigurationInterface
                         ->end()
                     ->end()
                 ->end()
+                ->arrayNode('send')
+                    ->info('2.5.0: sending from a delegated mailbox (MailboxSenderInterface): draft + send, a mandatory idempotency key per message.')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->integerNode('stale_claim_seconds')->info('A send without progress for this long may be taken over (and an ambiguous one reconciled by its draft state). Must exceed 8 x timeout: a provider call (max_duration 4 x timeout) and its retry with a fresh token must be over before another worker reads the draft state.')->defaultValue(300)->min(30)->max(3600)->end()
+                        ->scalarNode('retention')
+                            ->info('Settled send rows are deleted by nowo:mail-kit:mailbox:purge after this ISO 8601 duration; a key reused after that is sent again.')
+                            ->defaultValue('P7D')
+                            ->validate()
+                                ->ifTrue(static fn (mixed $v): bool => !is_string($v) || preg_match(MailboxSettings::WINDOW_PATTERN, $v) !== 1)
+                                ->thenInvalid('nowo_mail_kit.mailboxes.send.retention must be an ISO 8601 duration in days and / or hours such as "P7D", got %s.')
+                            ->end()
+                        ->end()
+                        ->integerNode('max_recipients')->info('Most recipients (To + Cc + Bcc) of one message.')->defaultValue(100)->min(1)->max(OutgoingMailboxMail::MAX_RECIPIENTS)->end()
+                        ->integerNode('max_attachments')->info('Most attachments of one message.')->defaultValue(50)->min(0)->max(OutgoingMailboxMail::MAX_ATTACHMENTS)->end()
+                        ->integerNode('max_attachment_bytes')->info('Largest attachment (upload sessions from 2.9 MB; Graph allows 150 MiB).')->defaultValue(36_700_160)->min(1)->max(OutgoingAttachment::MAX_BYTES)->end()
+                        ->integerNode('max_message_bytes')->info('Bodies plus attachments of one message (Exchange applies its own limit too, 35 MB by default).')->defaultValue(36_700_160)->min(1024)->max(1_073_741_824)->end()
+                        ->integerNode('max_html_bytes')->info('Largest HTML body (it is sanitised; a new message\'s MIME stays under 2.9 MB).')->defaultValue(1_048_576)->min(1024)->max(2_000_000)->end()
+                        ->integerNode('max_text_bytes')->info('Largest text body.')->defaultValue(1_048_576)->min(1024)->max(2_000_000)->end()
+                        ->integerNode('max_attempts')->info('Takeovers of one key (reconciles of an ambiguous submit) before its outcome is reported unknown; it is never sent again.')->defaultValue(5)->min(1)->max(20)->end()
+                        ->arrayNode('sent_copy')
+                            ->info('The copy of each sent message delivered to the sink (MessageOrigin::SentCopy), whether Sent Items is followed or not.')
+                            ->addDefaultsIfNotSet()
+                            ->children()
+                                ->integerNode('delay_ms')->info('Delay of the DeliverSentCopy message after a send, and between its tries.')->defaultValue(5000)->min(0)->max(600_000)->end()
+                                ->integerNode('attempts')->info('Tries while the provider has not filed the sent message yet.')->defaultValue(3)->min(1)->max(10)->end()
+                            ->end()
+                        ->end()
+                    ->end()
+                ->end()
                 ->arrayNode('graph')
                     ->addDefaultsIfNotSet()
                     ->children()
@@ -861,6 +894,17 @@ final class Configuration implements ConfigurationInterface
                                 ->ifTrue(static fn (mixed $v): bool => !is_string($v) || preg_match(MailboxSettings::WINDOW_PATTERN, $v) !== 1 || self::durationSeconds($v) >= 6 * 86_400)
                                 ->thenInvalid('nowo_mail_kit.mailboxes.graph.renew_before must be an ISO 8601 duration in days / hours shorter than 6 days, got %s.')
                             ->end()
+                        ->end()
+                        ->arrayNode('upload_hosts')
+                            ->info('Hosts accepted for attachment upload session URLs of the send path (exact, HTTPS on 443; never given the token).')
+                            ->scalarPrototype()
+                                ->validate()
+                                    ->ifTrue(static fn (mixed $v): bool => !is_string($v) || preg_match('/^(?=.{1,253}\\z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}\\z/', $v) !== 1)
+                                    ->thenInvalid('nowo_mail_kit.mailboxes.graph.upload_hosts must contain lower-case host names, got %s.')
+                                ->end()
+                            ->end()
+                            ->defaultValue(GraphApiClient::DEFAULT_UPLOAD_HOSTS)
+                            ->requiresAtLeastOneElement()
                         ->end()
                         ->enumNode('outbound_url_guard')
                             ->info('Pin graph.microsoft.com to the public address OutboundUrlGuard resolves: auto = when the OutboundUrlGuard bundle is enabled, required = fail the build without it, off.')
@@ -924,6 +968,10 @@ final class Configuration implements ConfigurationInterface
                 ->ifTrue(static fn (array $v): bool => self::durationSeconds((string) ($v['sync']['initial_window'] ?? 'P7D')) > self::durationSeconds((string) ($v['sync']['max_initial_window'] ?? 'P90D'))
                     || self::durationSeconds((string) ($v['sync']['resync_window'] ?? 'P7D')) > self::durationSeconds((string) ($v['sync']['max_initial_window'] ?? 'P90D')))
                 ->thenInvalid('nowo_mail_kit.mailboxes.sync.initial_window and sync.resync_window must not exceed sync.max_initial_window.')
+            ->end()
+            ->validate()
+                ->ifTrue(static fn (array $v): bool => (int) ($v['send']['stale_claim_seconds'] ?? 300) <= 8 * (float) ($v['timeout'] ?? 30.0))
+                ->thenInvalid('nowo_mail_kit.mailboxes.send.stale_claim_seconds must exceed 8 x mailboxes.timeout (a submit and its retry must be over before its draft state is read by another worker).')
             ->end();
 
         return $node;

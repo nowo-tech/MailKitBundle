@@ -22,6 +22,10 @@ use Nowo\MailKitBundle\Mailbox\Html\RemoteImages;
 use Nowo\MailKitBundle\Mailbox\Value\FolderRef;
 use Nowo\MailKitBundle\Mailbox\Value\MailboxId;
 use Nowo\MailKitBundle\Mailbox\Value\MailboxProvider;
+use Nowo\MailKitBundle\Mailbox\Value\OutgoingAttachment;
+use Nowo\MailKitBundle\Mailbox\Value\OutgoingKind;
+use Nowo\MailKitBundle\Mailbox\Value\OutgoingMailboxMail;
+use Nowo\MailKitBundle\Sender\MailAddress;
 use Nowo\MailKitBundle\Tests\Support\GraphApiMock;
 use Nowo\MailKitBundle\Tests\Support\MailboxGraphFake;
 use Nowo\MailKitBundle\Tests\Support\MemoryMailboxPorts;
@@ -252,6 +256,60 @@ final class GraphTokenTraceTest extends TestCase
         $this->assertNoDelegatedSecretIn(implode("\n", $this->logged));
     }
 
+    /**
+     * @return iterable<string, array{0: string}>
+     */
+    public static function delegatedSendFailures(): iterable
+    {
+        yield 'transport error on the draft' => ['draft'];
+        yield 'client decorator throws on the update' => ['update'];
+        yield 'transport error on an upload chunk' => ['chunk'];
+        yield 'error status on an upload chunk' => ['chunk-status'];
+        yield 'token refused twice on the send' => ['send'];
+        yield 'oversized sent copy' => ['sent-copy'];
+    }
+
+    /**
+     * 2.5.0 part 2: the send operations (draft, update, upload chunk, send, sent-copy fetch) keep the host's token and
+     * the pre-authenticated upload URL out of every stored chain and log.
+     */
+    #[DataProvider('delegatedSendFailures')]
+    public function testDelegatedSendFailuresKeepTheTokenOutOfTheStoredChain(string $failure): void
+    {
+        $graph           = new MailboxGraphFake();
+        $ports           = new MemoryMailboxPorts();
+        $graph->override = static function (string $method, string $path) use ($failure): ?MockResponse {
+            return match (true) {
+                $failure === 'draft' && $method === 'POST' && $path === '/v1.0/me/messages'                  => new MockResponse('', ['error' => 'Connection reset by peer.']),
+                $failure === 'update' && $method === 'PATCH'                                                 => throw new RuntimeException('Outbound guard refused the request.'),
+                $failure === 'chunk' && $method === 'PUT'                                                    => new MockResponse('', ['error' => 'Connection reset by peer.']),
+                $failure === 'chunk-status' && $method === 'PUT'                                             => MailboxGraphFake::json(['error' => ['code' => 'InvalidRange']], 416),
+                $failure === 'send' && $method === 'POST' && str_contains($path, '/send')                    => MailboxGraphFake::json(['error' => ['code' => 'InvalidAuthenticationToken']], 401),
+                $failure === 'sent-copy' && $method === 'GET' && str_contains($path, '/me/messages/DRAFT-1') => MailboxGraphFake::json(['value' => str_repeat('x', 300_000)]),
+                default                                                                                      => null,
+            };
+        };
+        $session = new MailboxSession(new MailboxId('mbx-ana'), MailboxProvider::Graph, 'ana@example.com', null, $ports, $ports, $this->logger);
+        $gateway = new GraphMailboxGateway(new GraphApiClient($graph->client(), null, logger: $this->logger), new GraphMessageNormalizer(new MailHtmlSanitizer(RemoteImages::Blocked)), 65_536, $this->logger);
+        $mail    = new OutgoingMailboxMail(OutgoingKind::New, null, [new MailAddress('pedro@example.org')], [], [new MailAddress('boss@example.org')], 'Plan', 'Hello', null, [], 'trace-key-000001');
+
+        try {
+            $draft = $gateway->createDraft($session, $mail, 'x@example.com');
+            $gateway->updateDraft($session, $draft, $mail);
+            $gateway->addAttachment($session, $draft, OutgoingAttachment::fromString(str_repeat('a', 3_000_000), 'a.bin'), static function (): void {
+            });
+            $gateway->sendDraft($session, $draft->id);
+            $gateway->fetch($session, FolderRef::sentItems(), $draft->id);
+            self::fail('The send path did not fail.');
+        } catch (Throwable $exception) {
+            self::assertInstanceOf(MailboxException::class, $exception);
+            $this->assertNoDelegatedSecret($exception);
+            $this->assertNoDelegatedSecretIn('REDACTED-TEST-upload-capability', serialize(FlattenException::createFromThrowable($exception)));
+        }
+        $this->assertNoDelegatedSecretIn(implode("\n", $this->logged));
+        $this->assertNoDelegatedSecretIn('REDACTED-TEST-upload-capability', implode("\n", $this->logged));
+    }
+
     private function assertNoDelegatedSecret(Throwable $exception): void
     {
         $this->assertNoDelegatedSecretIn(serialize((new Envelope(new stdClass()))->with(ErrorDetailsStamp::create($exception))));
@@ -262,9 +320,15 @@ final class GraphTokenTraceTest extends TestCase
         }
     }
 
-    private function assertNoDelegatedSecretIn(string $haystack): void
+    private function assertNoDelegatedSecretIn(string $haystack, ?string $extra = null): void
     {
-        foreach (['fake-mbx-ana', 'Bearer ', 'REDACTED-TEST-delta-token'] as $secret) {
+        if ($extra !== null) {
+            [$secret, $haystack] = [$haystack, $extra];
+            self::assertStringNotContainsString($secret, $haystack, 'Leaked: ' . $secret);
+
+            return;
+        }
+        foreach (['fake-mbx-ana', 'Bearer ', 'REDACTED-TEST-delta-token', 'REDACTED-TEST-upload-capability'] as $secret) {
             self::assertStringNotContainsString($secret, $haystack, 'Leaked: ' . $secret);
         }
     }

@@ -16,7 +16,7 @@ use function in_array;
 final readonly class ProviderCall
 {
     /** Closed list of operation labels. */
-    public const OPERATIONS = ['account', 'subscribe', 'renew', 'unsubscribe', 'watch', 'stop', 'delta', 'history', 'list', 'get_message', 'get_attachment', 'create_draft', 'update_draft', 'upload', 'send'];
+    public const OPERATIONS = ['account', 'subscribe', 'renew', 'unsubscribe', 'watch', 'stop', 'delta', 'history', 'list', 'get_message', 'get_attachment', 'create_draft', 'update_draft', 'upload', 'send', 'delete_draft'];
 
     /**
      * @param string $operation one of {@see OPERATIONS}

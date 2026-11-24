@@ -12,10 +12,15 @@ use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\SyncMailboxFolder;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Store\MailboxStore;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Webhook\MailboxGraphWebhookController;
 use Nowo\MailKitBundle\Mailbox\Service\MailboxAttachmentReaderInterface;
+use Nowo\MailKitBundle\Mailbox\Service\MailboxSenderInterface;
 use Nowo\MailKitBundle\Mailbox\Service\MailboxSyncInterface;
 use Nowo\MailKitBundle\Mailbox\Value\GrantFailureReason;
 use Nowo\MailKitBundle\Mailbox\Value\MailboxId;
 use Nowo\MailKitBundle\Mailbox\Value\MailboxStatus;
+use Nowo\MailKitBundle\Mailbox\Value\MessageOrigin;
+use Nowo\MailKitBundle\Mailbox\Value\OutgoingKind;
+use Nowo\MailKitBundle\Mailbox\Value\OutgoingMailboxMail;
+use Nowo\MailKitBundle\Sender\MailAddress;
 use Nowo\MailKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\MailKitBundle\Tests\Integration\Kernel\MailKitTestKernel;
 use Nowo\MailKitBundle\Tests\Support\MailboxGraphFake;
@@ -65,7 +70,7 @@ final class MailboxKernelTest extends KernelTestCase
         $ports->add(MemoryMailboxPorts::settings('mbx-bob', 'ana@example.com'));
         $store = $this->service($kernel, MailboxStore::class);
         $store->execute($store->missingTablesSql());
-        foreach (['mail_kit_mailbox_subscription', 'mail_kit_mailbox_cursor', 'mail_kit_mailbox'] as $table) {
+        foreach (['mail_kit_mailbox_send', 'mail_kit_mailbox_subscription', 'mail_kit_mailbox_cursor', 'mail_kit_mailbox'] as $table) {
             $this->connection($kernel)->executeStatement('DELETE FROM ' . $table);
         }
 
@@ -132,6 +137,33 @@ final class MailboxKernelTest extends KernelTestCase
         self::assertSame("0 folder sweep(s) enqueued.\n", $tester->getDisplay());
         $tester->run(['command' => 'nowo:mail-kit:mailbox:subscriptions']);
         self::assertSame(0, $tester->getStatusCode());
+        $tester->run(['command' => 'nowo:mail-kit:mailbox:purge']);
+        self::assertSame("0 send row(s) deleted.\n", $tester->getDisplay());
+        self::assertInstanceOf(MailboxSenderInterface::class, $this->container($kernel)->get(MailboxSenderInterface::class));
+    }
+
+    public function testDddHostSendsOnceAndGetsTheSentCopyInOneWorker(): void
+    {
+        $kernel = $this->bootMailboxes(['orm', 'instance_settings']);
+        $ports  = $this->service($kernel, MemoryMailboxPorts::class);
+        $graph  = $this->service($kernel, MailboxGraphFake::class);
+        $ports->add(MemoryMailboxPorts::settings('mbx-ana', 'ana@example.com'));
+        $store = $this->service($kernel, MailboxStore::class);
+        $store->execute($store->missingTablesSql());
+        foreach (['mail_kit_mailbox_send', 'mail_kit_mailbox_subscription', 'mail_kit_mailbox_cursor', 'mail_kit_mailbox'] as $table) {
+            $this->connection($kernel)->executeStatement('DELETE FROM ' . $table);
+        }
+        $this->service($kernel, MailboxSyncInterface::class)->start(new MailboxId('mbx-ana'));
+        $sender = $this->service($kernel, MailboxSenderInterface::class);
+        for ($i = 0; $i < 20; ++$i) {
+            $mail = new OutgoingMailboxMail(OutgoingKind::New, null, [new MailAddress('pedro@example.org')], [], [], 'Plan ' . $i, 'Hello', null, [], 'kernel-send-key-' . $i);
+            $sent = $sender->send(new MailboxId('mbx-ana'), $mail);
+            self::assertFalse($sent->replayed);
+            self::assertTrue($sender->send(new MailboxId('mbx-ana'), $mail)->replayed);
+            // The synchronous bus ran DeliverSentCopy at once (its DelayStamp is ignored there).
+            self::assertSame(MessageOrigin::SentCopy, ($ports->stored['mbx-ana' . "\n" . $sent->id->value] ?? null)?->origin);
+        }
+        self::assertCount(20, $graph->delivered);
     }
 
     public function testAGrantPauseSurvivesTheDoctrineTransactionMiddleware(): void
@@ -191,7 +223,7 @@ final class MailboxKernelTest extends KernelTestCase
                         'enabled' => true,
                         'webhook' => ['notification_url' => 'https://app.example.com/hooks/mail-kit/v1/mailbox/graph', 'rate_limit' => ['limit' => 100_000]],
                     ],
-                ] + ($debug ? [] : ['exclusion_policy' => MemoryMailboxPorts::class, 'call_observer' => MemoryMailboxPorts::class]),
+                ] + ($debug ? [] : ['exclusion_policy' => MemoryMailboxPorts::class, 'call_observer' => MemoryMailboxPorts::class, 'message_index' => MemoryMailboxPorts::class]),
             ],
             without: $without,
             routes: static function (RoutingConfigurator $routes): void {

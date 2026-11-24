@@ -1,6 +1,6 @@
 # Delegated mailboxes (Outlook and Gmail): design
 
-Status 2026-11-24: **accepted; 2.5.0 part 1 (ports, sync, attachments) built, part 2 (send) pending.** The owner accepted every recommendation (Q-MB-1 – Q-MB-22 as
+Status 2026-11-24: **accepted; 2.5.0 part 1 (ports, sync, attachments) and part 2 (send) built.** The owner accepted every recommendation (Q-MB-1 – Q-MB-22 as
 recommended, 2026-11-23). For symfony-beacon spec `255-mail-inbox` (owner decision D-20261123-14,
 task T001), spec `236` (personal Microsoft 365 mailboxes) and spec `254` block B (CRM mailboxes, FR-020 – FR-023). It
 widens the roadmap rows 2.5.0 "Personal Outlook mailboxes" and 2.6.0 "Gmail provider". The contract revision is
@@ -382,7 +382,9 @@ unique key and a caught duplicate (never check-then-insert).
 reads the row: `sent` → return the stored ids (`replayed: true`); `claimed` / `drafted` younger than
 `send.stale_claim_seconds` → 409 `CONFLICT_001` (in flight); older → take it over with a conditional `UPDATE … WHERE
 claimed_at < ?`, then: a stored draft id that Graph still reports as a draft is sent; one that is no longer a draft
-was sent (immutable id) and is marked `sent`. Gmail has no draft step: the Message-ID is derived from the key, and a
+was sent (immutable id) and is marked `sent`. As built (2.5.0 part 2) the states are `drafting`, `sending`, `sent`,
+`released` (abandoned before the submit; taken over at once), `failed` and `unknown`, and the key is unique per
+mailbox; see `Mailbox\Engine\MailboxSender`. Gmail has no draft step: the Message-ID is derived from the key, and a
 takeover first searches `rfc822msgid:` in the mailbox before sending again. A failed send keeps the row `failed` with
 the provider's reason (the host keeps its draft, Beacon FR-041). Rows are purged after `send.retention` (`P7D`).
 
@@ -529,7 +531,7 @@ nowo_mail_kit:
         html:
             remote_images: blocked     # blocked | dropped | allowed
         send:
-            stale_claim_seconds: 120
+            stale_claim_seconds: 300  # as built: must exceed 8 × mailboxes.timeout
             retention: P7D
             max_recipients: 100
         graph:
@@ -570,7 +572,7 @@ schema command, as the 1.9 tables.
 | `mail_kit_mailbox` | `mailbox_id`, `provider`, `status`, `reason`, `account_hash` (SHA-256), `updated_at` | PK `mailbox_id` |
 | `mail_kit_mailbox_cursor` | `mailbox_id`, `folder_key`, `provider_folder_id`, `cursor` (delta link or history id), `cursor_version`, `lease_owner`, `lease_until`, `rerun`, `last_complete_at` | PK (`mailbox_id`, `folder_key`) |
 | `mail_kit_mailbox_subscription` | `subscription_id`, `mailbox_id`, `folder_key`, `client_state_hash`, `expires_at`, `created_at` | PK `subscription_id`; unique (`mailbox_id`, `folder_key`) |
-| `mail_kit_mailbox_send` | `idempotency_key`, `mailbox_id`, `status`, `provider_draft_id`, `provider_message_id`, `internet_message_id`, `thread_id`, `reason`, `claimed_at`, `updated_at` | PK `idempotency_key`; index (`mailbox_id`) |
+| `mail_kit_mailbox_send` | `mailbox_id`, `idempotency_key`, `payload_hash`, `status`, `claim_token`, `provider_message_id` (the draft's immutable id, which the sent item keeps), `internet_message_id`, `thread_id`, `reason`, `attempts`, `row_version`, `claimed_at`, `updated_at`, `sent_at` (as built in 2.5.0 part 2) | PK (`mailbox_id`, `idempotency_key`); index (`updated_at`) |
 
 No table holds an address, a subject, a body, a token or a recipient. A delta link carries an opaque provider token
 that is useless without the bearer token; it is never logged.

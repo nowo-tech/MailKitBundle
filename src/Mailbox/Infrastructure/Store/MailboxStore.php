@@ -8,8 +8,10 @@ use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Platforms\AbstractPlatform;
 use Doctrine\DBAL\Schema\Schema;
 use Doctrine\Persistence\ManagerRegistry;
+use InvalidArgumentException;
 use Nowo\MailKitBundle\Concurrency\SavepointWrites;
 use Nowo\MailKitBundle\Doctrine\ExactCollation;
+use Nowo\MailKitBundle\Mailbox\Engine\SendState;
 use Nowo\MailKitBundle\Mailbox\Value\GrantFailureReason;
 use Nowo\MailKitBundle\Mailbox\Value\MailboxId;
 use Nowo\MailKitBundle\Mailbox\Value\MailboxProvider;
@@ -20,9 +22,13 @@ use Psr\Log\LoggerInterface;
 use SensitiveParameter;
 use Symfony\Component\Clock\NativeClock;
 
+use function array_fill;
 use function assert;
+use function count;
 use function hash;
 use function hash_equals;
+use function implode;
+use function in_array;
 use function is_numeric;
 use function is_string;
 
@@ -34,7 +40,9 @@ use function is_string;
  * - `<prefix>mail_kit_mailbox_cursor`: per followed folder the provider cursor (delta link), its version, the sweep
  *   lease (owner, until), the `rerun` flag, the end of the last complete sweep and the folder's sync error;
  * - `<prefix>mail_kit_mailbox_subscription`: change-notification subscriptions per folder with the **SHA-256 of the
- *   client state** only.
+ *   client state** only;
+ * - `<prefix>mail_kit_mailbox_send` (2.5.0 part 2): one row per idempotency key of a send ({@see SendState}), with the
+ *   SHA-256 of the message description, the claim token of the current holder and the provider ids once known.
  *
  * No table holds an address, a subject, a body, a token or a recipient. Every state change is one conditional
  * statement (REQ-RUNTIME-003): first rows are inserted with a caught duplicate key, status transitions and the lease
@@ -50,6 +58,11 @@ final class MailboxStore
     public const CURSOR_TABLE = 'mail_kit_mailbox_cursor';
 
     public const SUBSCRIPTION_TABLE = 'mail_kit_mailbox_subscription';
+
+    public const SEND_TABLE = 'mail_kit_mailbox_send';
+
+    /** Columns a send transition may set besides the status. */
+    private const SEND_COLUMNS = ['provider_message_id', 'internet_message_id', 'thread_id', 'reason', 'sent_at'];
 
     private const SAVEPOINT = 'nowo_mail_kit_mailbox';
 
@@ -88,6 +101,14 @@ final class MailboxStore
     public function subscriptionTable(): string
     {
         return $this->tablePrefix . self::SUBSCRIPTION_TABLE;
+    }
+
+    /**
+     * Prefixed name of the send table (2.5.0 part 2).
+     */
+    public function sendTable(): string
+    {
+        return $this->tablePrefix . self::SEND_TABLE;
     }
 
     /**
@@ -414,6 +435,133 @@ final class MailboxStore
     }
 
     /**
+     * Claims an idempotency key (design section 9.4): inserts a `drafting` row held by `$token`; false when the key
+     * exists already for this mailbox (caught duplicate key, never check-then-insert).
+     *
+     * @param string $payloadHash SHA-256 of the message description
+     * @param string $token random claim token of this call
+     */
+    public function claimSend(MailboxId $mailbox, string $key, string $payloadHash, string $token): bool
+    {
+        $now = $this->now();
+
+        return SavepointWrites::insertOnce($this->connection(), self::SAVEPOINT, $this->sendTable(), [
+            'mailbox_id'          => $mailbox->value,
+            'idempotency_key'     => $key,
+            'payload_hash'        => $payloadHash,
+            'status'              => SendState::Drafting->value,
+            'claim_token'         => $token,
+            'provider_message_id' => null,
+            'internet_message_id' => null,
+            'thread_id'           => null,
+            'reason'              => null,
+            'attempts'            => 1,
+            'row_version'         => 0,
+            'claimed_at'          => $now,
+            'updated_at'          => $now,
+            'sent_at'             => null,
+        ]);
+    }
+
+    /**
+     * The send row of a key, or null.
+     *
+     * @return array{status: SendState, token: string, payload_hash: string, message_id: string|null, internet_message_id: string, thread_id: string|null, reason: string|null, attempts: int, updated_at: int, sent_at: int|null}|null
+     */
+    public function sendRow(MailboxId $mailbox, string $key): ?array
+    {
+        $row = $this->connection()->fetchAssociative(
+            'SELECT status, claim_token, payload_hash, provider_message_id, internet_message_id, thread_id, reason, attempts, updated_at, sent_at FROM ' . $this->sendTable() . ' WHERE mailbox_id = ? AND idempotency_key = ?',
+            [$mailbox->value, $key],
+        );
+        if ($row === false) {
+            return null;
+        }
+        $text = static fn (mixed $value): ?string => is_string($value) && $value !== '' ? $value : null;
+
+        return [
+            'status'              => SendState::tryFrom(is_string($row['status'] ?? null) ? $row['status'] : '') ?? SendState::Unknown,
+            'token'               => $text($row['claim_token'] ?? null) ?? '',
+            'payload_hash'        => $text($row['payload_hash'] ?? null) ?? '',
+            'message_id'          => $text($row['provider_message_id'] ?? null),
+            'internet_message_id' => $text($row['internet_message_id'] ?? null) ?? '',
+            'thread_id'           => $text($row['thread_id'] ?? null),
+            'reason'              => $text($row['reason'] ?? null),
+            'attempts'            => is_numeric($row['attempts'] ?? null) ? (int) $row['attempts'] : 0,
+            'updated_at'          => is_numeric($row['updated_at'] ?? null) ? (int) $row['updated_at'] : 0,
+            'sent_at'             => is_numeric($row['sent_at'] ?? null) ? (int) $row['sent_at'] : null,
+        ];
+    }
+
+    /**
+     * A transition by the claim holder (one conditional statement): `$from` → `$to` with the given columns, only while
+     * the row is held by `$token` in state `$from`. Every transition bumps `row_version`, so MySQL / MariaDB count the
+     * row even when nothing else changes within the same second (audit ZAT-R4): `$from === $to` is the heartbeat of a
+     * long upload.
+     *
+     * @param array<string, int|string|null> $set columns among provider_message_id, internet_message_id, thread_id, reason, sent_at
+     */
+    public function updateSend(MailboxId $mailbox, string $key, string $token, SendState $from, SendState $to, array $set = []): bool
+    {
+        $sql    = 'UPDATE ' . $this->sendTable() . ' SET status = ?, row_version = row_version + 1, updated_at = ?';
+        $params = [$to->value, $this->now()];
+        foreach ($set as $column => $value) {
+            if (!in_array($column, self::SEND_COLUMNS, true)) {
+                throw new InvalidArgumentException('Unknown send column.');
+            }
+            $sql .= ', ' . $column . ' = ?';
+            $params[] = $value;
+        }
+
+        return $this->write($sql . ' WHERE mailbox_id = ? AND idempotency_key = ? AND claim_token = ? AND status = ?', [...$params, $mailbox->value, $key, $token, $from->value]) === 1;
+    }
+
+    /**
+     * Takes a key over from its previous holder (design section 9.4): one conditional statement on the old claim token
+     * and state (and, for an in-flight state, on no progress since `$staleBefore`); it writes a new random token, so
+     * exactly one of several concurrent callers wins. Counts the attempt.
+     *
+     * @param int|null $staleBefore UNIX seconds: the row must not have moved since (null for a released row)
+     */
+    public function takeOverSend(MailboxId $mailbox, string $key, string $oldToken, SendState $from, string $newToken, SendState $to, ?int $staleBefore): bool
+    {
+        $params = [$newToken, $to->value, $this->now(), $mailbox->value, $key, $oldToken, $from->value];
+        if ($staleBefore !== null) {
+            $params[] = $staleBefore;
+        }
+
+        return $this->write(
+            'UPDATE ' . $this->sendTable() . ' SET claim_token = ?, status = ?, attempts = attempts + 1, row_version = row_version + 1, updated_at = ? WHERE mailbox_id = ? AND idempotency_key = ? AND claim_token = ? AND status = ?' . ($staleBefore !== null ? ' AND updated_at < ?' : ''),
+            $params,
+        ) === 1;
+    }
+
+    /**
+     * Deletes settled send rows (`sent`, `failed`, `unknown`, `released`) not updated since `$before`, in batches;
+     * in-flight rows (`drafting`, `sending`) are never purged. Returns the rows deleted.
+     *
+     * @param int $before UNIX seconds
+     */
+    public function purgeSends(int $before, int $batch = 500): int
+    {
+        $connection = $this->connection();
+        $settled    = [SendState::Sent->value, SendState::Failed->value, SendState::Unknown->value, SendState::Released->value];
+        $in         = implode(', ', array_fill(0, count($settled), '?'));
+        $deleted    = 0;
+        do {
+            $rows = $connection->fetchAllAssociative(
+                $connection->getDatabasePlatform()->modifyLimitQuery('SELECT mailbox_id, idempotency_key FROM ' . $this->sendTable() . ' WHERE updated_at < ? AND status IN (' . $in . ') ORDER BY updated_at', $batch),
+                [$before, ...$settled],
+            );
+            foreach ($rows as $row) {
+                $deleted += $this->write('DELETE FROM ' . $this->sendTable() . ' WHERE mailbox_id = ? AND idempotency_key = ? AND updated_at < ? AND status IN (' . $in . ')', [$row['mailbox_id'], $row['idempotency_key'], $before, ...$settled]);
+            }
+        } while (count($rows) === $batch);
+
+        return $deleted;
+    }
+
+    /**
      * Deletes every row of a mailbox in one transaction (disconnect, or a mailbox the host no longer knows); returns
      * the rows deleted.
      */
@@ -477,6 +625,25 @@ final class MailboxStore
             $table->setPrimaryKey(['subscription_id']);
             $table->addUniqueIndex(['mailbox_id', 'folder_key'], $this->tablePrefix . 'uniq_mail_kit_mailbox_sub_folder');
         }
+        if (!$schema->hasTable($this->sendTable())) {
+            $table = $schema->createTable($this->sendTable());
+            $table->addColumn('mailbox_id', 'string', ['length' => 128] + $exact);
+            $table->addColumn('idempotency_key', 'string', ['length' => 128] + $exact);
+            $table->addColumn('payload_hash', 'string', ['length' => 64]);
+            $table->addColumn('status', 'string', ['length' => 16]);
+            $table->addColumn('claim_token', 'string', ['length' => 32]);
+            $table->addColumn('provider_message_id', 'string', ['length' => 512, 'notnull' => false]);
+            $table->addColumn('internet_message_id', 'string', ['length' => 512, 'notnull' => false]);
+            $table->addColumn('thread_id', 'string', ['length' => 512, 'notnull' => false]);
+            $table->addColumn('reason', 'string', ['length' => 128, 'notnull' => false]);
+            $table->addColumn('attempts', 'integer', ['default' => 1]);
+            $table->addColumn('row_version', 'integer', ['default' => 0]);
+            $table->addColumn('claimed_at', 'bigint');
+            $table->addColumn('updated_at', 'bigint');
+            $table->addColumn('sent_at', 'bigint', ['notnull' => false]);
+            $table->setPrimaryKey(['mailbox_id', 'idempotency_key']);
+            $table->addIndex(['updated_at'], $this->tablePrefix . 'idx_mail_kit_mailbox_send_updated');
+        }
     }
 
     /**
@@ -533,7 +700,7 @@ final class MailboxStore
      */
     private function tables(): array
     {
-        return [$this->subscriptionTable(), $this->cursorTable(), $this->mailboxTable()];
+        return [$this->sendTable(), $this->subscriptionTable(), $this->cursorTable(), $this->mailboxTable()];
     }
 
     /**

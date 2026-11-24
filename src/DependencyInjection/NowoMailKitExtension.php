@@ -82,17 +82,22 @@ use Nowo\MailKitBundle\Log\SentMailPersonalDataSubjectResolverInterface;
 use Nowo\MailKitBundle\Log\SentMailRecorder;
 use Nowo\MailKitBundle\Log\SentMailRepository;
 use Nowo\MailKitBundle\Mailbox\Engine\MailboxAttachmentReader;
+use Nowo\MailKitBundle\Mailbox\Engine\MailboxSender;
+use Nowo\MailKitBundle\Mailbox\Engine\MailboxSendOptions;
 use Nowo\MailKitBundle\Mailbox\Engine\MailboxSyncEngine;
 use Nowo\MailKitBundle\Mailbox\Engine\MailboxSyncOptions;
 use Nowo\MailKitBundle\Mailbox\Graph\GraphMailboxGateway;
 use Nowo\MailKitBundle\Mailbox\Html\MailHtmlSanitizer;
 use Nowo\MailKitBundle\Mailbox\Html\RemoteImages;
+use Nowo\MailKitBundle\Mailbox\Infrastructure\Command\MailboxPurgeCommand;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Command\MailboxSchemaCommand;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Command\MailboxStatusCommand;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Command\MailboxSubscriptionsCommand;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Command\MailboxSweepCommand;
+use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\DeliverSentCopy;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\FetchMailboxMessage;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\MailboxMessageHandler;
+use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\ReconcileMailboxSend;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\RenewMailboxSubscriptions;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\SyncMailboxFolder;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Store\MailboxSchemaListener;
@@ -103,10 +108,12 @@ use Nowo\MailKitBundle\Mailbox\Port\KeepAllExclusionPolicy;
 use Nowo\MailKitBundle\Mailbox\Port\MailboxCallObserverInterface;
 use Nowo\MailKitBundle\Mailbox\Port\MailboxDirectoryInterface;
 use Nowo\MailKitBundle\Mailbox\Port\MailboxExclusionPolicyInterface;
+use Nowo\MailKitBundle\Mailbox\Port\MailboxMessageIndexInterface;
 use Nowo\MailKitBundle\Mailbox\Port\MailboxMessageSinkInterface;
 use Nowo\MailKitBundle\Mailbox\Port\MailboxTokenProviderInterface;
 use Nowo\MailKitBundle\Mailbox\Port\NullMailboxCallObserver;
 use Nowo\MailKitBundle\Mailbox\Service\MailboxAttachmentReaderInterface;
+use Nowo\MailKitBundle\Mailbox\Service\MailboxSenderInterface;
 use Nowo\MailKitBundle\Mailbox\Service\MailboxSyncInterface;
 use Nowo\MailKitBundle\Mailbox\Value\MailboxProvider;
 use Nowo\MailKitBundle\Mailer\MailKitMailer;
@@ -632,7 +639,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
      */
     private function registerMailboxes(ContainerBuilder $container, array $mailboxes, array $doctrine, bool $hasDoctrine, bool $hasOrm): void
     {
-        /** @var array{enabled: bool, token_provider: string, directory: string, sink: string, exclusion_policy: string|null, call_observer: string|null, http_client: string, connection: string|null, bus: string, timeout: float, max_folders: int, sync: array{initial_window: string, max_initial_window: string, resync_window: string, page_size: int, max_pages_per_run: int, lease_seconds: int}, limits: array{max_message_bytes: int, max_html_bytes: int, max_attachment_bytes: int}, html: array{remote_images: string}, graph: array{enabled: bool, renew_before: string, outbound_url_guard: string, webhook: array{path: string, notification_url: string|null, max_body_bytes: int, max_notifications: int, allowed_ips: list<string>, rate_limit: array{limit: int, interval: string}, client_rate_limit: array{limit: int, interval: string}}}} $mailboxes */
+        /** @var array{enabled: bool, token_provider: string, directory: string, sink: string, exclusion_policy: string|null, call_observer: string|null, message_index: string|null, http_client: string, connection: string|null, bus: string, timeout: float, max_folders: int, sync: array{initial_window: string, max_initial_window: string, resync_window: string, page_size: int, max_pages_per_run: int, lease_seconds: int}, limits: array{max_message_bytes: int, max_html_bytes: int, max_attachment_bytes: int}, html: array{remote_images: string}, send: array{stale_claim_seconds: int, retention: string, max_recipients: int, max_attachments: int, max_attachment_bytes: int, max_message_bytes: int, max_html_bytes: int, max_text_bytes: int, max_attempts: int, sent_copy: array{delay_ms: int, attempts: int}}, graph: array{enabled: bool, renew_before: string, upload_hosts: list<string>, outbound_url_guard: string, webhook: array{path: string, notification_url: string|null, max_body_bytes: int, max_notifications: int, allowed_ips: list<string>, rate_limit: array{limit: int, interval: string}, client_rate_limit: array{limit: int, interval: string}}}} $mailboxes */
         if (!$mailboxes['enabled']) {
             return;
         }
@@ -670,6 +677,11 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             $container->setDefinition(NullMailboxCallObserver::class, new Definition(NullMailboxCallObserver::class));
             $container->setAlias(MailboxCallObserverInterface::class, NullMailboxCallObserver::class);
         }
+        $index = $mailboxes['message_index'];
+        if (is_string($index) && $index !== '') {
+            $container->setAlias(MailboxMessageIndexInterface::class, $index);
+        }
+        $send = $mailboxes['send'];
 
         $gateways = [];
         if ($graph['enabled']) {
@@ -677,7 +689,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             $container->setDefinition(self::MAILBOX_GRAPH_CLIENT_ID, new Definition(GraphApiClient::class, [
                 new Reference($mailboxes['http_client']),
                 null,
-                GraphApiClient::DEFAULT_UPLOAD_HOSTS,
+                $graph['upload_hosts'],
                 $mailboxes['timeout'],
                 $logger,
                 null,
@@ -690,6 +702,8 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
                 new Reference(self::MAILBOX_NORMALIZER_ID),
                 $mailboxes['limits']['max_message_bytes'],
                 $logger,
+                // Outgoing HTML: no remote image is sent unless html.remote_images is "allowed".
+                new Definition(MailHtmlSanitizer::class, [RemoteImages::from($mailboxes['html']['remote_images']) === RemoteImages::Allowed ? RemoteImages::Allowed : RemoteImages::Dropped, $send['max_html_bytes']]),
             ]));
             $gateways[MailboxProvider::Graph->value] = new Reference(GraphMailboxGateway::class);
         }
@@ -720,17 +734,49 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             new Reference('event_dispatcher', ContainerInterface::NULL_ON_INVALID_REFERENCE),
             $clock,
             $logger,
+            is_string($index) && $index !== '' ? new Reference(MailboxMessageIndexInterface::class) : null,
         ]))->setPublic(true));
         $container->setAlias(MailboxSyncInterface::class, MailboxSyncEngine::class)->setPublic(true);
+        $container->setDefinition(MailboxSender::class, (new Definition(MailboxSender::class, [
+            new Reference(MailboxSyncEngine::class),
+            new Reference(MailboxStore::class),
+            $bus,
+            new Definition(MailboxSendOptions::class, [
+                $send['stale_claim_seconds'],
+                $send['retention'],
+                $send['max_recipients'],
+                $send['max_attachments'],
+                $send['max_attachment_bytes'],
+                $send['max_message_bytes'],
+                $send['max_html_bytes'],
+                $send['max_text_bytes'],
+                $send['max_attempts'],
+                $send['sent_copy']['delay_ms'],
+                $send['sent_copy']['attempts'],
+            ]),
+            $clock,
+            $logger,
+        ]))->setPublic(true));
+        $container->setAlias(MailboxSenderInterface::class, MailboxSender::class)->setPublic(true);
         $container->setDefinition(MailboxAttachmentReader::class, (new Definition(MailboxAttachmentReader::class, [
             new Reference(MailboxSyncEngine::class),
             $mailboxes['limits']['max_attachment_bytes'],
         ]))->setPublic(true));
         $container->setAlias(MailboxAttachmentReaderInterface::class, MailboxAttachmentReader::class)->setPublic(true);
-        $container->setDefinition(MailboxMessageHandler::class, (new Definition(MailboxMessageHandler::class, [new Reference(MailboxSyncEngine::class), $bus, $logger]))
+        $container->setDefinition(MailboxMessageHandler::class, (new Definition(MailboxMessageHandler::class, [
+            new Reference(MailboxSyncEngine::class),
+            $bus,
+            $logger,
+            new Reference(MailboxSender::class),
+            $send['sent_copy']['attempts'],
+            $send['sent_copy']['delay_ms'],
+            ($send['stale_claim_seconds'] + 1) * 1000,
+        ]))
             ->addTag('messenger.message_handler', ['handles' => SyncMailboxFolder::class, 'method' => 'sync'])
             ->addTag('messenger.message_handler', ['handles' => FetchMailboxMessage::class, 'method' => 'fetch'])
-            ->addTag('messenger.message_handler', ['handles' => RenewMailboxSubscriptions::class, 'method' => 'renew']));
+            ->addTag('messenger.message_handler', ['handles' => RenewMailboxSubscriptions::class, 'method' => 'renew'])
+            ->addTag('messenger.message_handler', ['handles' => DeliverSentCopy::class, 'method' => 'sentCopy'])
+            ->addTag('messenger.message_handler', ['handles' => ReconcileMailboxSend::class, 'method' => 'reconcile']));
 
         if ($graph['enabled']) {
             $webhook = $graph['webhook'];
@@ -762,6 +808,8 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             ->addTag('console.command', ['command' => MailboxSubscriptionsCommand::NAME]));
         $container->setDefinition(MailboxStatusCommand::class, (new Definition(MailboxStatusCommand::class, [new Reference(MailboxSyncInterface::class)]))
             ->addTag('console.command', ['command' => MailboxStatusCommand::NAME]));
+        $container->setDefinition(MailboxPurgeCommand::class, (new Definition(MailboxPurgeCommand::class, [new Reference(MailboxStore::class), $send['retention'], $clock]))
+            ->addTag('console.command', ['command' => MailboxPurgeCommand::NAME]));
     }
 
     /**

@@ -230,8 +230,28 @@ Off by default (`mailboxes.enabled`). Threat model: design section 17.
   Removals are confirmed with Graph (`Deleted` vs `MovedOut`; an unexpected refusal answers `MovedOut`) so a move is
   never reported as a deletion. A folder whose sweeps are refused is recorded and reported (`MailboxFolderSyncFailedEvent`)
   instead of failing silently.
-- **Personal data.** MailKit's tables hold no address, subject, body, token or recipient; `disconnect()` deletes the
-  remote subscriptions (best effort) and every MailKit row of the mailbox. Logs carry the mailbox id and counts only.
+- **Send (2.5.0 part 2).** Draft + send only, from the mailbox's own address, after the account check (another
+  account pauses the mailbox and sends nothing). Idempotency key mandatory and scoped to the mailbox; a key reused for
+  another message is refused. Duplicates are prevented by the state machine, not by luck: once a key is `sending`
+  only its one draft is submitted again, and only after Graph reads it as a draft; an ambiguous answer is reconciled
+  by that state (never resent blindly), and an unprovable outcome stops for good (`MailboxSendOutcomeUnknown`). MailKit
+  deletes only drafts it created and never submitted, and only after reading them as drafts (a sent item keeps the
+  draft's immutable id). `send()` refuses an open transaction on its connection (a rollback after the provider sent
+  would forget the send).
+- **Header injection and bounds on send.** Addresses must pass `FILTER_VALIDATE_EMAIL` without CR / LF, quotes,
+  angle brackets or separators (≤ 254); display names and subjects carry no control characters (≤ 256 / 998);
+  Symfony Mime renders every header of a new message; recipients, attachments, attachment size, message size and
+  the HTML / text bodies are bounded (`send.*`) before anything is claimed. Attachments are streamed from their path or
+  stream; upload session URLs must be HTTPS on 443 to `graph.upload_hosts`, are pinned by OutboundUrlGuard when it is
+  on, never receive the token and are `#[\SensitiveParameter]` like every option, URL and token argument (a failing
+  chunk leaves no upload URL or token in a stored exception chain; `GraphTokenTraceTest` covers draft, update, upload
+  chunk, send and the sent-copy fetch). Outgoing HTML is sanitised (no script, style or event handler; remote images
+  dropped unless `html.remote_images: allowed`).
+- **Personal data.** MailKit's tables hold no address, subject, body, token or recipient (the send table keeps the
+  key, the SHA-256 of the message description, the provider ids and the Message-ID; settled rows are purged after
+  `send.retention`); `disconnect()` deletes the remote subscriptions (best effort) and every MailKit row of the mailbox,
+  send rows included. Delegated sends are not written to the sent-mail log (Q-MB-14). Logs carry the mailbox id and
+  counts only.
 
 ## Logging
 

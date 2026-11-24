@@ -47,7 +47,13 @@ request or a replayed Messenger message. It applies from **1.13.0**.
 | Open counter (`recordOpen()`, pixel or `RecordMailOpen` handler) | One `UPDATE` | Atomic `open_count = open_count + 1` with the cap in the `WHERE` | Pixel: 409 `CONFLICT_001`; Messenger retries |
 | Open event listeners (`MailOpenedEvent`, `MailMachineOpenedEvent`) | After the counter's commit | — | A listener's lock conflict is rethrown as a committed `ConcurrencyConflict`: pixel 409 `CONFLICT_002` |
 | Tracking retention and GDPR (`purge()`, `eraseRecipient()`) | One `DELETE` per batch of 500 ids | Idempotent; exact re-check of the recipient id | Exception to the command or the eraser |
-| Schema commands (`nowo:mail-kit:graph:schema`, `nowo:mail-kit:tracking:schema`) | DDL, one statement at a time | `CREATE` only for missing tables | Exception to the command |
+| Delegated mailbox status (`MailboxStore::insertMailbox/activate/pauseByHost/pauseGrant/bindAccount`, 2.5.0) | One statement, in a savepoint inside a host transaction | First row: caught duplicate; transitions: conditional `UPDATE … WHERE status = ?` (one winner, one event); account: conditional first write, then a read | Grant failure acknowledged (the pause commits); others to Messenger |
+| Folder sweep lease and cursor (`acquireLease`, `requestRerun`, `advanceCursor`, `extendLease`, `releaseLease`, 2.5.0) | One statement each, in a savepoint inside a host transaction | Lease by a conditional `UPDATE` with a random owner; cursor compare-and-set on `cursor_version` and the owner; a 0-row extension confirmed by a read (MySQL changed-rows count, ZAT-R4) | A lost lease stops the run without writing; the fetches are idempotent |
+| Delegated subscriptions (`saveSubscription` swap, renewal, deletion, 2.5.0) | Swap in **one transaction**; the rest one statement | All or nothing; by id | Exception to Messenger or the command |
+| Delegated send (`claimSend`, `updateSend`, `takeOverSend`, 2.5.0 part 2) | One statement each; `send()` refuses an open transaction on the mailbox connection | Primary key (mailbox, key) plus a caught duplicate; every transition conditional on the claim token and state and bumps `row_version`; takeover of a stale row by a conditional `UPDATE` with a new token (one winner); a heartbeat right before every submit (ZAV-L1) | `MailboxSendInProgress` (map to 409 `CONFLICT_001`), `MailboxSendKeyConflict` (`CONFLICT_002`) |
+| Send purge (`purgeSends`, `nowo:mail-kit:mailbox:purge`) | One `DELETE` per row of a batch | Settled states only, re-checked in the `WHERE` | Exception to the command |
+| Delegated mailbox webhook (`MailboxGraphWebhookController`) | Writes nothing itself; it only dispatches messages | — | As the Graph webhook |
+| Schema commands (`nowo:mail-kit:graph:schema`, `nowo:mail-kit:tracking:schema`, `nowo:mail-kit:mailbox:schema`) | DDL, one statement at a time | `CREATE` only for missing tables | Exception to the command |
 
 `grep -rn "flush()" src/` finds nothing: MailKit has no ORM write.
 
@@ -149,6 +155,10 @@ twice:
   - a listener conflict after the counted open (409 `CONFLICT_002`).
 
   Each test checks the stored rows and that the connection is still usable.
+- `tests/Integration/Concurrency/MailboxConcurrencyRaceTest.php` and `MailboxSendRaceTest.php` (2.5.0): one sweeper
+  per folder, no cursor lost update after a takeover, one grant transition, same-second lease extensions and send
+  heartbeats on MySQL / MariaDB, one takeover winner against an open transaction, and two workers sending one key
+  (one delivery, also after an ambiguous submit), with an injected `MockClock`.
 - Unit tests with injected deadlocks, lock wait timeouts, serialization failures, lost savepoints, unique violations
   and lost connections: `StorageConflictsTest`, `MailKitConflictListenerTest`, `TrackingConflictsTest`,
   `GraphInboundStoreTest`, `GraphInboundProcessorTest`, `GraphWebhookControllerTest`.
@@ -172,4 +182,7 @@ twice:
   unknown.
 - **A replayed open.** A Messenger retry of `RecordMailOpen` after a listener conflict counts the open again. Open
   counts are statistics, not billing data.
+- **A resubmitted draft (2.5.0 send).** After an ambiguous submit, a draft that still reads as a draft after
+  `send.stale_claim_seconds` is submitted again. This relies on Exchange delivering one draft item at most once (on the
+  owner's manual checklist); worker clocks should be NTP-synced (staleness compares them with stored times).
 - **No retry inside MailKit.** Its runner makes one attempt. Clients, Messenger or a retrying runner retry.

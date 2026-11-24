@@ -177,7 +177,10 @@ final readonly class MailboxMessageHandler
         $this->run($mailbox, function () use ($mailbox, $sender, $message, $again): void {
             try {
                 $settled = $sender->reconcile($mailbox, $message->idempotencyKey);
-            } catch (LogicException) {
+            } catch (LogicException $logic) {
+                if ($logic instanceof InvalidArgumentException) {
+                    throw $logic;
+                }
                 // Audit ZAV-I3: the handler runs inside a transaction on the mailbox connection (a doctrine_transaction
                 // middleware without a dedicated mailboxes.connection). Retrying cannot help: acknowledge once; the
                 // next send() with the key reconciles it.

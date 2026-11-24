@@ -39,6 +39,7 @@ use Throwable;
 use function getenv;
 use function is_string;
 use function str_contains;
+use function str_ends_with;
 use function str_starts_with;
 
 /**
@@ -179,6 +180,39 @@ final class MailboxSendRaceTest extends TestCase
         self::assertTrue($b->reconcile($this->id, 'race-send-key-0002'));
         self::assertTrue($a->send($this->id, $second)->replayed);
         self::assertSame(['DRAFT-1', 'DRAFT-2'], $graph->delivered);
+    }
+
+    public function testAStalledHolderNeverDeletesTheDraftAnotherWorkerSent(): void
+    {
+        // Audit ZAV-F1: A's submit is refused (4xx); A stalls before deciding; B takes the stale key over, finds the
+        // draft still a draft and sends it. A's late "still a draft" view must neither delete it nor mark it failed.
+        $graph           = new MailboxGraphFake();
+        $ports           = (new MemoryMailboxPorts())->add(MemoryMailboxPorts::settings('mbx-ana', 'ana@example.com', ['inbox']));
+        $a               = $this->sender($this->storeA, $graph, $ports);
+        $b               = $this->sender($this->storeB, $graph, $ports);
+        $mail            = new OutgoingMailboxMail(OutgoingKind::New, null, [new MailAddress('pedro@example.org')], [], [], 'Plan', 'Hello', null, [], self::KEY);
+        $clock           = $this->clock;
+        $submits         = 0;
+        $stalled         = false;
+        $graph->override = static function (string $method, string $path) use (&$submits, &$stalled, $b, $clock): ?MockResponse {
+            if ($method === 'POST' && str_ends_with($path, '/send') && ++$submits === 1) {
+                return MailboxGraphFake::json(['error' => ['code' => 'ErrorInvalidRecipients']], 400);
+            }
+            if ($method === 'GET' && str_contains($path, 'isDraft') && !$stalled) {
+                $stalled = true;
+                $clock->modify('+121 seconds');
+                self::assertTrue($b->reconcile(new MailboxId('mbx-ana'), self::KEY));
+
+                return MailboxGraphFake::json(['id' => 'DRAFT-1', 'isDraft' => true]);
+            }
+
+            return null;
+        };
+
+        self::assertTrue($a->send($this->id, $mail)->replayed);
+        self::assertSame(['DRAFT-1'], $graph->delivered);
+        self::assertSame([], $graph->deleted);
+        self::assertSame(SendState::Sent, $this->storeA->sendRow($this->id, self::KEY)['status'] ?? null);
     }
 
     private function sender(MailboxStore $store, MailboxGraphFake $graph, MemoryMailboxPorts $ports): MailboxSender

@@ -163,7 +163,9 @@ final readonly class MailboxSender implements MailboxSenderInterface
     /**
      * Deletes the drafts that settled rows (`released`, `failed`) not updated since `$before` still name, each only
      * after Graph reads it as a draft (audit ZAV-I4; `nowo:mail-kit:mailbox:purge --drafts`). A draft that reads as sent
-     * is left alone; a paused mailbox, an unreadable state or a failure skips that row. Returns the drafts deleted.
+     * is left alone. A row whose draft is dealt with (deleted, gone or sent) forgets its id; a paused mailbox, an unreadable
+     * state or a failure keeps it, and `purgeSends(…, keepDrafts: true)` keeps such rows so the next purge retries them.
+     * Returns the drafts deleted.
      */
     public function purgeOrphanDrafts(int $before): int
     {
@@ -178,9 +180,14 @@ final readonly class MailboxSender implements MailboxSenderInterface
             $draft                 = new ProviderMessageId($row['draft']);
 
             try {
-                if ($gateway->draftState($session, $draft) === DraftState::Draft) {
+                $state = $gateway->draftState($session, $draft);
+                if ($state === DraftState::Draft) {
                     $gateway->deleteDraft($session, $draft);
                     ++$deleted;
+                }
+                if ($state !== DraftState::Unreadable) {
+                    // Deleted, gone or sent by hand: nothing left to retry, so the row may be purged.
+                    $this->store->forgetDraft($mailbox, $row['idempotency_key'], $row['token'], $row['status']);
                 }
             } catch (Throwable $failure) {
                 $this->logger?->notice('Mailbox orphan draft not deleted; retried by the next purge until its row is purged.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value, 'error' => $failure::class]);
@@ -260,7 +267,9 @@ final readonly class MailboxSender implements MailboxSenderInterface
     {
         $state = $gateway->draftState($session, $previous);
         if ($state === DraftState::Sent) {
-            $this->store->updateSend($settings->id, $key, $token, SendState::Drafting, SendState::Unknown, ['reason' => 'draft_sent_elsewhere']);
+            if (!$this->store->updateSend($settings->id, $key, $token, SendState::Drafting, SendState::Unknown, ['reason' => 'draft_sent_elsewhere'])) {
+                throw new MailboxSendInProgress();
+            }
             $this->logger?->warning('Mailbox send: the draft of an abandoned attempt was sent outside MailKit; the key is unknown and nothing is sent again.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $settings->id->value]);
 
             throw new MailboxSendOutcomeUnknown();
@@ -380,16 +389,19 @@ final readonly class MailboxSender implements MailboxSenderInterface
             return $this->markSent($mailbox, $key, $token, $draft, $replayed);
         }
         if ($state === DraftState::Gone) {
-            $this->store->updateSend($mailbox, $key, $token, SendState::Sending, SendState::Unknown, ['reason' => 'draft_gone']);
-            $this->logger?->warning('Mailbox send outcome unknown: the submitted draft is gone; it is never sent again.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value]);
-
-            throw new MailboxSendOutcomeUnknown();
+            return $this->unknown($mailbox, $key, $token);
         }
         if ($state === DraftState::Draft && $failure instanceof MailboxProviderFailure && !$failure->isRetryable()) {
-            // A definite refusal of a draft that is still a draft: nothing was sent.
-            $reason  = $this->reason($failure);
-            $deleted = $this->delete($gateway, $session, $draft);
-            $this->store->updateSend($mailbox, $key, $token, SendState::Sending, SendState::Failed, ['reason' => $reason] + ($deleted ? ['provider_message_id' => null] : []));
+            // A definite refusal of a draft that is still a draft: nothing was sent. The transition comes first (audit
+            // ZAV-F1): a holder that stalled past the stale delay may have lost the key to a worker that sent this very
+            // draft, so it deletes the draft only while it still holds the key.
+            $reason = $this->reason($failure);
+            if (!$this->store->updateSend($mailbox, $key, $token, SendState::Sending, SendState::Failed, ['reason' => $reason])) {
+                return $this->lostOutcome($mailbox, $key);
+            }
+            if ($this->delete($gateway, $session, $draft)) {
+                $this->store->updateSend($mailbox, $key, $token, SendState::Failed, SendState::Failed, ['provider_message_id' => null]);
+            }
             $this->logger?->notice('Mailbox send refused by the provider; nothing was sent.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value, 'status' => $failure->status]);
 
             throw new MailboxSendFailed($reason);
@@ -419,7 +431,9 @@ final readonly class MailboxSender implements MailboxSenderInterface
             throw new MailboxSendInProgress(true);
         }
         if ($row['message_id'] === null || $this->options->maxAttempts < $row['attempts'] + 1) {
-            $this->store->updateSend($mailbox, $key, $token, SendState::Sending, SendState::Unknown, ['reason' => 'attempts']);
+            if (!$this->store->updateSend($mailbox, $key, $token, SendState::Sending, SendState::Unknown, ['reason' => 'attempts'])) {
+                return $this->lostOutcome($mailbox, $key);
+            }
             $this->logger?->warning('Mailbox send outcome unknown after the last reconcile attempt; it is never sent again.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value]);
 
             throw new MailboxSendOutcomeUnknown();
@@ -453,13 +467,8 @@ final readonly class MailboxSender implements MailboxSenderInterface
     private function markSent(MailboxId $mailbox, string $key, string $token, ProviderMessageId $draft, bool $replayed): SentMessage
     {
         if (!$this->store->updateSend($mailbox, $key, $token, SendState::Sending, SendState::Sent, ['provider_message_id' => $draft->value, 'sent_at' => $this->now()])) {
-            // Taken over meanwhile (this call was slower than send.stale_claim_seconds): the holder reaches the same outcome.
-            $row = $this->store->sendRow($mailbox, $key);
-            if ($row !== null && $row['status'] === SendState::Sent) {
-                return $this->sentMessage($row, true);
-            }
-
-            throw new MailboxSendInProgress(true);
+            // Taken over meanwhile (this call was slower than send.stale_claim_seconds): the holder's outcome is answered.
+            return $this->lostOutcome($mailbox, $key);
         }
 
         try {
@@ -475,14 +484,38 @@ final readonly class MailboxSender implements MailboxSenderInterface
     }
 
     /**
+     * `sending` → `unknown` (the submitted draft is gone), only while this call holds the key (audit ZAV-F1).
+     *
      * @throws MailboxSendOutcomeUnknown
      */
-    private function unknown(MailboxId $mailbox, string $key, string $token): never
+    private function unknown(MailboxId $mailbox, string $key, string $token): SentMessage
     {
-        $this->store->updateSend($mailbox, $key, $token, SendState::Sending, SendState::Unknown, ['reason' => 'draft_gone']);
+        if (!$this->store->updateSend($mailbox, $key, $token, SendState::Sending, SendState::Unknown, ['reason' => 'draft_gone'])) {
+            return $this->lostOutcome($mailbox, $key);
+        }
         $this->logger?->warning('Mailbox send outcome unknown: the submitted draft is gone; it is never sent again.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value]);
 
         throw new MailboxSendOutcomeUnknown();
+    }
+
+    /**
+     * This call lost the key while it decided (it stalled past the stale delay): the row's holder decided instead, so its
+     * outcome is answered and nothing of this call's view is written or deleted (audit ZAV-F1).
+     *
+     * @throws MailboxSendFailed
+     * @throws MailboxSendOutcomeUnknown
+     * @throws MailboxSendInProgress
+     */
+    private function lostOutcome(MailboxId $mailbox, string $key): SentMessage
+    {
+        $row = $this->store->sendRow($mailbox, $key);
+
+        return match ($row['status'] ?? null) {
+            SendState::Sent    => $this->sentMessage($row, true),
+            SendState::Failed  => throw new MailboxSendFailed($row['reason'] ?? MailboxProviderFailure::REFUSED),
+            SendState::Unknown => throw new MailboxSendOutcomeUnknown(),
+            default            => throw new MailboxSendInProgress(true),
+        };
     }
 
     /**

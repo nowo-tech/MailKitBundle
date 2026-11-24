@@ -921,7 +921,97 @@ final class MailboxSenderTest extends TestCase
         self::assertStringContainsString('2 leftover draft(s) deleted.', $command->getDisplay());
         self::assertSame(['LEFT-1', 'LEFT-2'], array_values(array_filter($this->graph->deleted, static fn (string $id): bool => $id !== 'ERR-1')));
         self::assertTrue($this->log->has('Mailbox orphan draft not deleted; retried by the next purge until its row is purged.'));
-        self::assertSame(0, (int) $this->mailboxConnection->fetchOne('SELECT COUNT(*) FROM mail_kit_mailbox_send'));
+        // The draft that could not be deleted and the paused / unknown mailbox's row stay for the next run.
+        self::assertSame(['key-err-00000001', 'key-other-000001'], $this->mailboxConnection->fetchFirstColumn('SELECT idempotency_key FROM mail_kit_mailbox_send ORDER BY idempotency_key'));
+        $this->graph->override = null;
+        self::assertSame(0, $command->execute(['--drafts' => true]));
+        self::assertStringContainsString('1 leftover draft(s) deleted.', $command->getDisplay());
+        self::assertSame(['key-other-000001'], $this->mailboxConnection->fetchFirstColumn('SELECT idempotency_key FROM mail_kit_mailbox_send'));
+        self::assertSame(0, $command->execute([]));
+        self::assertSame(0, (int) $this->mailboxConnection->fetchOne('SELECT COUNT(*) FROM mail_kit_mailbox_send'), 'without --drafts every settled row goes');
+    }
+
+    public function testAHolderThatLostTheKeyWhileDecidingWritesAndDeletesNothing(): void
+    {
+        // ZAV-F1: A gets a definite 4xx, then stalls; B takes over and the row ends `sent`. A's stale view (still a draft,
+        // or gone) must neither delete the draft nor overwrite the row.
+        foreach (['draft' => true, 'gone' => false] as $case => $staleDraft) {
+            $key                   = 'lost-key-' . $case . '-0001';
+            $connection            = $this->mailboxConnection;
+            $this->graph->override = static function (string $method, string $path) use ($connection, $key, $staleDraft): ?MockResponse {
+                if ($method === 'POST' && str_ends_with($path, '/send')) {
+                    return MailboxGraphFake::json(['error' => ['code' => 'ErrorInvalidRecipients']], 400);
+                }
+                if ($method === 'GET' && str_contains($path, 'isDraft')) {
+                    $connection->executeStatement("UPDATE mail_kit_mailbox_send SET claim_token = 'worker-b', status = 'sent', sent_at = 1 WHERE idempotency_key = ?", [$key]);
+
+                    preg_match('#/me/messages/([^/?]+)#', $path, $m);
+
+                    return $staleDraft ? MailboxGraphFake::json(['id' => $m[1] ?? '', 'isDraft' => true]) : MailboxGraphFake::json(['error' => ['code' => 'ErrorItemNotFound']], 404);
+                }
+
+                return null;
+            };
+            $this->graph->deleted = [];
+            $sent                 = $this->sender->send($this->ana, $this->mail(key: $key));
+            self::assertTrue($sent->replayed, $case);
+            self::assertSame([], $this->graph->deleted, $case);
+            self::assertSame('sent', $this->row($key)['status'], $case);
+        }
+
+        // The lost outcomes: failed, unknown, still in flight.
+        foreach (['failed' => MailboxSendFailed::class, 'unknown' => MailboxSendOutcomeUnknown::class, 'sending' => MailboxSendInProgress::class] as $status => $expected) {
+            $key                   = 'lost-key-' . $status . '-01';
+            $connection            = $this->mailboxConnection;
+            $this->graph->override = static function (string $method, string $path) use ($connection, $key, $status): ?MockResponse {
+                if ($method === 'POST' && str_ends_with($path, '/send')) {
+                    return MailboxGraphFake::json(['error' => ['code' => 'ErrorInvalidRecipients']], 400);
+                }
+                if ($method === 'GET' && str_contains($path, 'isDraft')) {
+                    $connection->executeStatement("UPDATE mail_kit_mailbox_send SET claim_token = 'worker-b', status = ?, reason = 'refused' WHERE idempotency_key = ?", [$status, $key]);
+                }
+
+                return null;
+            };
+
+            try {
+                $this->sender->send($this->ana, $this->mail(key: $key));
+                self::fail($status);
+            } catch (Throwable $failure) {
+                self::assertInstanceOf($expected, $failure, $status);
+            }
+        }
+
+        // A previous draft sent by hand while another worker took the key: nothing written, the caller retries.
+        $this->graph->override           = null;
+        $this->graph->messages['HAND-1'] = MailboxGraphFake::message('HAND-1', ['isDraft' => false]);
+        $this->mailboxConnection->executeStatement("INSERT INTO mail_kit_mailbox_send (mailbox_id, idempotency_key, payload_hash, status, claim_token, provider_message_id, attempts, row_version, claimed_at, updated_at) VALUES ('mbx-ana', 'hand-key-0000001', ?, 'released', 't0', 'HAND-1', 1, 0, 0, 0)", [$this->mail(key: 'hand-key-0000001')->fingerprint()]);
+        $this->mailboxConnection->executeStatement("CREATE TRIGGER lose_unknown BEFORE UPDATE ON mail_kit_mailbox_send WHEN NEW.status = 'unknown' BEGIN SELECT RAISE(IGNORE); END");
+
+        try {
+            $this->sender->send($this->ana, $this->mail(key: 'hand-key-0000001'));
+            self::fail('Lost.');
+        } catch (MailboxSendInProgress $busy) {
+            self::assertFalse($busy->reconciling);
+        }
+
+        // The attempts run out but the key was lost meanwhile.
+        $this->mailboxConnection->executeStatement("INSERT INTO mail_kit_mailbox_send (mailbox_id, idempotency_key, payload_hash, status, claim_token, provider_message_id, attempts, row_version, claimed_at, updated_at) VALUES ('mbx-ana', 'spent-key-000001', ?, 'sending', 't0', 'DRAFT-77', 9, 0, 0, 0)", [$this->mail(key: 'spent-key-000001')->fingerprint()]);
+
+        try {
+            $this->sender->send($this->ana, $this->mail(key: 'spent-key-000001'));
+            self::fail('Lost.');
+        } catch (MailboxSendInProgress $busy) {
+            self::assertTrue($busy->reconciling);
+        }
+        $this->mailboxConnection->executeStatement('DROP TRIGGER lose_unknown');
+    }
+
+    public function testAnInvalidArgumentInTheBackgroundReconcileIsNotMistakenForATransaction(): void
+    {
+        $this->mailboxConnection->executeStatement("INSERT INTO mail_kit_mailbox_send (mailbox_id, idempotency_key, payload_hash, status, claim_token, provider_message_id, attempts, row_version, claimed_at, updated_at) VALUES ('mbx-ana', 'bad-draft-key-01', 'h', 'sending', 't0', 'bad id', 1, 0, 0, 0)");
+        $this->expectException(InvalidArgumentException::class);
+        $this->handler->reconcile(new ReconcileMailboxSend('mbx-ana', 'bad-draft-key-01'));
     }
 
     private function submits(): int

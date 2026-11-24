@@ -1217,7 +1217,8 @@ try {
   longer knows that key, and an earlier attempt may have left (or may still leave) its draft. Use a new key.
 - **Leftover drafts**: an attempt abandoned after its draft was created (a crash, a failed delete) can leave that
   draft in the mailbox's Drafts folder; it is never submitted. `nowo:mail-kit:mailbox:purge --drafts` deletes the
-  drafts that settled `released` / `failed` rows still name, each only after Graph reads it as a draft.
+  drafts that settled `released` / `failed` rows still name, each only after Graph reads it as a draft; a row whose
+  draft could not be dealt with (paused mailbox, unreadable state, failed delete) is kept for the next run.
 - **Account check before every send**: a token of another account pauses the mailbox `AccountMismatch` and nothing
   is sent.
 - **The sent copy** is delivered only for a key MailKit recorded as `sent` with that id. It reaches your sink as `SyncedMessage` with `origin: SentCopy` and folder `sentitems`, a few seconds

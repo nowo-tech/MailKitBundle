@@ -92,7 +92,10 @@ All notable changes to this project are documented here. The format follows
   SHA-256 of the attachment bytes (I1); `DeliverSentCopy` needs a `sent` row with that id (I2); a `ReconcileMailboxSend`
   inside a transaction is logged and acknowledged, and the build warns about a `doctrine_transaction` bus without a
   dedicated `mailboxes.connection` (I3); `nowo:mail-kit:mailbox:purge --drafts` deletes leftover drafts after reading
-  them as drafts (I4).
+  them as drafts and keeps a row whose draft could not be dealt with, so the next run retries it (I4). ZAV-F1: after a
+  refused or vanished submit the `failed` / `unknown` transition is written first and the draft deleted only while the
+  call still holds the key; a holder that lost the key answers the row's outcome (replay, failure, unknown or in
+  progress). Index on (`mailbox_id`, `provider_message_id`).
 - `Mailbox\Port\MailboxMessageIndexInterface` (optional, `mailboxes.message_index`; owner answer Q1 of 2026-11-24):
   which messages of a change page the host already stores in that folder; the sweep asks once per page and fetches
   only the others. No default implementation.

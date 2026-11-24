@@ -22,7 +22,8 @@ use function sprintf;
  * older than `mailboxes.send.retention` (default `P7D`). Rows of sends in flight are kept. Schedule it daily. A key
  * reused after its row was purged is sent again: keep the retention longer than your own retries. With `--drafts` it
  * first deletes the drafts those `released` / `failed` rows still name, each only after Graph reads it as a draft
- * (audit ZAV-I4; one Graph call or two per draft).
+ * (audit ZAV-I4; one Graph call or two per draft); a row whose draft could not be dealt with is kept, so the next run
+ * retries it.
  */
 #[AsCommand(name: self::NAME, description: 'Delete settled delegated-mailbox send rows older than the retention.')]
 final class MailboxPurgeCommand extends Command
@@ -51,9 +52,11 @@ final class MailboxPurgeCommand extends Command
     {
         $before = ($this->clock ?? new NativeClock())->now()->getTimestamp() - MailboxSyncOptions::seconds($this->retention);
         if ($input->getOption('drafts') === true && $this->sender instanceof MailboxSender) {
+            // Rows whose draft could not be dealt with are kept for the next run.
             $output->writeln(sprintf('%d leftover draft(s) deleted.', $this->sender->purgeOrphanDrafts($before)));
         }
-        $deleted = $this->store->purgeSends($before);
+        $drafts  = $input->getOption('drafts') === true && $this->sender instanceof MailboxSender;
+        $deleted = $this->store->purgeSends($before, 500, $drafts);
         $output->writeln(sprintf('%d send row(s) deleted.', $deleted));
 
         return Command::SUCCESS;

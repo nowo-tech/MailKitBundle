@@ -528,6 +528,15 @@ final class MailboxStore
     }
 
     /**
+     * Forgets the draft id of a settled row whose draft was dealt with (purge `--drafts`), without touching
+     * `updated_at`, so the same purge run deletes the row. Conditional on the token and state; `row_version` changes.
+     */
+    public function forgetDraft(MailboxId $mailbox, string $key, string $token, SendState $status): void
+    {
+        $this->write('UPDATE ' . $this->sendTable() . ' SET provider_message_id = NULL, row_version = row_version + 1 WHERE mailbox_id = ? AND idempotency_key = ? AND claim_token = ? AND status = ?', [$mailbox->value, $key, $token, $status->value]);
+    }
+
+    /**
      * A transition by the claim holder (one conditional statement): `$from` → `$to` with the given columns, only while
      * the row is held by `$token` in state `$from`. Every transition bumps `row_version`, so MySQL / MariaDB count the
      * row even when nothing else changes within the same second (audit ZAT-R4): `$from === $to` is the heartbeat of a
@@ -572,23 +581,26 @@ final class MailboxStore
 
     /**
      * Deletes settled send rows (`sent`, `failed`, `unknown`, `released`) not updated since `$before`, in batches;
-     * in-flight rows (`drafting`, `sending`) are never purged. Returns the rows deleted.
+     * in-flight rows (`drafting`, `sending`) are never purged. With `$keepDrafts`, `released` / `failed` rows that still
+     * name a draft are kept, so the next `--drafts` purge retries that draft (audit ZAV-I). Returns the rows deleted.
      *
      * @param int $before UNIX seconds
      */
-    public function purgeSends(int $before, int $batch = 500): int
+    public function purgeSends(int $before, int $batch = 500, bool $keepDrafts = false): int
     {
         $connection = $this->connection();
         $settled    = [SendState::Sent->value, SendState::Failed->value, SendState::Unknown->value, SendState::Released->value];
         $in         = implode(', ', array_fill(0, count($settled), '?'));
+        $keep       = $keepDrafts ? ' AND NOT (status IN (?, ?) AND provider_message_id IS NOT NULL)' : '';
+        $keepArgs   = $keepDrafts ? [SendState::Released->value, SendState::Failed->value] : [];
         $deleted    = 0;
         do {
             $rows = $connection->fetchAllAssociative(
-                $connection->getDatabasePlatform()->modifyLimitQuery('SELECT mailbox_id, idempotency_key FROM ' . $this->sendTable() . ' WHERE updated_at < ? AND status IN (' . $in . ') ORDER BY updated_at', $batch),
-                [$before, ...$settled],
+                $connection->getDatabasePlatform()->modifyLimitQuery('SELECT mailbox_id, idempotency_key FROM ' . $this->sendTable() . ' WHERE updated_at < ? AND status IN (' . $in . ')' . $keep . ' ORDER BY updated_at', $batch),
+                [$before, ...$settled, ...$keepArgs],
             );
             foreach ($rows as $row) {
-                $deleted += $this->write('DELETE FROM ' . $this->sendTable() . ' WHERE mailbox_id = ? AND idempotency_key = ? AND updated_at < ? AND status IN (' . $in . ')', [$row['mailbox_id'], $row['idempotency_key'], $before, ...$settled]);
+                $deleted += $this->write('DELETE FROM ' . $this->sendTable() . ' WHERE mailbox_id = ? AND idempotency_key = ? AND updated_at < ? AND status IN (' . $in . ')' . $keep, [$row['mailbox_id'], $row['idempotency_key'], $before, ...$settled, ...$keepArgs]);
             }
         } while (count($rows) === $batch);
 
@@ -677,6 +689,7 @@ final class MailboxStore
             $table->addColumn('sent_at', 'bigint', ['notnull' => false]);
             $table->setPrimaryKey(['mailbox_id', 'idempotency_key']);
             $table->addIndex(['updated_at'], $this->tablePrefix . 'idx_mail_kit_mailbox_send_updated');
+            $table->addIndex(['mailbox_id', 'provider_message_id'], $this->tablePrefix . 'idx_mail_kit_mailbox_send_message');
         }
     }
 

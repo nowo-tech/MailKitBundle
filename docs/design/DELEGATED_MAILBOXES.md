@@ -572,7 +572,7 @@ schema command, as the 1.9 tables.
 | `mail_kit_mailbox` | `mailbox_id`, `provider`, `status`, `reason`, `account_hash` (SHA-256), `updated_at` | PK `mailbox_id` |
 | `mail_kit_mailbox_cursor` | `mailbox_id`, `folder_key`, `provider_folder_id`, `cursor` (delta link or history id), `cursor_version`, `lease_owner`, `lease_until`, `rerun`, `last_complete_at` | PK (`mailbox_id`, `folder_key`) |
 | `mail_kit_mailbox_subscription` | `subscription_id`, `mailbox_id`, `folder_key`, `client_state_hash`, `expires_at`, `created_at` | PK `subscription_id`; unique (`mailbox_id`, `folder_key`) |
-| `mail_kit_mailbox_send` | `mailbox_id`, `idempotency_key`, `payload_hash`, `status`, `claim_token`, `provider_message_id` (the draft's immutable id, which the sent item keeps), `internet_message_id`, `thread_id`, `reason`, `attempts`, `row_version`, `claimed_at`, `updated_at`, `sent_at` (as built in 2.5.0 part 2) | PK (`mailbox_id`, `idempotency_key`); index (`updated_at`) |
+| `mail_kit_mailbox_send` | `mailbox_id`, `idempotency_key`, `payload_hash`, `status`, `claim_token`, `provider_message_id` (the draft's immutable id, which the sent item keeps), `internet_message_id`, `thread_id`, `reason`, `attempts`, `row_version`, `claimed_at`, `updated_at`, `sent_at` (as built in 2.5.0 part 2) | PK (`mailbox_id`, `idempotency_key`); indexes (`updated_at`), (`mailbox_id`, `provider_message_id`) |
 
 No table holds an address, a subject, a body, a token or a recipient. A delta link carries an opaque provider token
 that is useless without the bearer token; it is never logged.

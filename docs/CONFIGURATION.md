@@ -13,6 +13,7 @@
 - [personal_data](#personal_data)
 - [brand](#brand)
 - [graph](#graph)
+- [mailboxes](#mailboxes)
 - [tracking](#tracking)
 - [doctrine](#doctrine)
 - [web_ui](#web_ui)
@@ -330,6 +331,81 @@ Since 1.9 (Beacon spec 229 block B). Opt-in; needs `graph.enabled`, symfony/mess
 | `limits.max_attachments` / `max_attachment_bytes` / `max_total_attachment_bytes` | `20` / `26214400` / `52428800` | Attachments beyond these are reported as rejected (`count`, `size`, `total_size`), not read. |
 | `limits.max_html_bytes` | `1048576` | HTML passed to the sanitizer (longer: cut). |
 | `limits.allowed_types` | PDF, PNG, JPEG, GIF, WebP, plain text, CSV, Word / Excel / PowerPoint (legacy and OOXML), OpenDocument | Content types accepted **as detected from the bytes** (finfo), `fnmatch` patterns, lower-cased; any other type is rejected (`type`). `application/zip` is **not** in the default (owner decision 2026-11-12): add it explicitly; archives and legacy Office files are not scanned inside. Independently, dangerous extensions (`InboundFileTypes::DANGEROUS_EXTENSIONS`: `html`, `svg`, `js`, `php*`, `exe`, `bat`, `ps1`, `lnk`, macro-enabled Office…) are always rejected (`extension`). |
+
+## mailboxes
+
+Since 2.5.0 (design [`DELEGATED_MAILBOXES.md`](design/DELEGATED_MAILBOXES.md)). Opt-in; needs symfony/messenger,
+symfony/html-sanitizer, the PHP fileinfo extension and doctrine/doctrine-bundle (DBAL). Independent of `graph`
+(app-only shared mailboxes). Usage: [USAGE — Delegated Outlook mailboxes](USAGE.md#delegated-outlook-mailboxes-250).
+
+```yaml
+nowo_mail_kit:
+    mailboxes:
+        enabled: false
+        token_provider: ~        # required: Mailbox\Port\MailboxTokenProviderInterface service id
+        directory: ~             # required: Mailbox\Port\MailboxDirectoryInterface
+        sink: ~                  # required: Mailbox\Port\MailboxMessageSinkInterface
+        exclusion_policy: ~      # optional: MailboxExclusionPolicyInterface (default: keep all)
+        call_observer: ~         # optional: MailboxCallObserverInterface (default: none)
+        http_client: http_client
+        connection: ~            # DBAL connection of the mailbox tables (null = default)
+        bus: messenger.default_bus
+        timeout: 30.0
+        max_folders: 10
+        sync:
+            initial_window: P7D
+            max_initial_window: P90D
+            resync_window: P7D
+            page_size: 50
+            max_pages_per_run: 20
+            lease_seconds: 120
+        limits:
+            max_message_bytes: 26214400
+            max_html_bytes: 1048576
+            max_attachment_bytes: 26214400
+        html:
+            remote_images: blocked   # blocked | dropped | allowed
+        graph:
+            enabled: false
+            renew_before: P1D
+            outbound_url_guard: auto # auto | required | off
+            webhook:
+                path: /hooks/mail-kit/v1/mailbox/graph
+                notification_url: ~  # public https URL; null = sweep only
+                max_body_bytes: 1048576
+                max_notifications: 200
+                allowed_ips: []
+                rate_limit: { limit: 600, interval: '1 minute' }
+                client_rate_limit: { limit: 60, interval: '1 minute' }
+```
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `enabled` | `false` | Registers the ports, the engine (`MailboxSyncInterface`), the attachment reader, the Messenger handler, the commands and the route loader content. Literal boolean. |
+| `token_provider`, `directory`, `sink` | — | Your port services; all three are required when enabled (the build fails otherwise). |
+| `exclusion_policy`, `call_observer` | `null` | Optional ports; without them every message is kept and no call is metered. |
+| `http_client` | `http_client` | Keep the decorated client so HttpLog counts the calls under the provider you declare for `graph.microsoft.com`. |
+| `connection` | `null` | DBAL connection of the tables (never the host's entity manager; nothing is flushed). |
+| `bus` | `messenger.default_bus` | Receives `SyncMailboxFolder`, `FetchMailboxMessage`, `RenewMailboxSubscriptions`. Route them to an async transport. |
+| `timeout` | `30.0` | Idle deadline of one Graph call, in seconds. |
+| `max_folders` | `10` | Most followed folders per mailbox (1 – 100); more is refused by `start()` / `resume()`. |
+| `sync.initial_window` | `P7D` | Window of a folder's first sweep (Q-MB-11); a mailbox may ask for its own (`MailboxSettings::$initialWindow`) up to `max_initial_window`. ISO 8601 days / hours. |
+| `sync.max_initial_window` | `P90D` | Longest window a mailbox may ask for. |
+| `sync.resync_window` | `P7D` | Window of the sweep after a lost cursor (Graph 410). |
+| `sync.page_size` / `sync.max_pages_per_run` | `50` / `20` | Delta page size and pages per run; a longer backlog continues in the next enqueued sweep. |
+| `sync.lease_seconds` | `120` | Folder lease (extended after every page); a crashed worker's lease expires after this. |
+| `limits.max_message_bytes` | `26214400` | Bytes of one Graph message read; a larger one reaches the sink `oversized`, without body or headers. |
+| `limits.max_html_bytes` | `1048576` | HTML passed to the sanitiser (longer: cut). |
+| `limits.max_attachment_bytes` | `26214400` | Ceiling of `MailboxAttachmentReaderInterface::open($maxBytes)`. |
+| `html.remote_images` | `blocked` | `blocked`: remote image URLs move to `data-mail-kit-remote-src` (load them through your image proxy on *Show images*); `dropped`: removed; `allowed`: kept (tracking pixels reach the sender). |
+| `graph.enabled` | `false` | The Microsoft Graph delegated provider; needs `mailboxes.enabled`. |
+| `graph.renew_before` | `P1D` | Renew a subscription expiring within this duration (shorter than 6 days). |
+| `graph.outbound_url_guard` | `auto` | Pin `graph.microsoft.com` to the public address OutboundUrlGuard resolves: `auto` when the bundle is enabled (without it the build logs a warning in the container compiler log), `required` fails the build without it, `off`. **Use `required` in production.** A guard with a host allow-list must allow `graph.microsoft.com`, or every call fails closed. |
+| `graph.webhook.path` | `/hooks/mail-kit/v1/mailbox/graph` | Route of the loader `nowo_mail_kit_mailbox_webhook` (POST, stateless). |
+| `graph.webhook.notification_url` | `null` | Public HTTPS URL given to Graph; `null` = no subscriptions, sweep only. |
+| `graph.webhook.max_body_bytes` / `max_notifications` | `1048576` / `200` | Request caps (413 above). |
+| `graph.webhook.allowed_ips` | `[]` | Optional source allow-list (CIDR). |
+| `graph.webhook.rate_limit` / `client_rate_limit` | `600` / `60` per minute | Verified bucket and per-client-IP bucket of unverified requests (429 above). |
 
 ## tracking
 

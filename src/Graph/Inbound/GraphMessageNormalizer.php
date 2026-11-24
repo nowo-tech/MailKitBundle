@@ -7,6 +7,7 @@ namespace Nowo\MailKitBundle\Graph\Inbound;
 use DateTimeImmutable;
 use Exception;
 use Nowo\MailKitBundle\Graph\Send\PlusAddress;
+use Nowo\MailKitBundle\Mailbox\Html\MailHtmlSanitizer;
 
 use function array_keys;
 use function array_slice;
@@ -48,10 +49,10 @@ final class GraphMessageNormalizer
     private const FORWARD_BODY = '/(?:-{3,}\s*(?:Forwarded message|Original Message|Mensaje original|Mensaje reenviado)\s*-{3,}|Begin forwarded message:|Inicio del mensaje reenviado:)/iu';
 
     /**
-     * @param InboundHtmlSanitizer $sanitizer HTML sanitizer of the inbound bodies
+     * @param MailHtmlSanitizer $sanitizer HTML sanitizer of the received bodies ({@see InboundHtmlSanitizer} for 1.9)
      */
     public function __construct(
-        private readonly InboundHtmlSanitizer $sanitizer,
+        private readonly MailHtmlSanitizer $sanitizer,
     ) {
     }
 
@@ -128,7 +129,33 @@ final class GraphMessageNormalizer
             forwarded: $forwarded,
             plusTags: array_keys($tags),
             oversized: $oversized,
+            listId: self::listId($headers['list-id'][0] ?? null),
         );
+    }
+
+    /**
+     * List-Id of a Graph message resource (2.5.0): the id in angle brackets of the first `List-Id` header (RFC 2919),
+     * at most 255 characters of `[A-Za-z0-9._-]`, else null.
+     *
+     * @param array<mixed> $data Graph message resource
+     */
+    public static function listIdOf(array $data): ?string
+    {
+        foreach (is_array($data['internetMessageHeaders'] ?? null) ? $data['internetMessageHeaders'] : [] as $header) {
+            if (is_array($header) && is_string($header['name'] ?? null) && strtolower(trim($header['name'])) === 'list-id') {
+                return self::listId(is_string($header['value'] ?? null) ? $header['value'] : null);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The id of a List-Id header value, or null.
+     */
+    private static function listId(?string $value): ?string
+    {
+        return $value !== null && strlen($value) <= 65_536 && preg_match('/<([A-Za-z0-9._-]{1,255})>/', $value, $match) === 1 ? $match[1] : null;
     }
 
     /**

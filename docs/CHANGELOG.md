@@ -38,6 +38,53 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Delegated mailboxes, sync side (2.5.0 part 1; design [`docs/design/DELEGATED_MAILBOXES.md`](design/DELEGATED_MAILBOXES.md),
+  spec 005; Beacon spec 255).** `nowo_mail_kit.mailboxes` (off by default) syncs the folders a person follows in
+  their own Outlook mailbox through Microsoft Graph **delegated** tokens the host provides: MailKit runs no OAuth
+  flow (Q-254-15 = b) and never stores, caches or logs a token. Host ports (bundle VOs only, REQ-ARCH-001 rule 3):
+  `Mailbox\Port\MailboxTokenProviderInterface`, `MailboxDirectoryInterface`, `MailboxMessageSinkInterface`
+  (required), `MailboxExclusionPolicyInterface`, `MailboxCallObserverInterface` (optional). Services:
+  `Mailbox\Service\MailboxSyncInterface` (start, pause, resume, sweep, status, disconnect) and
+  `MailboxAttachmentReaderInterface` (on-demand, capped temp streams). Events `MailboxGrantFailedEvent` (once per
+  transition) and `MailboxResyncedEvent`. Per-folder Graph subscriptions on a new webhook route
+  (`nowo_mail_kit_mailbox_webhook`, `/hooks/mail-kit/v1/mailbox/graph`), per-folder delta sweep with a lease,
+  `rerun` coalescing and cursor compare-and-set, exclusion before the fetch when the delta page gives the sender,
+  thread key, removals reported to the sink, grant-failure pause, per-call metering. Commands
+  `nowo:mail-kit:mailbox:schema`, `…:mailbox:subscriptions`, `…:mailbox:sweep`, `…:mailbox:status`. Three DBAL tables
+  (`mail_kit_mailbox`, `_cursor`, `_subscription`) with no address, subject, body, token or recipient. Sending from a
+  delegated mailbox follows in part 2 of 2.5.0. Audit ZAT fixes before release: a grant failure acknowledges its
+  Messenger message (the pause survives a `doctrine_transaction` middleware); the account is checked on every sweep;
+  bounded retries (sweeps acknowledge transient failures; Retry-After re-enqueues at most 10 times); `removed()`
+  carries a `RemovalReason` (`Deleted` / `MovedOut`, confirmed with Graph); delta links bound to their folder; only
+  grant / consent / scope 403s pause; 400 sync-state errors resync. Re-audit ZAT-R: a folder whose sweeps are refused
+  records the error on its cursor (`FolderSyncState::$syncError`, one `MailboxFolderSyncFailedEvent` per transition,
+  cleared by the next good sweep) instead of failing unnoticed; an unrecognised delta-link folder form is logged and
+  followed; the removal check reports `MovedOut` on an unexpected refusal and extends the folder lease after each check.
+  The 2.2.2 fixes are carried into the 2.5 code: the ZAT-L4 strip rules apply to `MailHtmlSanitizer` in `dropped` and
+  `blocked` mode, and the ZAT-L5 `#[\SensitiveParameter]` / no-`previous` wrapping covers the delegated credential path
+  (delta links included).
+  Verification ZAT-R4: a lease extension in the same second (no row changed on MySQL / MariaDB) is confirmed by a read
+  of the owner instead of being taken for a lost lease; ZAT-R5: store write parameters are sensitive.
+- `Mailbox\Html\MailHtmlSanitizer`: the 1.9 inbound sanitiser, provider-neutral, with `html.remote_images: blocked`
+  (default for mailboxes): remote image URLs move to `data-mail-kit-remote-src` for the host's image proxy; no
+  `style`, script or event handler in any mode. `Graph\Inbound\InboundHtmlSanitizer` is now a thin subclass (no BC
+  break).
+- Optional OutboundUrlGuard pin of `graph.microsoft.com` for the delegated client (`mailboxes.graph.outbound_url_guard`:
+  `auto` | `required` | `off`, the CrmKit 0.10 pattern).
+- `GraphInboundMessage::$listId` (List-Id, optional trailing constructor argument) and
+  `GraphMessageNormalizer::listIdOf()`.
+- REQ-SEC-006: `MailKitExactKeyColumns` declares the mailbox key columns (inactive unless `mailboxes.enabled`).
+
+### Changed
+
+- `Graph\GraphApiClient` (`@internal`) takes a shared-mailbox profile or a `GraphCredentialInterface` per call, reports
+  every call (status 0 on transport errors) and accepts optional per-request options (host pin). The 1.8 / 1.9
+  behaviour is unchanged.
+- The 1.9 webhook controller's HTTP flow moved to `Graph\Inbound\Webhook\AbstractGraphWebhookController`, shared
+  with the delegated-mailbox route; savepoint writes moved to `Concurrency\SavepointWrites`. No behaviour change.
+
 ## [2.2.2] - 2026-11-24
 
 ### Security

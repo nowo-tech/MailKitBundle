@@ -1,6 +1,6 @@
 # Delegated mailboxes (Outlook and Gmail): design
 
-Status 2026-11-23: **accepted, not built.** The owner accepted every recommendation (Q-MB-1 – Q-MB-22 as
+Status 2026-11-24: **accepted; 2.5.0 part 1 (ports, sync, attachments) built, part 2 (send) pending.** The owner accepted every recommendation (Q-MB-1 – Q-MB-22 as
 recommended, 2026-11-23). For symfony-beacon spec `255-mail-inbox` (owner decision D-20261123-14,
 task T001), spec `236` (personal Microsoft 365 mailboxes) and spec `254` block B (CRM mailboxes, FR-020 – FR-023). It
 widens the roadmap rows 2.5.0 "Personal Outlook mailboxes" and 2.6.0 "Gmail provider". The contract revision is

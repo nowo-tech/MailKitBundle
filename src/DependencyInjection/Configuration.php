@@ -12,11 +12,14 @@ use Nowo\MailKitBundle\Graph\GraphMailbox;
 use Nowo\MailKitBundle\Graph\Inbound\InboundLimits;
 use Nowo\MailKitBundle\Graph\Send\GraphSendLimits;
 use Nowo\MailKitBundle\Log\SentMailCsvExporter;
+use Nowo\MailKitBundle\Mailbox\Html\RemoteImages;
+use Nowo\MailKitBundle\Mailbox\Value\MailboxSettings;
 use Nowo\MailKitBundle\Tracking\EmailTracker;
 use Nowo\MailKitBundle\Tracking\TrackingBaseUrl;
 use Nowo\MailKitBundle\Ui\MailKitPages;
 use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponsePolicy;
 use Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition;
+use Symfony\Component\Config\Definition\Builder\NodeDefinition;
 use Symfony\Component\Config\Definition\Builder\TreeBuilder;
 use Symfony\Component\Config\Definition\ConfigurationInterface;
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
@@ -261,6 +264,7 @@ final class Configuration implements ConfigurationInterface
                 ->end()
                 ->append($this->brandNode())
                 ->append($this->graphNode())
+                ->append($this->mailboxesNode())
                 ->append($this->trackingNode())
                 ->arrayNode('doctrine')
                     ->addDefaultsIfNotSet()
@@ -763,6 +767,163 @@ final class Configuration implements ConfigurationInterface
             ->validate()
                 ->ifTrue(static fn (array $v): bool => ($v['enabled'] ?? false) === true && (!is_string($v['handler'] ?? null) || $v['handler'] === ''))
                 ->thenInvalid('nowo_mail_kit.graph.inbound.enabled needs graph.inbound.handler (your GraphInboundHandlerInterface service).')
+            ->end();
+
+        return $node;
+    }
+
+    /**
+     * `mailboxes` (2.5.0, design docs/design/DELEGATED_MAILBOXES.md): sync of people's own Outlook mailboxes through
+     * Microsoft Graph delegated tokens the host provides (MailKit runs no OAuth flow). Off by default.
+     */
+    private function mailboxesNode(): ArrayNodeDefinition
+    {
+        $window = static fn (string $name, string $default, string $info): NodeDefinition => (new TreeBuilder($name, 'scalar'))->getRootNode()
+            ->info($info)
+            ->defaultValue($default)
+            ->validate()
+                ->ifTrue(static fn (mixed $v): bool => !is_string($v) || preg_match(MailboxSettings::WINDOW_PATTERN, $v) !== 1)
+                ->thenInvalid('nowo_mail_kit.mailboxes.sync.' . $name . ' must be an ISO 8601 duration in days and / or hours such as "P7D", got %s.')
+            ->end();
+        $bucket = static fn (string $name, int $limit, string $info): ArrayNodeDefinition => (new TreeBuilder($name))->getRootNode()
+            ->info($info)
+            ->addDefaultsIfNotSet()
+            ->children()
+                ->integerNode('limit')->defaultValue($limit)->min(1)->max(100_000)->end()
+                ->scalarNode('interval')
+                    ->defaultValue('1 minute')
+                    ->validate()
+                        ->ifTrue(static fn (mixed $v): bool => !is_string($v) || preg_match('/^[1-9]\d{0,5} (?:second|minute|hour|day)s?\z/', $v) !== 1)
+                        ->thenInvalid('A rate limit interval must read like "1 minute" or "10 seconds", got %s.')
+                    ->end()
+                ->end()
+            ->end();
+        $service = static fn (string $name, string $info): NodeDefinition => (new TreeBuilder($name, 'scalar'))->getRootNode()->info($info)->defaultNull();
+
+        /** @var ArrayNodeDefinition $node */
+        $node = (new TreeBuilder('mailboxes'))->getRootNode();
+        $node
+            ->info('2.5.0: sync the folders people follow in their own Outlook mailbox (Microsoft Graph, delegated tokens from your MailboxTokenProviderInterface) into your MailboxMessageSinkInterface. Needs symfony/messenger, symfony/html-sanitizer, ext-fileinfo and a DBAL connection. Off by default.')
+            ->addDefaultsIfNotSet()
+            ->children()
+                ->booleanNode('enabled')->info('Register the ports, services, Messenger handlers, commands and the webhook route loader.')->defaultFalse()->end()
+                ->append($service('token_provider', 'Required: service id implementing Mailbox\\Port\\MailboxTokenProviderInterface (the current access token of a mailbox; MailKit never stores it).'))
+                ->append($service('directory', 'Required: service id implementing Mailbox\\Port\\MailboxDirectoryInterface (address, followed folders, pause).'))
+                ->append($service('sink', 'Required: service id implementing Mailbox\\Port\\MailboxMessageSinkInterface (idempotent by mailbox id + provider message id).'))
+                ->append($service('exclusion_policy', 'Optional: service id implementing Mailbox\\Port\\MailboxExclusionPolicyInterface; null = keep every message.'))
+                ->append($service('call_observer', 'Optional: service id implementing Mailbox\\Port\\MailboxCallObserverInterface (metering per mailbox); null = none.'))
+                ->scalarNode('http_client')
+                    ->info('HTTP client service id. Keep the decorated "http_client" so HttpLog counts the calls under the outbound provider you declare for graph.microsoft.com (it never records bodies, query strings or headers).')
+                    ->defaultValue('http_client')
+                    ->cannotBeEmpty()
+                ->end()
+                ->scalarNode('connection')->info('DBAL connection of the mailbox tables (null = default).')->defaultNull()->end()
+                ->scalarNode('bus')->info('Messenger bus service id that receives the sync / fetch / renew messages (route them to an async transport).')->defaultValue('messenger.default_bus')->cannotBeEmpty()->end()
+                ->floatNode('timeout')->info('Idle deadline of one provider call, in seconds (REQ-RUNTIME-001).')->defaultValue(30.0)->min(1.0)->max(300.0)->end()
+                ->integerNode('max_folders')->info('Most followed folders per mailbox.')->defaultValue(10)->min(1)->max(MailboxSettings::MAX_FOLDERS)->end()
+                ->arrayNode('sync')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->append($window('initial_window', 'P7D', 'Window of a folder\'s first sweep (a mailbox may ask for another one up to max_initial_window).'))
+                        ->append($window('max_initial_window', 'P90D', 'Longest window a mailbox may ask for.'))
+                        ->append($window('resync_window', 'P7D', 'Window of the sweep after a lost cursor.'))
+                        ->integerNode('page_size')->defaultValue(50)->min(1)->max(1000)->end()
+                        ->integerNode('max_pages_per_run')->info('Pages one sweep reads; a longer backlog continues in the next enqueued sweep.')->defaultValue(20)->min(1)->max(1000)->end()
+                        ->integerNode('lease_seconds')->info('Lease of a folder sweep (extended after every page); a crashed worker\'s lease expires after this.')->defaultValue(120)->min(30)->max(3600)->end()
+                    ->end()
+                ->end()
+                ->arrayNode('limits')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->integerNode('max_message_bytes')->info('Bytes of one Graph message read (JSON with body and headers); larger ones reach the sink oversized, without body.')->defaultValue(26_214_400)->min(65_536)->max(157_286_400)->end()
+                        ->integerNode('max_html_bytes')->info('Bytes of HTML passed to the sanitiser (longer: cut).')->defaultValue(1_048_576)->min(1024)->max(16_777_216)->end()
+                        ->integerNode('max_attachment_bytes')->info('Ceiling of MailboxAttachmentReaderInterface::open($maxBytes).')->defaultValue(26_214_400)->min(1)->max(157_286_400)->end()
+                    ->end()
+                ->end()
+                ->arrayNode('html')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->enumNode('remote_images')
+                            ->info('blocked: remote image URLs move to data-mail-kit-remote-src (show them through your image proxy); dropped: removed; allowed: kept (tracking pixels reach the sender).')
+                            ->values([RemoteImages::Blocked->value, RemoteImages::Dropped->value, RemoteImages::Allowed->value])
+                            ->defaultValue(RemoteImages::Blocked->value)
+                        ->end()
+                    ->end()
+                ->end()
+                ->arrayNode('graph')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->booleanNode('enabled')->info('Microsoft Graph delegated provider (scopes Mail.ReadWrite, Mail.Send, offline_access, User.Read).')->defaultFalse()->end()
+                        ->scalarNode('renew_before')
+                            ->info('Renew a subscription that expires within this ISO 8601 duration (subscriptions live just under 7 days).')
+                            ->defaultValue('P1D')
+                            ->validate()
+                                ->ifTrue(static fn (mixed $v): bool => !is_string($v) || preg_match(MailboxSettings::WINDOW_PATTERN, $v) !== 1 || self::durationSeconds($v) >= 6 * 86_400)
+                                ->thenInvalid('nowo_mail_kit.mailboxes.graph.renew_before must be an ISO 8601 duration in days / hours shorter than 6 days, got %s.')
+                            ->end()
+                        ->end()
+                        ->enumNode('outbound_url_guard')
+                            ->info('Pin graph.microsoft.com to the public address OutboundUrlGuard resolves: auto = when the OutboundUrlGuard bundle is enabled, required = fail the build without it, off.')
+                            ->values(['auto', 'required', 'off'])
+                            ->defaultValue('auto')
+                        ->end()
+                        ->arrayNode('webhook')
+                            ->addDefaultsIfNotSet()
+                            ->children()
+                                ->scalarNode('path')
+                                    ->info('Path of the notification route (loader type nowo_mail_kit_mailbox_webhook). Make it public and stateless in the firewall, outside the HTTP log.')
+                                    ->defaultValue('/hooks/mail-kit/v1/mailbox/graph')
+                                    ->validate()
+                                        ->ifTrue(static fn (mixed $v): bool => !is_string($v) || preg_match('#^/[A-Za-z0-9/_.-]{1,200}\z#', $v) !== 1)
+                                        ->thenInvalid('nowo_mail_kit.mailboxes.graph.webhook.path must be an absolute path, got %s.')
+                                    ->end()
+                                ->end()
+                                ->scalarNode('notification_url')
+                                    ->info('Public HTTPS URL of that route given to Graph; null = no subscriptions, sweep only.')
+                                    ->defaultNull()
+                                    ->validate()
+                                        ->ifTrue(static fn (mixed $v): bool => $v !== null && (!is_string($v) || preg_match('#^https://[^/\s?\#@]+/[^\s\#]*\z#', $v) !== 1))
+                                        ->thenInvalid('nowo_mail_kit.mailboxes.graph.webhook.notification_url must be an absolute https:// URL without user info or fragment, got %s.')
+                                    ->end()
+                                ->end()
+                                ->integerNode('max_body_bytes')->info('Largest notification request read.')->defaultValue(1_048_576)->min(1024)->max(16_777_216)->end()
+                                ->integerNode('max_notifications')->info('Most notifications in one request.')->defaultValue(200)->min(1)->max(1000)->end()
+                                ->arrayNode('allowed_ips')
+                                    ->info('Optional source allow-list (addresses or CIDR ranges); empty = any. Behind a proxy, configure framework.trusted_proxies.')
+                                    ->scalarPrototype()->cannotBeEmpty()->end()
+                                    ->defaultValue([])
+                                    ->validate()
+                                        ->ifTrue(static function (array $v): bool {
+                                            foreach ($v as $range) {
+                                                if (!self::isIpRange((string) $range)) {
+                                                    return true;
+                                                }
+                                            }
+
+                                            return false;
+                                        })
+                                        ->thenInvalid('nowo_mail_kit.mailboxes.graph.webhook.allowed_ips must contain IP addresses or CIDR ranges.')
+                                    ->end()
+                                ->end()
+                                ->append($bucket('rate_limit', 600, 'Requests with at least one valid notification accepted per interval (all together; 429 above).'))
+                                ->append($bucket('client_rate_limit', 60, 'Unverified requests accepted per interval and client IP (429 above).'))
+                            ->end()
+                        ->end()
+                    ->end()
+                ->end()
+            ->end()
+            ->validate()
+                ->ifTrue(static fn (array $v): bool => ($v['enabled'] ?? false) === true && (!is_string($v['token_provider'] ?? null) || $v['token_provider'] === '' || !is_string($v['directory'] ?? null) || $v['directory'] === '' || !is_string($v['sink'] ?? null) || $v['sink'] === ''))
+                ->thenInvalid('nowo_mail_kit.mailboxes.enabled needs mailboxes.token_provider, mailboxes.directory and mailboxes.sink (your port services).')
+            ->end()
+            ->validate()
+                ->ifTrue(static fn (array $v): bool => ($v['graph']['enabled'] ?? false) === true && ($v['enabled'] ?? false) !== true)
+                ->thenInvalid('nowo_mail_kit.mailboxes.graph.enabled needs nowo_mail_kit.mailboxes.enabled: true.')
+            ->end()
+            ->validate()
+                ->ifTrue(static fn (array $v): bool => self::durationSeconds((string) ($v['sync']['initial_window'] ?? 'P7D')) > self::durationSeconds((string) ($v['sync']['max_initial_window'] ?? 'P90D'))
+                    || self::durationSeconds((string) ($v['sync']['resync_window'] ?? 'P7D')) > self::durationSeconds((string) ($v['sync']['max_initial_window'] ?? 'P90D')))
+                ->thenInvalid('nowo_mail_kit.mailboxes.sync.initial_window and sync.resync_window must not exceed sync.max_initial_window.')
             ->end();
 
         return $node;

@@ -10,9 +10,21 @@ use Nowo\MailKitBundle\Graph\GraphException;
 use Nowo\MailKitBundle\Graph\GraphMailbox;
 use Nowo\MailKitBundle\Graph\GraphMailboxProviderInterface;
 use Nowo\MailKitBundle\Graph\GraphTokenProvider;
+use Nowo\MailKitBundle\Graph\Inbound\GraphMessageNormalizer;
 use Nowo\MailKitBundle\Graph\Send\GraphMailSender;
 use Nowo\MailKitBundle\Graph\Transport\GraphTransport;
+use Nowo\MailKitBundle\Mailbox\Engine\MailboxSession;
+use Nowo\MailKitBundle\Mailbox\Exception\MailboxException;
+use Nowo\MailKitBundle\Mailbox\Graph\DelegatedGraphCredential;
+use Nowo\MailKitBundle\Mailbox\Graph\GraphMailboxGateway;
+use Nowo\MailKitBundle\Mailbox\Html\MailHtmlSanitizer;
+use Nowo\MailKitBundle\Mailbox\Html\RemoteImages;
+use Nowo\MailKitBundle\Mailbox\Value\FolderRef;
+use Nowo\MailKitBundle\Mailbox\Value\MailboxId;
+use Nowo\MailKitBundle\Mailbox\Value\MailboxProvider;
 use Nowo\MailKitBundle\Tests\Support\GraphApiMock;
+use Nowo\MailKitBundle\Tests\Support\MailboxGraphFake;
+use Nowo\MailKitBundle\Tests\Support\MemoryMailboxPorts;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\AbstractLogger;
@@ -175,6 +187,85 @@ final class GraphTokenTraceTest extends TestCase
             self::fail('The upload URL was accepted.');
         } catch (GraphException $exception) {
             $this->assertNoSecret($exception);
+        }
+    }
+
+    /**
+     * @return iterable<string, array{0: string}>
+     */
+    public static function delegatedFailures(): iterable
+    {
+        yield 'transport error on the delta' => ['transport'];
+        yield 'client decorator throws' => ['throw'];
+        yield 'oversized delta page' => ['large'];
+        yield 'token refused twice' => ['revoked'];
+        yield 'link outside the mailbox' => ['link'];
+    }
+
+    /**
+     * 2.5.0: the delegated credential path keeps the host's token and the delta token out of every stored chain too
+     * (the GraphApiClient exception and the gateway's mailbox failure that replaces it).
+     */
+    #[DataProvider('delegatedFailures')]
+    public function testDelegatedFailuresKeepTheTokenOutOfTheStoredChain(string $failure): void
+    {
+        $graph           = new MailboxGraphFake();
+        $ports           = new MemoryMailboxPorts();
+        $graph->override = static function (string $method, string $path) use ($failure): ?MockResponse {
+            if (!str_contains($path, '/delta')) {
+                return null;
+            }
+
+            return match ($failure) {
+                'transport' => new MockResponse('', ['error' => 'Connection reset by peer.']),
+                'throw'     => throw new RuntimeException('Outbound guard refused the request.'),
+                'large'     => MailboxGraphFake::json(['value' => str_repeat('x', 5_000_000)]),
+                'revoked'   => MailboxGraphFake::json(['error' => ['code' => 'InvalidAuthenticationToken']], 401),
+                default     => MailboxGraphFake::json(['value' => [], '@odata.deltaLink' => 'https://graph.microsoft.com/v1.0/users/other@example.org/mailFolders/inbox/messages/delta?$deltatoken=REDACTED-TEST-delta-token']),
+            };
+        };
+        $client  = $graph->client();
+        $session = new MailboxSession(new MailboxId('mbx-ana'), MailboxProvider::Graph, 'ana@example.com', null, $ports, $ports, $this->logger);
+        $cursor  = MailboxGraphFake::BASE . "/me/mailFolders('inbox')/messages/delta?\$deltatoken=REDACTED-TEST-delta-token";
+        $api     = new GraphApiClient($client, null, logger: $this->logger);
+
+        // The client itself, with the delegated credential.
+        if ($failure !== 'link') {
+            try {
+                $api->callUrl(new DelegatedGraphCredential($session), 'GET', $cursor, ['headers' => ['Prefer' => 'IdType="ImmutableId"']], [200], 'delta', 4_194_304);
+                self::fail('The delta call did not fail.');
+            } catch (GraphException $exception) {
+                $this->assertNoDelegatedSecret($exception);
+            }
+        }
+
+        // The gateway, which replaces the Graph exception by a mailbox failure.
+        $gateway = new GraphMailboxGateway($api, new GraphMessageNormalizer(new MailHtmlSanitizer(RemoteImages::Blocked)), 65_536, $this->logger);
+
+        try {
+            $gateway->changes($session, FolderRef::inbox(), $cursor, 0, 25);
+            self::fail('The sweep page did not fail.');
+        } catch (Throwable $exception) {
+            self::assertInstanceOf(MailboxException::class, $exception);
+            $this->assertNoDelegatedSecret($exception);
+        }
+        $this->assertNoDelegatedSecretIn(implode("\n", $this->logged));
+    }
+
+    private function assertNoDelegatedSecret(Throwable $exception): void
+    {
+        $this->assertNoDelegatedSecretIn(serialize((new Envelope(new stdClass()))->with(ErrorDetailsStamp::create($exception))));
+        $this->assertNoDelegatedSecretIn(serialize(FlattenException::createFromThrowable($exception)));
+        for ($current = $exception; $current instanceof Throwable; $current = $current->getPrevious()) {
+            $this->assertNoDelegatedSecretIn($current->getMessage());
+            $this->assertNoDelegatedSecretIn(implode("\n", self::strings($current->getTrace())));
+        }
+    }
+
+    private function assertNoDelegatedSecretIn(string $haystack): void
+    {
+        foreach (['fake-mbx-ana', 'Bearer ', 'REDACTED-TEST-delta-token'] as $secret) {
+            self::assertStringNotContainsString($secret, $haystack, 'Leaked: ' . $secret);
         }
     }
 

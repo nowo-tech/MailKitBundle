@@ -33,6 +33,7 @@ final class GraphInboundMessage
      * @param bool $oversized over `limits.max_message_bytes`: no body, headers, threading headers, authentication
      *                        results or attachments were read, and no recipients when even the envelope is huge
      *                        (quarantine it, or fetch it yourself)
+     * @param string|null $listId List-Id without angle brackets (2.5.0), or null
      */
     public function __construct(
         public readonly string $profile,
@@ -55,6 +56,7 @@ final class GraphInboundMessage
         public readonly bool $forwarded,
         public readonly array $plusTags,
         public readonly bool $oversized = false,
+        public readonly ?string $listId = null,
     ) {
     }
 }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\MailKitBundle\Doctrine;
 
 use Nowo\MailKitBundle\Graph\Inbound\Store\GraphInboundStore;
+use Nowo\MailKitBundle\Mailbox\Infrastructure\Store\MailboxStore;
 use Nowo\MailKitBundle\Tracking\Store\TrackingStore;
 use Nowo\MigrationsKitContracts\Collation\ExactKeyColumn;
 use Nowo\MigrationsKitContracts\Collation\ExactKeyColumnsInterface;
@@ -35,6 +36,13 @@ use Nowo\MigrationsKitContracts\Collation\ExactKeyColumnsInterface;
  *   mailbox profile key, which is what ties a subscription, a delta link and an inbound record to one mailbox.
  * - `mail_kit_graph_inbound.message_key` — the idempotency key of one inbound message: the claim that decides
  *   whether a message is handled once or twice is `WHERE message_key = ?`.
+ * - `mail_kit_mailbox.mailbox_id`, `mail_kit_mailbox_cursor.mailbox_id`, `mail_kit_mailbox_subscription.mailbox_id`
+ *   (2.5.0) — the host's id of a delegated mailbox: status transitions, the cursor lease and the GDPR disconnect all
+ *   match `WHERE mailbox_id = ?`.
+ * - `mail_kit_mailbox_cursor.folder_key`, `mail_kit_mailbox_subscription.folder_key` (2.5.0) — the followed folder
+ *   (a provider folder id is case-sensitive base64).
+ * - `mail_kit_mailbox_subscription.subscription_id` (2.5.0) — a Graph subscription id: a notification is resolved to
+ *   a mailbox and folder by it.
  *
  * Deliberately **not** declared, because a declaration is a claim about identity and an untrue one is worse than
  * none (on a server without a NO PAD collation it would report `fallback` about a column that does not want NO PAD):
@@ -47,6 +55,8 @@ use Nowo\MigrationsKitContracts\Collation\ExactKeyColumnsInterface;
  *   never matched (`log_id` appears only in `SET log_id = ?`).
  * - `mail_kit_tracking_send.last_open_ip` / `.last_open_ua` — a truncated address and a user-agent family kept for
  *   the report; they are telemetry, not keys.
+ * - `mail_kit_mailbox.account_hash`, `mail_kit_mailbox_subscription.client_state_hash`, `mail_kit_mailbox_cursor.lease_owner`
+ *   (2.5.0) — read back and compared with `hash_equals()`, or a random run id MailKit writes and matches itself.
  *
  * The table names are resolved from `nowo_mail_kit.doctrine.table_prefix` on the stores' own unprefixed names, never
  * literals, and the columns of a feature that is off are declared **inactive** (reported as skipped with the setting
@@ -70,15 +80,20 @@ final readonly class MailKitExactKeyColumns implements ExactKeyColumnsInterface
     /** Condition reported for the Graph inbound columns when the pipeline is off. */
     public const GRAPH_INBOUND_CONDITION = 'nowo_mail_kit.graph.inbound.enabled: true';
 
+    /** Condition reported for the delegated-mailbox columns when they are off (2.5.0). */
+    public const MAILBOXES_CONDITION = 'nowo_mail_kit.mailboxes.enabled: true';
+
     /**
      * @param string $tablePrefix nowo_mail_kit.doctrine.table_prefix
      * @param bool $tracking nowo_mail_kit.tracking.enabled (the tracked-sends table exists)
      * @param bool $graphInbound nowo_mail_kit.graph.inbound.enabled (the three Graph tables exist)
+     * @param bool $mailboxes nowo_mail_kit.mailboxes.enabled (the delegated-mailbox tables exist, 2.5.0)
      */
     public function __construct(
         private string $tablePrefix = '',
         private bool $tracking = false,
         private bool $graphInbound = false,
+        private bool $mailboxes = false,
     ) {
     }
 
@@ -94,6 +109,10 @@ final readonly class MailKitExactKeyColumns implements ExactKeyColumnsInterface
         $subscription = $this->tablePrefix . GraphInboundStore::SUBSCRIPTION_TABLE;
         $delta        = $this->tablePrefix . GraphInboundStore::DELTA_TABLE;
         $inboundTable = $this->tablePrefix . GraphInboundStore::INBOUND_TABLE;
+        $mailboxes    = $this->mailboxes ? null : self::MAILBOXES_CONDITION;
+        $mailbox      = $this->tablePrefix . MailboxStore::MAILBOX_TABLE;
+        $cursor       = $this->tablePrefix . MailboxStore::CURSOR_TABLE;
+        $mailboxSub   = $this->tablePrefix . MailboxStore::SUBSCRIPTION_TABLE;
 
         return [
             new ExactKeyColumn($send, 'send_id', self::OWNER, 'id of one tracked send: the open is counted with WHERE send_id = ?', $tracking, $this->tracking),
@@ -104,6 +123,12 @@ final readonly class MailKitExactKeyColumns implements ExactKeyColumnsInterface
             new ExactKeyColumn($delta, 'profile', self::OWNER, 'mailbox profile the delta link belongs to (primary key)', $inbound, $this->graphInbound),
             new ExactKeyColumn($inboundTable, 'message_key', self::OWNER, 'idempotency key of one inbound message: handled once or twice is decided on it', $inbound, $this->graphInbound),
             new ExactKeyColumn($inboundTable, 'profile', self::OWNER, 'mailbox profile the inbound record belongs to', $inbound, $this->graphInbound),
+            new ExactKeyColumn($mailbox, 'mailbox_id', self::OWNER, 'host id of a delegated mailbox: status transitions match WHERE mailbox_id = ?', $mailboxes, $this->mailboxes),
+            new ExactKeyColumn($cursor, 'mailbox_id', self::OWNER, 'delegated mailbox of the folder cursor (primary key)', $mailboxes, $this->mailboxes),
+            new ExactKeyColumn($cursor, 'folder_key', self::OWNER, 'followed folder of the cursor (primary key; provider folder ids are case-sensitive)', $mailboxes, $this->mailboxes),
+            new ExactKeyColumn($mailboxSub, 'subscription_id', self::OWNER, 'Microsoft Graph subscription id: a notification is resolved to a mailbox and folder by it', $mailboxes, $this->mailboxes),
+            new ExactKeyColumn($mailboxSub, 'mailbox_id', self::OWNER, 'delegated mailbox of the subscription', $mailboxes, $this->mailboxes),
+            new ExactKeyColumn($mailboxSub, 'folder_key', self::OWNER, 'followed folder of the subscription', $mailboxes, $this->mailboxes),
         ];
     }
 }

@@ -6,6 +6,7 @@ namespace Nowo\MailKitBundle\Graph;
 
 use Nowo\OutboundUrlGuardBundle\Exception\UnsafeOutboundUrlException;
 use Nowo\OutboundUrlGuardBundle\Guard\OutboundUrlGuard;
+use SensitiveParameter;
 
 /**
  * Pins the Microsoft Graph host to the public address OutboundUrlGuard resolved (2.5.0, the CrmKit 0.10 pattern):
@@ -27,7 +28,7 @@ final readonly class GuardedGraphRequestOptions implements GraphRequestOptionsIn
     /**
      * {@inheritDoc}
      */
-    public function options(string $url): array
+    public function options(#[SensitiveParameter] string $url): array
     {
         try {
             return $this->guard->httpClientOptions($url, false, true);

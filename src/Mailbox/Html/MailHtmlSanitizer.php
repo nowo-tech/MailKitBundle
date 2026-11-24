@@ -33,7 +33,8 @@ use const ENT_QUOTES;
  * Sanitises the HTML of received mail with symfony/html-sanitizer (1.9 inbound rules, provider-neutral since 2.5.0):
  * the W3C safe elements and attributes only (no script, style, iframe, form, event handler or `style` attribute),
  * links `http`, `https` and `mailto` only with `rel="noopener noreferrer nofollow"`, no relative URLs, `cid:` images
- * of the message's own inline parts. Remote images follow {@see RemoteImages}. The input is cut to `$maxBytes` first.
+ * of the message's own inline parts. Remote images follow {@see RemoteImages}; unless they are allowed, every other
+ * URL-bearing media attribute and the `source`, `track`, `link` and `style` elements are removed (2.2.2, ZAT-L4). The input is cut to `$maxBytes` first.
  * Also derives the plain text of an HTML-only message.
  *
  * The output has no inline script, event handler, `style` attribute or element and, in `blocked` mode, no URL that
@@ -47,6 +48,16 @@ class MailHtmlSanitizer
 
     /** Longest blocked image URL kept. */
     public const MAX_REMOTE_URL = 2048;
+
+    /**
+     * URL-bearing attributes removed from every element unless remote images are allowed (2.2.2, audit ZAT-L4): older
+     * symfony/html-sanitizer releases keep `srcset` / `imagesrcset` without a URL check (before 7.4.23 and 8.1.11),
+     * and `poster` / `longdesc` too in early 7.4 releases; `style` can hold `url()`.
+     */
+    public const DROPPED_URL_ATTRIBUTES = ['srcset', 'imagesrcset', 'lowsrc', 'dynsrc', 'poster', 'background', 'longdesc', 'style'];
+
+    /** Elements removed (with their content) unless remote images are allowed: they only carry media sources or CSS. */
+    public const DROPPED_MEDIA_ELEMENTS = ['source', 'track', 'link', 'style'];
 
     /** Placeholder host that carries `cid:` references through the URL sanitizer. */
     private const CID_HOST = 'cid.mail-kit.invalid';
@@ -70,11 +81,18 @@ class MailHtmlSanitizer
         $config = match ($remoteImages) {
             RemoteImages::Allowed => $config->allowMediaSchemes(['http', 'https']),
             RemoteImages::Dropped => $config->allowMediaSchemes(['https'])->allowMediaHosts([self::CID_HOST]),
-            RemoteImages::Blocked => $config->allowMediaSchemes(['https'])
-                ->dropElement('audio')->dropElement('video')->dropElement('source')->dropElement('track')
-                ->dropAttribute('srcset', '*')->dropAttribute('imagesrcset', '*')->dropAttribute('lowsrc', '*')
-                ->dropAttribute('poster', '*')->dropAttribute('background', '*'),
+            RemoteImages::Blocked => $config->allowMediaSchemes(['https'])->dropElement('audio')->dropElement('video'),
         };
+        if ($remoteImages !== RemoteImages::Allowed) {
+            // 2.2.2 (audit ZAT-L4): whatever the installed sanitizer version checks, no other URL-bearing media
+            // attribute or media-only element survives, so no remote image loads in `dropped` or `blocked` mode.
+            foreach (self::DROPPED_URL_ATTRIBUTES as $attribute) {
+                $config = $config->dropAttribute($attribute, '*');
+            }
+            foreach (self::DROPPED_MEDIA_ELEMENTS as $element) {
+                $config = $config->dropElement($element);
+            }
+        }
         $this->sanitizer = new HtmlSanitizer($config);
     }
 

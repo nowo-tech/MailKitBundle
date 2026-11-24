@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[2.2.2] - 2026-11-24](#222---2026-11-24)
 - [[2.2.1] - 2026-11-23](#221---2026-11-23)
 - [[2.2.0] - 2026-11-23](#220---2026-11-23)
 - [[2.1.0] - 2026-11-22](#210---2026-11-22)
@@ -61,6 +62,9 @@ All notable changes to this project are documented here. The format follows
   records the error on its cursor (`FolderSyncState::$syncError`, one `MailboxFolderSyncFailedEvent` per transition,
   cleared by the next good sweep) instead of failing unnoticed; an unrecognised delta-link folder form is logged and
   followed; the removal check reports `MovedOut` on an unexpected refusal and extends the folder lease after each check.
+  The 2.2.2 fixes are carried into the 2.5 code: the ZAT-L4 strip rules apply to `MailHtmlSanitizer` in `dropped` and
+  `blocked` mode, and the ZAT-L5 `#[\SensitiveParameter]` / no-`previous` wrapping covers the delegated credential path
+  (delta links included).
 - `Mailbox\Html\MailHtmlSanitizer`: the 1.9 inbound sanitiser, provider-neutral, with `html.remote_images: blocked`
   (default for mailboxes): remote image URLs move to `data-mail-kit-remote-src` for the host's image proxy; no
   `style`, script or event handler in any mode. `Graph\Inbound\InboundHtmlSanitizer` is now a thin subclass (no BC
@@ -78,6 +82,35 @@ All notable changes to this project are documented here. The format follows
   behaviour is unchanged.
 - The 1.9 webhook controller's HTTP flow moved to `Graph\Inbound\Webhook\AbstractGraphWebhookController`, shared
   with the delegated-mailbox route; savepoint writes moved to `Concurrency\SavepointWrites`. No behaviour change.
+
+## [2.2.2] - 2026-11-24
+
+### Security
+
+- Microsoft Graph app-only path: the bearer token no longer reaches the trace arguments of an exception (audit
+  ZAT-L5, Low, affects 1.8.0 to 2.2.1; advisory to follow). `GraphApiClient::send()` received the request options,
+  `Authorization` header included, as an argument, so a `GraphException` created there (transport error, timeout,
+  answer over the size limit) recorded the token in its trace whenever `zend.exception_ignore_args` is Off (the PHP
+  default and `php.ini-development`). `GraphTransport` chains that exception as `previous`, and Messenger's
+  `ErrorDetailsStamp` keeps the flattened trace arguments, so the token could be written to the retry / failure
+  transport or reach an error tracker. The options of `call()`, `callUrl()` and the internal `authorized()` /
+  `send()` request helpers, and the URL of `send()`, `uploadChunk()`, `cancelUpload()` and `assertUploadUrl()`, are
+  now `#[\SensitiveParameter]` (the upload session URL is pre-authenticated, so it is treated as a secret too). Any
+  other failure of the HTTP client (a decorator, an outbound URL guard), whose own frames hold the token or, on the
+  token request, the client secret, is now replaced by a `GraphException` transport error without `previous`, and
+  only its class is logged. The delegated mailbox path (2.5, unreleased) is not affected. New test: a failing send,
+  the exception chain serialised as Messenger's failure transport stores it (`ErrorDetailsStamp`,
+  `FlattenException`, the raw `getTrace()` arguments), with no token, secret or upload URL in it.
+
+### Fixed
+
+- Graph inbound HTML (`graph.inbound`, `allow_remote_images: false`, the default): remote images could still load
+  through `srcset` (audit ZAT-L4). symfony/html-sanitizer before 7.4.23 / 8.1.11 keeps `srcset` and `imagesrcset`
+  without a URL check (and `poster` / `longdesc` in early 7.4 releases), so `<img src="cid:…" srcset="https://…">` or
+  `<picture><source srcset="https://…">` loaded a tracking image although remote images are dropped. Without remote
+  images, `InboundHtmlSanitizer` now removes `srcset`, `imagesrcset`, `lowsrc`, `dynsrc`, `poster`, `background`,
+  `longdesc` and `style` from every element and the `source`, `track`, `link` and `style` elements, whatever the
+  installed sanitizer version checks. `allow_remote_images: true` is unchanged. New tests for each vector.
 
 ## [2.2.1] - 2026-11-23
 

@@ -60,6 +60,20 @@ final class MailHtmlSanitizerTest extends TestCase
         self::assertSame(0, MailHtmlSanitizer::blockedImages($html));
     }
 
+    public function testNoOtherRemoteMediaVectorSurvivesUnlessAllowed(): void
+    {
+        $source = '<img src="cid:a@b" srcset="https://t.example/1.png 1x" dynsrc="https://t.example/2" longdesc="https://t.example/3" lowsrc="https://t.example/4" style="background:url(https://t.example/5)">'
+            . '<picture><source srcset="https://t.example/6.png"><img src="cid:c@d"></picture>'
+            . '<video poster="https://t.example/7.png"><track src="https://t.example/8.vtt"></video>'
+            . '<table background="https://t.example/9.png"><tr><td>x</td></tr></table>'
+            . '<link rel="stylesheet" href="https://t.example/10.css"><style>p{background:url(https://t.example/11)}</style>';
+        foreach ([RemoteImages::Dropped, RemoteImages::Blocked] as $mode) {
+            $html = (new MailHtmlSanitizer($mode))->sanitize($source);
+            self::assertStringNotContainsString('t.example', $html, $mode->value);
+            self::assertStringContainsString('src="cid:a@b"', $html, $mode->value);
+        }
+    }
+
     public function testDroppedAndAllowedModes(): void
     {
         $source  = '<img src="https://cdn.example.net/a.png"><img src="cid:a@b">';

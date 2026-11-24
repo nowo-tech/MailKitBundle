@@ -42,6 +42,7 @@ use Nowo\MailKitBundle\Mailbox\Value\SyncedMessage;
 use Nowo\MailKitBundle\Mailbox\Value\ThreadKey;
 use Nowo\MailKitBundle\Sender\MailAddress;
 use Psr\Log\LoggerInterface;
+use SensitiveParameter;
 
 use function array_slice;
 use function array_values;
@@ -218,7 +219,7 @@ final class GraphMailboxGateway implements MailboxGatewayInterface
     /**
      * {@inheritDoc}
      */
-    public function changes(MailboxSession $session, FolderRef $folder, ?string $cursor, int $since, int $pageSize): ChangePage
+    public function changes(MailboxSession $session, FolderRef $folder, #[SensitiveParameter] ?string $cursor, int $since, int $pageSize): ChangePage
     {
         $options = ['headers' => ['Prefer' => 'odata.maxpagesize=' . $pageSize . ', IdType="ImmutableId"']];
 
@@ -470,7 +471,7 @@ final class GraphMailboxGateway implements MailboxGatewayInterface
      *
      * @return array<mixed>
      */
-    private function call(MailboxSession $session, string $method, string $path, array $options, array $expected, string $operation, int $maxBytes, bool $subscription = false, bool $absolute = false): array
+    private function call(MailboxSession $session, string $method, #[SensitiveParameter] string $path, #[SensitiveParameter] array $options, array $expected, string $operation, int $maxBytes, bool $subscription = false, bool $absolute = false): array
     {
         $credential = new DelegatedGraphCredential($session);
 
@@ -534,7 +535,7 @@ final class GraphMailboxGateway implements MailboxGatewayInterface
      * provider id Graph names it by (read once per operation with `GET /me/mailFolders/{key}?$select=id`); another
      * form is logged and accepted (audit ZAT-R1).
      */
-    private function assertDeltaLink(MailboxSession $session, FolderRef $folder, string $url): void
+    private function assertDeltaLink(MailboxSession $session, FolderRef $folder, #[SensitiveParameter] string $url): void
     {
         try {
             $this->api->assertGraphUrl($url, 'delta');

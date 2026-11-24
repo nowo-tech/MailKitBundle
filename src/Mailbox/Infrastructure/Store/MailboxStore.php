@@ -17,6 +17,7 @@ use Nowo\MailKitBundle\Mailbox\Value\MailboxStatus;
 use Nowo\TransactionDoctrine\DoctrineTransactionRunner;
 use Psr\Clock\ClockInterface;
 use Psr\Log\LoggerInterface;
+use SensitiveParameter;
 use Symfony\Component\Clock\NativeClock;
 
 use function assert;
@@ -246,7 +247,7 @@ final class MailboxStore
      *
      * @param bool $complete the page ended with a delta link: records the end of a complete sweep
      */
-    public function advanceCursor(MailboxId $mailbox, string $folder, string $owner, int $version, ?string $cursor, int $leaseSeconds, bool $complete): bool
+    public function advanceCursor(MailboxId $mailbox, string $folder, string $owner, int $version, #[SensitiveParameter] ?string $cursor, int $leaseSeconds, bool $complete): bool
     {
         $now = $this->now();
 

@@ -28,6 +28,7 @@ use Nowo\MailKitBundle\Mailbox\Engine\MailboxGatewayInterface;
 use Nowo\MailKitBundle\Mailbox\Engine\MailboxSession;
 use Nowo\MailKitBundle\Mailbox\Engine\ProviderAccount;
 use Nowo\MailKitBundle\Mailbox\Engine\RemoteSubscription;
+use Nowo\MailKitBundle\Mailbox\Engine\SubmitTokenRejected;
 use Nowo\MailKitBundle\Mailbox\Exception\MailboxGrantFailure;
 use Nowo\MailKitBundle\Mailbox\Exception\MailboxProviderFailure;
 use Nowo\MailKitBundle\Mailbox\Html\MailHtmlSanitizer;
@@ -574,7 +575,16 @@ final class GraphMailboxGateway implements MailboxGatewayInterface
      */
     public function sendDraft(MailboxSession $session, ProviderMessageId $draft): void
     {
-        $this->call($session, 'POST', '/me/messages/' . rawurlencode($draft->value) . '/send', ['headers' => ['Prefer' => 'IdType="ImmutableId"'], 'body' => ''], [202], 'send', self::MAX_SMALL_BYTES);
+        // One request only (audit ZAV-L1): a 401 is not retried here, so the sender renews its claim before the retry.
+        try {
+            $this->api->call(new DelegatedGraphCredential($session), 'POST', '/me/messages/' . rawurlencode($draft->value) . '/send', ['headers' => ['Prefer' => 'IdType="ImmutableId"'], 'body' => ''], [202], 'send', self::MAX_SMALL_BYTES, false);
+        } catch (GraphException $failure) {
+            if ($failure->status === 401) {
+                throw new SubmitTokenRejected();
+            }
+
+            throw self::failure($failure, 'send');
+        }
     }
 
     /**

@@ -237,7 +237,14 @@ Off by default (`mailboxes.enabled`). Threat model: design section 17.
   by that state (never resent blindly), and an unprovable outcome stops for good (`MailboxSendOutcomeUnknown`). MailKit
   deletes only drafts it created and never submitted, and only after reading them as drafts (a sent item keeps the
   draft's immutable id). `send()` refuses an open transaction on its connection (a rollback after the provider sent
-  would forget the send).
+  would forget the send). Audit ZAV-L1: every submit request (the 401 retry included, which the sender makes, not the
+  HTTP client) follows a conditional heartbeat on the claim token and is refused later than
+  `send.stale_claim_seconds / 2` after `sending` was written, so no other worker reads the draft state while a submit
+  of the same holder can still start. **Residual:** the reconcile resubmits a draft that still reads as a draft after
+  the stale delay; it relies on Exchange delivering one draft item at most once (a second `/send` on the same immutable
+  id answers 4xx). That is on the owner's manual checklist; if Graph ever accepted a second submit, the resubmission
+  after an ambiguous answer would be removed (an ambiguous key would end `unknown` instead). Clocks: staleness compares
+  worker clocks with stored times; keep workers on NTP. Sent copies are delivered only for MailKit's own `sent` keys.
 - **Header injection and bounds on send.** Addresses must pass `FILTER_VALIDATE_EMAIL` without CR / LF, quotes,
   angle brackets or separators (≤ 254); display names and subjects carry no control characters (≤ 256 / 998);
   Symfony Mime renders every header of a new message; recipients, attachments, attachment size, message size and

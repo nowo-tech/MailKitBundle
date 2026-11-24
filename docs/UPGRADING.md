@@ -137,7 +137,7 @@ version is needed.
 
 `Graph\GraphApiClient` (`@internal`) now accepts `?GraphTokenProvider` and a trailing `?GraphRequestOptionsInterface`,
 and its `call()`, `callUrl()`, `download()`, `uploadChunk()` and `cancelUpload()` take
-`GraphMailbox|GraphCredentialInterface`.
+`GraphMailbox|GraphCredentialInterface`; `call()` takes a trailing `bool $retryUnauthorized = true`.
 `Graph\Inbound\GraphMessageNormalizer` takes any `Mailbox\Html\MailHtmlSanitizer` (an `InboundHtmlSanitizer` still
 fits). Public 1.x / 2.x classes are unchanged.
 

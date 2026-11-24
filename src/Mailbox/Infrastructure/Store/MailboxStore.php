@@ -494,6 +494,40 @@ final class MailboxStore
     }
 
     /**
+     * True when a send of this mailbox is `sent` with this provider message id (audit ZAV-I2: only MailKit's own sends
+     * are delivered as sent copies).
+     */
+    public function isSentMessage(MailboxId $mailbox, string $providerMessageId): bool
+    {
+        return $this->connection()->fetchOne('SELECT 1 FROM ' . $this->sendTable() . ' WHERE mailbox_id = ? AND provider_message_id = ? AND status = ?', [$mailbox->value, $providerMessageId, SendState::Sent->value]) !== false;
+    }
+
+    /**
+     * Settled rows (`released`, `failed`) not updated since `$before` that still name a draft (audit ZAV-I4).
+     *
+     * @return list<array{mailbox_id: string, idempotency_key: string, token: string, status: SendState, draft: string}>
+     */
+    public function orphanDrafts(int $before, int $limit = 500): array
+    {
+        $connection = $this->connection();
+        $rows       = [];
+        foreach ($connection->fetchAllAssociative(
+            $connection->getDatabasePlatform()->modifyLimitQuery('SELECT mailbox_id, idempotency_key, claim_token, status, provider_message_id FROM ' . $this->sendTable() . ' WHERE updated_at < ? AND status IN (?, ?) AND provider_message_id IS NOT NULL ORDER BY updated_at', $limit),
+            [$before, SendState::Released->value, SendState::Failed->value],
+        ) as $row) {
+            $rows[] = [
+                'mailbox_id'      => (string) $row['mailbox_id'],
+                'idempotency_key' => (string) $row['idempotency_key'],
+                'token'           => (string) $row['claim_token'],
+                'status'          => SendState::from((string) $row['status']),
+                'draft'           => (string) $row['provider_message_id'],
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
      * A transition by the claim holder (one conditional statement): `$from` → `$to` with the given columns, only while
      * the row is held by `$token` in state `$from`. Every transition bumps `row_version`, so MySQL / MariaDB count the
      * row even when nothing else changes within the same second (audit ZAT-R4): `$from === $to` is the heartbeat of a

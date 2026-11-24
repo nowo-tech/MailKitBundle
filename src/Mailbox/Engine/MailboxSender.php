@@ -38,6 +38,7 @@ use function bin2hex;
 use function count;
 use function hash;
 use function hash_equals;
+use function intdiv;
 use function random_bytes;
 use function strlen;
 use function strrchr;
@@ -58,7 +59,9 @@ use function substr;
  *    after reading it as a draft) and the row becomes `released` (transient, grant, token: the next call takes it over
  *    at once) or `failed` (a definite refusal).
  * 4. **`sending`** is written before the submit. From then on only that draft is ever submitted again for the key.
- * 5. **Submit**. A failure of any kind is followed by a read of the draft state: sent → `sent`; still a draft after a
+ * 5. **Submit**, one request at a time: before each (the retry after a 401 too) the token is fetched, the submit
+ *    window checked (at most `send.stale_claim_seconds / 2` after `sending` was written) and the claim renewed by a
+ *    conditional heartbeat (audit ZAV-L1). A failure of any kind is followed by a read of the draft state: sent → `sent`; still a draft after a
  *    definite 4xx → `failed`; gone → `unknown`; still a draft after an ambiguous answer, or unreadable → stays
  *    `sending`, {@see MailboxSendInProgress} with `reconciling`, and a delayed `ReconcileMailboxSend`.
  * 6. **Reconcile** (a later send() with the key, or the delayed message) of a `sending` row with no progress for
@@ -128,6 +131,7 @@ final readonly class MailboxSender implements MailboxSenderInterface
      * to try again later.
      *
      * @throws MailboxGrantFailure the mailbox was paused
+     * @throws LogicException called inside a transaction on the mailbox connection
      */
     public function reconcile(MailboxId $mailbox, string $key): bool
     {
@@ -157,6 +161,36 @@ final readonly class MailboxSender implements MailboxSenderInterface
     }
 
     /**
+     * Deletes the drafts that settled rows (`released`, `failed`) not updated since `$before` still name, each only
+     * after Graph reads it as a draft (audit ZAV-I4; `nowo:mail-kit:mailbox:purge --drafts`). A draft that reads as sent
+     * is left alone; a paused mailbox, an unreadable state or a failure skips that row. Returns the drafts deleted.
+     */
+    public function purgeOrphanDrafts(int $before): int
+    {
+        $deleted = 0;
+        foreach ($this->store->orphanDrafts($before) as $row) {
+            $mailbox = new MailboxId($row['mailbox_id']);
+            $context = $this->engine->active($mailbox);
+            if ($context === null) {
+                continue;
+            }
+            [, $gateway, $session] = $context;
+            $draft                 = new ProviderMessageId($row['draft']);
+
+            try {
+                if ($gateway->draftState($session, $draft) === DraftState::Draft) {
+                    $gateway->deleteDraft($session, $draft);
+                    ++$deleted;
+                }
+            } catch (Throwable $failure) {
+                $this->logger?->notice('Mailbox orphan draft not deleted; retried by the next purge until its row is purged.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value, 'error' => $failure::class]);
+            }
+        }
+
+        return $deleted;
+    }
+
+    /**
      * A `drafting` row without progress for `send.stale_claim_seconds`, or a `released` one: taken over by one caller.
      *
      * @param array{status: SendState, token: string, message_id: string|null} $row
@@ -182,6 +216,7 @@ final readonly class MailboxSender implements MailboxSenderInterface
         $mailbox = $settings->id;
         $key     = $mail->idempotencyKey;
         $draft   = null;
+        $since   = 0;
 
         try {
             if (!$this->engine->checkAccount($settings, $gateway, $session)) {
@@ -203,6 +238,7 @@ final readonly class MailboxSender implements MailboxSenderInterface
                     }
                 });
             }
+            $since = $this->now();
             if (!$this->store->updateSend($mailbox, $key, $token, SendState::Drafting, SendState::Sending)) {
                 throw new MailboxSendInProgress();
             }
@@ -210,7 +246,7 @@ final readonly class MailboxSender implements MailboxSenderInterface
             $this->abandon($settings, $gateway, $session, $key, $token, $draft?->id, $failure);
         }
 
-        return $this->submit($settings, $gateway, $session, $key, $token, $draft->id, false);
+        return $this->submit($settings, $gateway, $session, $key, $token, $draft->id, $since, false);
     }
 
     /**
@@ -273,19 +309,44 @@ final readonly class MailboxSender implements MailboxSenderInterface
     }
 
     /**
-     * Step 5 for the holder of a `sending` row.
+     * Step 5 for the holder of a `sending` row (audit ZAV-L1). Every submit request, the retry after a 401 included, is
+     * preceded by: the token (a host refresh may take long, so it comes first), the submit window (no submit later than
+     * `send.stale_claim_seconds / 2` after `sending` was written or taken over, so a request is over long before another
+     * worker may read the draft state) and a conditional heartbeat on the claim token (a lost claim submits nothing).
      *
+     * @param int $since UNIX seconds when this holder wrote or took over `sending`
      * @param bool $replayed this call takes over an earlier submit (the result is reported as a replay when sent)
      */
-    private function submit(MailboxSettings $settings, MailboxGatewayInterface $gateway, MailboxSession $session, string $key, string $token, ProviderMessageId $draft, bool $replayed): SentMessage
+    private function submit(MailboxSettings $settings, MailboxGatewayInterface $gateway, MailboxSession $session, string $key, string $token, ProviderMessageId $draft, int $since, bool $replayed): SentMessage
     {
-        try {
-            $gateway->sendDraft($session, $draft);
-        } catch (Throwable $failure) {
-            return $this->afterFailedSubmit($settings, $gateway, $session, $key, $token, $draft, $failure, $replayed);
-        }
+        $mailbox = $settings->id;
+        for ($attempt = 1;; ++$attempt) {
+            try {
+                $session->token();
+                if ($this->now() - $since > intdiv($this->options->staleClaimSeconds, 2)) {
+                    $this->logger?->notice('Mailbox send: the submit window passed (slow token refresh); reconciled by the draft state later.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value]);
+                    $this->pending($mailbox, $key);
+                }
+                if (!$this->store->updateSend($mailbox, $key, $token, SendState::Sending, SendState::Sending)) {
+                    // Another worker took the key over: it decides by the draft state; nothing is submitted here.
+                    throw new MailboxSendInProgress(true);
+                }
+                $gateway->sendDraft($session, $draft);
+            } catch (MailboxSendInProgress $stop) {
+                throw $stop;
+            } catch (SubmitTokenRejected) {
+                if ($attempt === 1) {
+                    // Graph took nothing; the token was dropped. Refresh, then window and heartbeat again.
+                    continue;
+                }
 
-        return $this->markSent($settings->id, $key, $token, $draft, $replayed);
+                return $this->afterFailedSubmit($settings, $gateway, $session, $key, $token, $draft, new MailboxGrantFailure(GrantFailureReason::Revoked, 'Microsoft Graph refused a fresh token of the submit (HTTP 401).'), $replayed);
+            } catch (Throwable $failure) {
+                return $this->afterFailedSubmit($settings, $gateway, $session, $key, $token, $draft, $failure, $replayed);
+            }
+
+            return $this->markSent($mailbox, $key, $token, $draft, $replayed);
+        }
     }
 
     /**
@@ -353,6 +414,7 @@ final readonly class MailboxSender implements MailboxSenderInterface
             throw new MailboxSendInProgress(true);
         }
         $token = $this->token();
+        $since = $this->now();
         if (!$this->store->takeOverSend($mailbox, $key, $row['token'], SendState::Sending, $token, SendState::Sending, $stale)) {
             throw new MailboxSendInProgress(true);
         }
@@ -379,7 +441,7 @@ final readonly class MailboxSender implements MailboxSenderInterface
 
         return match ($state) {
             DraftState::Sent       => $this->markSent($mailbox, $key, $token, $draft, true),
-            DraftState::Draft      => $this->submit($settings, $gateway, $session, $key, $token, $draft, true),
+            DraftState::Draft      => $this->submit($settings, $gateway, $session, $key, $token, $draft, $since, true),
             DraftState::Gone       => $this->unknown($mailbox, $key, $token),
             DraftState::Unreadable => $this->pending($mailbox, $key),
         };

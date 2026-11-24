@@ -17,6 +17,9 @@ use function fopen;
 use function fseek;
 use function fstat;
 use function fwrite;
+use function hash_final;
+use function hash_init;
+use function hash_update_stream;
 use function is_file;
 use function is_readable;
 use function is_resource;
@@ -166,6 +169,26 @@ final class OutgoingAttachment
         rewind($stream);
 
         return $stream;
+    }
+
+    /**
+     * SHA-256 of the content, streamed (never loaded whole): part of the message fingerprint, so a key reused with other
+     * attachment bytes is refused (audit ZAV-I1).
+     *
+     * @throws InvalidArgumentException when the file can no longer be read
+     */
+    public function contentHash(): string
+    {
+        $handle  = $this->open();
+        $context = hash_init('sha256');
+
+        try {
+            hash_update_stream($context, $handle);
+        } finally {
+            $this->close($handle);
+        }
+
+        return hash_final($context);
     }
 
     /**

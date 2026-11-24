@@ -92,18 +92,20 @@ final class GraphApiClient
      * @param list<int> $expected accepted statuses
      * @param string $operation fixed label for errors and logs ("create draft", "send"...)
      * @param int $maxBytes largest response body read (a longer one fails with {@see GraphException::REASON_TOO_LARGE})
+     * @param bool $retryUnauthorized retry once with a fresh token after a 401 (false: the 401 is reported to the
+     *                                credential and returned as a GraphException; the caller decides, 2.5.0 send)
      *
      * @throws GraphException
      *
      * @return array<mixed>
      */
-    public function call(GraphMailbox|GraphCredentialInterface $mailbox, string $method, string $path, #[SensitiveParameter] array $options, array $expected, string $operation, int $maxBytes = self::MAX_RESPONSE_BYTES): array
+    public function call(GraphMailbox|GraphCredentialInterface $mailbox, string $method, string $path, #[SensitiveParameter] array $options, array $expected, string $operation, int $maxBytes = self::MAX_RESPONSE_BYTES, bool $retryUnauthorized = true): array
     {
         if (!str_starts_with($path, '/')) {
             throw GraphException::untrustedUrl($operation);
         }
 
-        return $this->authorized($this->credential($mailbox), $method, self::BASE_URL . $path, $options, $expected, $operation, $maxBytes, null);
+        return $this->authorized($this->credential($mailbox), $method, self::BASE_URL . $path, $options, $expected, $operation, $maxBytes, null, $retryUnauthorized);
     }
 
     /**
@@ -187,7 +189,7 @@ final class GraphApiClient
      *
      * @return array<mixed>
      */
-    private function authorized(GraphCredentialInterface $credential, string $method, #[SensitiveParameter] string $url, #[SensitiveParameter] array $options, array $expected, string $operation, int $maxBytes, mixed $sink): array
+    private function authorized(GraphCredentialInterface $credential, string $method, #[SensitiveParameter] string $url, #[SensitiveParameter] array $options, array $expected, string $operation, int $maxBytes, mixed $sink, bool $retryUnauthorized = true): array
     {
         $context = ['bundle' => 'NowoMailKitBundle'] + $credential->logContext();
         for ($attempt = 0;; ++$attempt) {
@@ -206,8 +208,9 @@ final class GraphApiClient
             $credential->called($operation, $status, $this->elapsedMs($started), $bytes, $retryAfter, $attempt + 1);
             if ($status === 401 && $attempt === 0) {
                 $credential->rejected();
-
-                continue;
+                if ($retryUnauthorized) {
+                    continue;
+                }
             }
             if (in_array($status, $expected, true)) {
                 return $data;

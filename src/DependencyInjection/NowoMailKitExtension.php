@@ -231,6 +231,9 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
     /** Service id of the Graph normaliser of the delegated mailboxes (2.5.0; mailbox HTML sanitiser). */
     public const MAILBOX_NORMALIZER_ID = 'nowo_mail_kit.mailbox.graph_normalizer';
 
+    /** Parameter: `mailboxes.connection` when the mailboxes are on (2.5.0, audit ZAV-I3), read by the transaction pass. */
+    public const MAILBOX_CONNECTION_PARAMETER = 'nowo_mail_kit.mailboxes.connection';
+
     /** Parameter: `mailboxes.graph.outbound_url_guard` when the Graph provider is on (2.5.0), read by the pass. */
     public const MAILBOX_URL_GUARD_PARAMETER = 'nowo_mail_kit.mailboxes.graph.outbound_url_guard';
 
@@ -654,6 +657,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $bus    = new Reference($mailboxes['bus']);
         $graph  = $mailboxes['graph'];
 
+        $container->setParameter(self::MAILBOX_CONNECTION_PARAMETER, $mailboxes['connection']);
         $container->setDefinition(MailboxStore::class, new Definition(MailboxStore::class, [new Reference('doctrine'), $mailboxes['connection'], $doctrine['table_prefix'], $clock, $logger]));
         if ($hasOrm) {
             $container->setDefinition(MailboxSchemaListener::class, (new Definition(MailboxSchemaListener::class, [new Reference(MailboxStore::class), new Reference('doctrine'), $doctrine['entity_manager']]))
@@ -808,7 +812,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             ->addTag('console.command', ['command' => MailboxSubscriptionsCommand::NAME]));
         $container->setDefinition(MailboxStatusCommand::class, (new Definition(MailboxStatusCommand::class, [new Reference(MailboxSyncInterface::class)]))
             ->addTag('console.command', ['command' => MailboxStatusCommand::NAME]));
-        $container->setDefinition(MailboxPurgeCommand::class, (new Definition(MailboxPurgeCommand::class, [new Reference(MailboxStore::class), $send['retention'], $clock]))
+        $container->setDefinition(MailboxPurgeCommand::class, (new Definition(MailboxPurgeCommand::class, [new Reference(MailboxStore::class), $send['retention'], $clock, new Reference(MailboxSender::class)]))
             ->addTag('console.command', ['command' => MailboxPurgeCommand::NAME]));
     }
 

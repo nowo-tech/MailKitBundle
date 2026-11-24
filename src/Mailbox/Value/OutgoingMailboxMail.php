@@ -127,8 +127,8 @@ final readonly class OutgoingMailboxMail
     }
 
     /**
-     * SHA-256 of the message as the host described it (attachments by name, type, size and Content-ID; not their
-     * bytes): a second send() with the same key must describe the same message.
+     * SHA-256 of the message as the host described it (attachments by name, type, size, Content-ID and the SHA-256 of
+     * their bytes, streamed; audit ZAV-I1): a second send() with the same key must describe the same message.
      */
     public function fingerprint(): string
     {
@@ -142,7 +142,7 @@ final readonly class OutgoingMailboxMail
         };
         $attachments = [];
         foreach ($this->attachments as $attachment) {
-            $attachments[] = [$attachment->filename, $attachment->contentType, $attachment->size, $attachment->inline, $attachment->contentId];
+            $attachments[] = [$attachment->filename, $attachment->contentType, $attachment->size, $attachment->inline, $attachment->contentId, $attachment->contentHash()];
         }
 
         return hash('sha256', json_encode([

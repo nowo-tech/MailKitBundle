@@ -17,6 +17,7 @@ use Nowo\MailKitBundle\Mailbox\Exception\MailboxSendInProgress;
 use Nowo\MailKitBundle\Mailbox\Exception\MailboxSendKeyConflict;
 use Nowo\MailKitBundle\Mailbox\Exception\MailboxSendOutcomeUnknown;
 use Nowo\MailKitBundle\Mailbox\Exception\MailboxTokenUnavailable;
+use Nowo\MailKitBundle\Mailbox\Infrastructure\Command\MailboxPurgeCommand;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\DeliverSentCopy;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\ReconcileMailboxSend;
 use Nowo\MailKitBundle\Mailbox\Value\ExclusionDecision;
@@ -37,6 +38,7 @@ use Nowo\MailKitBundle\Tests\Support\MailboxHarness;
 use Nowo\MailKitBundle\Tests\Support\MemoryMailboxPorts;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
+use Symfony\Component\Console\Tester\CommandTester;
 use Symfony\Component\HttpClient\Response\MockResponse;
 use Symfony\Component\Messenger\Stamp\DelayStamp;
 use Throwable;
@@ -817,6 +819,109 @@ final class MailboxSenderTest extends TestCase
         $this->bus->messages = [];
         $this->handler->sentCopy(new DeliverSentCopy('mbx-ana', 'DRAFT-9'));
         self::assertSame([], $this->bus->messages);
+    }
+
+    public function testEverySubmitIsPrecededByAHeartbeatAndInsideItsWindow(): void
+    {
+        // A 401 on the submit: the sender refreshes the token, renews its claim and submits once more.
+        $first                 = true;
+        $this->graph->override = static function (string $method, string $path) use (&$first): ?MockResponse {
+            if ($first && $method === 'POST' && str_ends_with($path, '/send')) {
+                $first = false;
+
+                return MailboxGraphFake::json(['error' => ['code' => 'InvalidAuthenticationToken']], 401);
+            }
+
+            return null;
+        };
+        self::assertFalse($this->sender->send($this->ana, $this->mail())->replayed);
+        self::assertSame(2, $this->submits());
+        self::assertCount(1, $this->ports->rejectedTokens);
+        self::assertSame(['DRAFT-1'], $this->graph->delivered);
+
+        // The token refresh after the 401 outlasts half the stale delay: no second submit (ZAV-L1 a).
+        $this->graph->override      = static fn (string $method, string $path): ?MockResponse => $method === 'POST' && str_ends_with($path, '/send') ? MailboxGraphFake::json(['error' => ['code' => 'InvalidAuthenticationToken']], 401) : null;
+        $issued                     = 0;
+        $clock                      = $this->clock;
+        $this->ports->tokenOverride = static function () use (&$issued, $clock): ?MailboxAccessToken {
+            if (++$issued === 2) {
+                $clock->modify('+61 seconds');
+            }
+
+            return null;
+        };
+
+        try {
+            $this->sender->send($this->ana, $this->mail(key: 'second-key-00001'));
+            self::fail('Out of the submit window.');
+        } catch (MailboxSendInProgress $pending) {
+            self::assertTrue($pending->reconciling);
+        }
+        self::assertSame(3, $this->submits());
+        self::assertSame('sending', $this->row('second-key-00001')['status']);
+        self::assertTrue($this->log->has('Mailbox send: the submit window passed (slow token refresh); reconciled by the draft state later.'));
+
+        // Another worker took the claim over while the token was refreshed: the heartbeat fails, nothing is submitted.
+        $issued                     = 0;
+        $connection                 = $this->mailboxConnection;
+        $this->ports->tokenOverride = static function () use (&$issued, $connection): ?MailboxAccessToken {
+            if (++$issued === 2) {
+                $connection->executeStatement("UPDATE mail_kit_mailbox_send SET claim_token = 'another-worker' WHERE idempotency_key = 'third-key-000001'");
+            }
+
+            return null;
+        };
+
+        try {
+            $this->sender->send($this->ana, $this->mail(key: 'third-key-000001'));
+            self::fail('The claim was lost.');
+        } catch (MailboxSendInProgress $lost) {
+            self::assertTrue($lost->reconciling);
+        }
+        self::assertSame(4, $this->submits());
+        $this->ports->tokenOverride = null;
+    }
+
+    public function testTheSentCopyOfAMessageMailKitDidNotSendIsDropped(): void
+    {
+        $this->graph->messages['FOREIGN-1'] = MailboxGraphFake::message('FOREIGN-1');
+        $this->handler->sentCopy(new DeliverSentCopy('mbx-ana', 'FOREIGN-1'));
+        self::assertSame([], $this->ports->stored);
+        self::assertTrue($this->log->has('Mailbox sent copy dropped: no send of this mailbox has that id.'));
+    }
+
+    public function testAReconcileInsideATransactionIsAcknowledgedOnce(): void
+    {
+        $this->mailboxConnection->beginTransaction();
+        $this->handler->reconcile(new ReconcileMailboxSend('mbx-ana', 'some-key-0000001'));
+        $this->mailboxConnection->rollBack();
+        self::assertSame([], $this->bus->messages);
+        self::assertTrue($this->log->has('Mailbox send reconcile skipped: it runs inside a transaction on the mailbox connection'));
+    }
+
+    public function testPurgeDeletesLeftoverDraftsOnlyWhenTheyAreDrafts(): void
+    {
+        $insert = function (string $key, string $status, string $draft, string $mailbox = 'mbx-ana'): void {
+            $this->mailboxConnection->executeStatement('INSERT INTO mail_kit_mailbox_send (mailbox_id, idempotency_key, payload_hash, status, claim_token, provider_message_id, attempts, row_version, claimed_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, 0, 0, 0)', [$mailbox, $key, 'h', $status, 't', $draft]);
+        };
+        foreach (['LEFT-1', 'LEFT-2', 'SENT-1', 'ERR-1'] as $id) {
+            $this->graph->messages[$id] = MailboxGraphFake::message($id, ['isDraft' => $id !== 'SENT-1']);
+        }
+        $insert('key-left-0000001', 'released', 'LEFT-1');
+        $insert('key-left-0000002', 'failed', 'LEFT-2');
+        $insert('key-sent-0000001', 'released', 'SENT-1');
+        $insert('key-gone-0000001', 'released', 'GONE-1');
+        $insert('key-err-00000001', 'released', 'ERR-1');
+        $insert('key-other-000001', 'released', 'LEFT-9', 'mbx-unknown');
+        $this->graph->override = static fn (string $method, string $path): ?MockResponse => $method === 'DELETE' && str_contains($path, 'ERR-1') ? MailboxGraphFake::json([], 500) : null;
+
+        $this->clock->modify('+8 days');
+        $command = new CommandTester(new MailboxPurgeCommand($this->mailboxStore, 'P7D', $this->clock, $this->sender));
+        self::assertSame(0, $command->execute(['--drafts' => true]));
+        self::assertStringContainsString('2 leftover draft(s) deleted.', $command->getDisplay());
+        self::assertSame(['LEFT-1', 'LEFT-2'], array_values(array_filter($this->graph->deleted, static fn (string $id): bool => $id !== 'ERR-1')));
+        self::assertTrue($this->log->has('Mailbox orphan draft not deleted; retried by the next purge until its row is purged.'));
+        self::assertSame(0, (int) $this->mailboxConnection->fetchOne('SELECT COUNT(*) FROM mail_kit_mailbox_send'));
     }
 
     private function submits(): int

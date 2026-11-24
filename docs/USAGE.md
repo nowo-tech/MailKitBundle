@@ -1207,15 +1207,30 @@ try {
   (timeout, 5xx, 429) is never resent blindly: MailKit reads the draft state after `send.stale_claim_seconds`
   (`ReconcileMailboxSend`, or your next `send()` with the key) and submits **that same draft** again only while Graph
   still reports it as a draft (one draft item is delivered at most once).
+- **Every submit is fenced** (audit ZAV-L1): before each `POST …/send`, the retry after a 401 included, MailKit takes
+  the token (a slow refresh of yours happens here), refuses to submit later than `send.stale_claim_seconds / 2` after
+  the key went `sending` (it is then reconciled), and renews its claim with a conditional heartbeat; a worker that
+  lost the claim submits nothing. MailKit retries a 401 on the submit itself, not the HTTP client.
+- **Clocks**: staleness compares the worker's clock with the time another worker stored. Keep your workers on NTP;
+  a skew must stay well under `send.stale_claim_seconds / 2`.
+- **Do not reuse a key that was in flight after `disconnect()`**: the disconnect deletes the send rows, so MailKit no
+  longer knows that key, and an earlier attempt may have left (or may still leave) its draft. Use a new key.
+- **Leftover drafts**: an attempt abandoned after its draft was created (a crash, a failed delete) can leave that
+  draft in the mailbox's Drafts folder; it is never submitted. `nowo:mail-kit:mailbox:purge --drafts` deletes the
+  drafts that settled `released` / `failed` rows still name, each only after Graph reads it as a draft.
 - **Account check before every send**: a token of another account pauses the mailbox `AccountMismatch` and nothing
   is sent.
-- **The sent copy** reaches your sink as `SyncedMessage` with `origin: SentCopy` and folder `sentitems`, a few seconds
+- **The sent copy** is delivered only for a key MailKit recorded as `sent` with that id. It reaches your sink as `SyncedMessage` with `origin: SentCopy` and folder `sentitems`, a few seconds
   later (`DeliverSentCopy`), whether you follow Sent Items or not (Q-MB-6), without the exclusion policy. If you also
   follow Sent Items the sweep delivers it once more and your sink answers `Duplicate`.
 - **Not in the sent-mail log** (Q-MB-14): your thread is the record.
 - **Transactions**: call `send()` outside a transaction on the mailbox connection (it refuses otherwise): a rollback
   after Graph sent would forget the send and a retry would send again. In a Messenger handler wrapped by
-  `doctrine_transaction`, give MailKit its own `mailboxes.connection`.
+  `doctrine_transaction`, give MailKit its own `mailboxes.connection` (the container build logs a warning when a bus
+  runs that middleware and `mailboxes.connection` is not set). A `ReconcileMailboxSend` that meets such a transaction is
+  logged and acknowledged; the next `send()` with the key reconciles it.
+- **The fingerprint** of a message includes the SHA-256 of each attachment's bytes (streamed), so a key reused with
+  other attachment content is refused.
 
 ### Wiring
 

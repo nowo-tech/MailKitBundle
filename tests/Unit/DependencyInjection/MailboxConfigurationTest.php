@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\MailKitBundle\Tests\Unit\DependencyInjection;
 
 use LogicException;
+use Nowo\MailKitBundle\DependencyInjection\Compiler\MailboxSendTransactionPass;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\MailboxUrlGuardPass;
 use Nowo\MailKitBundle\DependencyInjection\Configuration;
 use Nowo\MailKitBundle\DependencyInjection\NowoMailKitExtension;
@@ -123,6 +124,29 @@ final class MailboxConfigurationTest extends TestCase
 
         $this->expectException(LogicException::class);
         (new MailboxUrlGuardPass())->process($this->container('required', false));
+    }
+
+    public function testTheTransactionPassWarnsAboutADoctrineTransactionBusOnTheDefaultConnection(): void
+    {
+        $container = new ContainerBuilder();
+        (new MailboxSendTransactionPass())->process($container);
+        self::assertSame([], $container->getCompiler()->getLog());
+
+        $container->setParameter(NowoMailKitExtension::MAILBOX_CONNECTION_PARAMETER, null);
+        $container->setParameter('kernel.debug', false);
+        $container->setParameter('messenger.bus.plain.middleware', [['id' => 'add_bus_name_stamp_middleware'], 'odd']);
+        (new MailboxSendTransactionPass())->process($container);
+        self::assertSame([], $container->getCompiler()->getLog());
+
+        $container->setParameter('messenger.bus.default.middleware', [['id' => 'doctrine_transaction']]);
+        (new MailboxSendTransactionPass())->process($container);
+        self::assertStringContainsString('"messenger.bus.default" runs the doctrine_transaction middleware', implode("\n", $container->getCompiler()->getLog()));
+
+        $dedicated = new ContainerBuilder();
+        $dedicated->setParameter(NowoMailKitExtension::MAILBOX_CONNECTION_PARAMETER, 'mail_kit');
+        $dedicated->setParameter('messenger.bus.default.middleware', [['id' => 'doctrine_transaction']]);
+        (new MailboxSendTransactionPass())->process($dedicated);
+        self::assertSame([], $dedicated->getCompiler()->getLog());
     }
 
     private function container(string $mode, bool $guard): ContainerBuilder

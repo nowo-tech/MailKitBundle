@@ -86,7 +86,13 @@ All notable changes to this project are documented here. The format follows
   exclusion policy. Delegated sends are not written to the sent-mail log (Q-MB-14); outgoing HTML is sanitised with
   remote images dropped. Configuration `mailboxes.send.*` and `mailboxes.graph.upload_hosts`; command
   `nowo:mail-kit:mailbox:purge` (settled send rows after `send.retention`, `P7D`). `send()` refuses to run inside a
-  transaction on the mailbox connection (a rollback would forget a delivered send).
+  transaction on the mailbox connection (a rollback would forget a delivered send). Audit ZAV fixes: every submit
+  (the 401 retry included, now made by the sender, not `GraphApiClient`) follows a conditional heartbeat and is refused
+  later than `send.stale_claim_seconds / 2` after `sending` was written (L1); the message fingerprint includes the
+  SHA-256 of the attachment bytes (I1); `DeliverSentCopy` needs a `sent` row with that id (I2); a `ReconcileMailboxSend`
+  inside a transaction is logged and acknowledged, and the build warns about a `doctrine_transaction` bus without a
+  dedicated `mailboxes.connection` (I3); `nowo:mail-kit:mailbox:purge --drafts` deletes leftover drafts after reading
+  them as drafts (I4).
 - `Mailbox\Port\MailboxMessageIndexInterface` (optional, `mailboxes.message_index`; owner answer Q1 of 2026-11-24):
   which messages of a change page the host already stores in that folder; the sweep asks once per page and fetches
   only the others. No default implementation.
@@ -105,7 +111,8 @@ All notable changes to this project are documented here. The format follows
 
 - `Graph\GraphApiClient` (`@internal`) takes a shared-mailbox profile or a `GraphCredentialInterface` per call, reports
   every call (status 0 on transport errors) and accepts optional per-request options (host pin); `uploadChunk()` and
-  `cancelUpload()` take a credential too (the delegated path meters each chunk as `upload`). The 1.8 / 1.9 behaviour
+  `cancelUpload()` take a credential too (the delegated path meters each chunk as `upload`), and `call()` takes a trailing
+  `$retryUnauthorized` (false for the delegated submit: the sender retries a 401 itself). The 1.8 / 1.9 behaviour
   is unchanged. `ProviderCall::OPERATIONS` gains `delete_draft`.
 - The 1.9 webhook controller's HTTP flow moved to `Graph\Inbound\Webhook\AbstractGraphWebhookController`, shared
   with the delegated-mailbox route; savepoint writes moved to `Concurrency\SavepointWrites`. No behaviour change.

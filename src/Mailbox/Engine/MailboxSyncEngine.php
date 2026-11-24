@@ -325,6 +325,12 @@ final class MailboxSyncEngine implements MailboxSyncInterface
         if ($context === null) {
             return true;
         }
+        if (!$this->store->isSentMessage($mailbox, $message->value)) {
+            // Audit ZAV-I2: only a message MailKit sent (a `sent` row with this id) skips the exclusion policy.
+            $this->logger?->warning('Mailbox sent copy dropped: no send of this mailbox has that id.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value]);
+
+            return true;
+        }
         [$settings, $gateway, $session] = $context;
 
         return $this->deliver($settings, $gateway, $session, FolderRef::sentItems(), $message, MessageOrigin::SentCopy, false);

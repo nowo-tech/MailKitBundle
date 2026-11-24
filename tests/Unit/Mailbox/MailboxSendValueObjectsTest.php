@@ -51,6 +51,8 @@ final class MailboxSendValueObjectsTest extends TestCase
         self::assertNotSame($mail->fingerprint(), $this->mail(text: 'Hello!')->fingerprint());
         self::assertNotSame($mail->fingerprint(), $this->mail(html: '<p>x</p>')->fingerprint());
         self::assertNotSame($mail->fingerprint(), $this->mail(attachments: [OutgoingAttachment::fromString('a', 'a.txt')])->fingerprint());
+        self::assertNotSame($this->mail(attachments: [OutgoingAttachment::fromString('a', 'a.txt')])->fingerprint(), $this->mail(attachments: [OutgoingAttachment::fromString('b', 'a.txt')])->fingerprint(), 'same name and size, other bytes');
+        self::assertSame(hash('sha256', 'abc'), OutgoingAttachment::fromString('abc', 'a')->contentHash());
         self::assertSame($mail->fingerprint(), $this->mail(to: [new MailAddress('PEDRO@example.org', 'Pedro')])->fingerprint(), 'addresses compare case-insensitively');
 
         $this->expectException(LogicException::class);

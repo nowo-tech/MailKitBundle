@@ -30,7 +30,8 @@ interface MailboxSenderInterface
      * sent-mail log (Q-MB-14).
      *
      * Call it **outside** a database transaction on the mailbox connection (a rollback after the provider sent would
-     * forget the send): use a dedicated `mailboxes.connection` when your handlers run in a transaction.
+     * forget the send): use a dedicated `mailboxes.connection` when your handlers run in a transaction. Do not reuse a
+     * key that was in flight after `MailboxSyncInterface::disconnect()` (its row is gone; use a new key).
      *
      * @throws InvalidArgumentException the message breaks a configured `send.*` limit (nothing was claimed)
      * @throws LogicException called inside a transaction on the mailbox connection (nothing was claimed)

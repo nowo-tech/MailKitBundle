@@ -118,7 +118,10 @@ interface MailboxGatewayInterface
     public function addAttachment(MailboxSession $session, DraftRef $draft, OutgoingAttachment $attachment, Closure $progress): void;
 
     /**
-     * Submits a draft. A failure tells nothing about the outcome on its own: the caller reads {@see draftState()}.
+     * Submits a draft with one request (never retried here). A failure tells nothing about the outcome on its own: the
+     * caller reads {@see draftState()}.
+     *
+     * @throws SubmitTokenRejected the provider answered 401 (the token was dropped; the caller may retry once)
      */
     public function sendDraft(MailboxSession $session, ProviderMessageId $draft): void;
 

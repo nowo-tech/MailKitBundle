@@ -6,6 +6,7 @@ namespace Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger;
 
 use Closure;
 use InvalidArgumentException;
+use LogicException;
 use Nowo\MailKitBundle\Mailbox\Engine\MailboxSender;
 use Nowo\MailKitBundle\Mailbox\Engine\MailboxSyncEngine;
 use Nowo\MailKitBundle\Mailbox\Exception\MailboxGrantFailure;
@@ -174,7 +175,17 @@ final readonly class MailboxMessageHandler
         }
         $again = static fn (int $attempt): ReconcileMailboxSend => new ReconcileMailboxSend($message->mailboxId, $message->idempotencyKey, $attempt);
         $this->run($mailbox, function () use ($mailbox, $sender, $message, $again): void {
-            if ($sender->reconcile($mailbox, $message->idempotencyKey)) {
+            try {
+                $settled = $sender->reconcile($mailbox, $message->idempotencyKey);
+            } catch (LogicException) {
+                // Audit ZAV-I3: the handler runs inside a transaction on the mailbox connection (a doctrine_transaction
+                // middleware without a dedicated mailboxes.connection). Retrying cannot help: acknowledge once; the
+                // next send() with the key reconciles it.
+                $this->logger?->warning('Mailbox send reconcile skipped: it runs inside a transaction on the mailbox connection; configure a dedicated nowo_mail_kit.mailboxes.connection.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value]);
+
+                return;
+            }
+            if ($settled) {
                 return;
             }
             $attempt = max(0, $message->attempt) + 1;

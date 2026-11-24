@@ -6,13 +6,15 @@ namespace Nowo\MailKitBundle\Concurrency;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
+use SensitiveParameter;
 use Throwable;
 
 /**
  * Single-statement writes of the bundle's DBAL stores that never abort a caller's transaction (1.13 / audit UE2-MK-1,
  * shared by the Graph inbound store and the 2.5.0 mailbox store): inside an open transaction each statement runs in a
  * savepoint rolled back on **any** failure, so a duplicate key, a lock wait timeout, a deadlock or a serialization
- * failure leaves a PostgreSQL transaction usable. Stateless (static methods only).
+ * failure leaves a PostgreSQL transaction usable. Rows and parameters are sensitive parameters (a delta link, audit
+ * ZAT-R5): they never appear in the trace arguments of a DBAL failure. Stateless (static methods only).
  *
  * @internal
  */
@@ -24,7 +26,7 @@ final class SavepointWrites
      *
      * @param array<string, mixed> $row
      */
-    public static function insertOnce(Connection $connection, string $savepoint, string $table, array $row): bool
+    public static function insertOnce(Connection $connection, string $savepoint, string $table, #[SensitiveParameter] array $row): bool
     {
         $nested = $connection->isTransactionActive();
         if ($nested) {
@@ -60,7 +62,7 @@ final class SavepointWrites
      *
      * @param list<mixed> $params
      */
-    public static function write(Connection $connection, string $savepoint, string $sql, array $params): int
+    public static function write(Connection $connection, string $savepoint, string $sql, #[SensitiveParameter] array $params): int
     {
         if (!$connection->isTransactionActive()) {
             return (int) $connection->executeStatement($sql, $params);

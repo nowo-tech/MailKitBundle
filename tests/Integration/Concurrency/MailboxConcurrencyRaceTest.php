@@ -89,6 +89,19 @@ final class MailboxConcurrencyRaceTest extends TestCase
         self::assertFalse($this->storeB->releaseLease($this->id, 'inbox', 'worker-b'));
     }
 
+    public function testALeaseExtendedTwiceInTheSameSecondIsStillHeld(): void
+    {
+        // Audit ZAT-R4: MySQL / MariaDB count changed rows only; two extensions within one second change nothing.
+        $this->storeA->ensureCursor($this->id, 'inbox');
+        self::assertTrue($this->storeA->acquireLease($this->id, 'inbox', 'worker-a', 120));
+        self::assertTrue($this->storeA->extendLease($this->id, 'inbox', 'worker-a', 120));
+        self::assertTrue($this->storeA->extendLease($this->id, 'inbox', 'worker-a', 120));
+        self::assertTrue($this->storeA->extendLease($this->id, 'inbox', 'worker-a', 120));
+        self::assertFalse($this->storeB->extendLease($this->id, 'inbox', 'worker-b', 120));
+        // The holder still advances the cursor afterwards.
+        self::assertTrue($this->storeA->advanceCursor($this->id, 'inbox', 'worker-a', 0, 'page-1', 120, false));
+    }
+
     public function testNoCursorLostUpdateAfterALeaseTakeover(): void
     {
         $this->storeA->ensureCursor($this->id, 'inbox');

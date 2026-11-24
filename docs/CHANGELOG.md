@@ -65,6 +65,8 @@ All notable changes to this project are documented here. The format follows
   The 2.2.2 fixes are carried into the 2.5 code: the ZAT-L4 strip rules apply to `MailHtmlSanitizer` in `dropped` and
   `blocked` mode, and the ZAT-L5 `#[\SensitiveParameter]` / no-`previous` wrapping covers the delegated credential path
   (delta links included).
+  Verification ZAT-R4: a lease extension in the same second (no row changed on MySQL / MariaDB) is confirmed by a read
+  of the owner instead of being taken for a lost lease; ZAT-R5: store write parameters are sensitive.
 - `Mailbox\Html\MailHtmlSanitizer`: the 1.9 inbound sanitiser, provider-neutral, with `html.remote_images: blocked`
   (default for mailboxes): remote image URLs move to `data-mail-kit-remote-src` for the host's image proxy; no
   `style`, script or event handler in any mode. `Graph\Inbound\InboundHtmlSanitizer` is now a thin subclass (no BC

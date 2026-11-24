@@ -260,12 +260,17 @@ final class MailboxStore
 
     /**
      * Extends the lease of this run (between slow provider checks); false when the lease changed hands.
+     *
+     * MySQL / MariaDB count changed rows only: an extension in the same second as the previous lease write changes
+     * nothing and answers 0 although this run still holds the lease (audit ZAT-R4). A 0 is therefore confirmed with a
+     * read of the owner (a primary-key look-up, only on that path) rather than by forcing a change (`GREATEST()` is not
+     * portable to SQLite, a sequence column needs a schema change).
      */
     public function extendLease(MailboxId $mailbox, string $folder, string $owner, int $seconds): bool
     {
         return $this->write('UPDATE ' . $this->cursorTable() . ' SET lease_until = ? WHERE mailbox_id = ? AND folder_key = ? AND lease_owner = ?', [
             $this->now() + $seconds, $mailbox->value, $folder, $owner,
-        ]) === 1;
+        ]) === 1 || $this->connection()->fetchOne('SELECT lease_owner FROM ' . $this->cursorTable() . ' WHERE mailbox_id = ? AND folder_key = ?', [$mailbox->value, $folder]) === $owner;
     }
 
     /**
@@ -532,9 +537,13 @@ final class MailboxStore
     }
 
     /**
+     * Every other state change decides on its affected rows only where the statement always changes the row it matches
+     * (a new status, owner or version, NULL to a value), so MySQL's changed-rows count equals the matched rows (audit
+     * ZAT-R4). The parameters may hold a delta link: sensitive (audit ZAT-R5).
+     *
      * @param list<mixed> $params
      */
-    private function write(string $sql, array $params): int
+    private function write(string $sql, #[SensitiveParameter] array $params): int
     {
         return SavepointWrites::write($this->connection(), self::SAVEPOINT, $sql, $params);
     }

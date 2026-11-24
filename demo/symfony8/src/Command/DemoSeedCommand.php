@@ -16,6 +16,9 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Mailer\MailerInterface;
 use Symfony\Component\Mime\Email;
 
+use function count;
+use function sprintf;
+
 /**
  * Seeds the demo (idempotent): the mailer settings (runtime DSN pointing at Mailpit) and, when the log is empty, a few
  * realistic messages sent through the plain MailerInterface plus one failed delivery.

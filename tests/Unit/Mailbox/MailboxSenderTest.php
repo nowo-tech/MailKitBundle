@@ -821,6 +821,118 @@ final class MailboxSenderTest extends TestCase
         self::assertSame([], $this->bus->messages);
     }
 
+    public function testResumeReconcilesTheKeysAGrantFailureLeftSending(): void
+    {
+        // Audit ZBUv-L2: a grant failure at the submit keeps the key `sending`; resume() enqueues its reconcile, so the
+        // host need not call send() with that key again.
+        $this->graph->override = static fn (string $method, string $path): ?MockResponse => $method === 'POST' && str_ends_with($path, '/send') ? MailboxGraphFake::json(['error' => ['code' => 'InvalidAuthenticationToken']], 401) : null;
+
+        try {
+            $this->sender->send($this->ana, $this->mail());
+            self::fail('Revoked.');
+        } catch (MailboxGrantFailure) {
+        }
+        self::assertSame('sending', $this->row()['status']);
+        $this->graph->override = null;
+        self::assertSame(MailboxStatus::Active, $this->engine->resume($this->ana)->status);
+        $reconciles = array_values(array_filter($this->bus->messages, static fn (object $m): bool => $m instanceof ReconcileMailboxSend));
+        self::assertEquals([new ReconcileMailboxSend('mbx-ana', self::KEY)], $reconciles);
+
+        // Once stale, the background reconcile submits that same draft once; nothing else is sent.
+        $this->clock->modify('+121 seconds');
+        $this->drain();
+        self::assertSame('sent', $this->row()['status']);
+        self::assertSame(['DRAFT-1'], $this->graph->delivered);
+
+        // An enqueue failure on resume is logged; the next send() with the key still reconciles it.
+        $this->mailboxConnection->executeStatement("UPDATE mail_kit_mailbox_send SET status = 'sending'");
+        $this->engine->pause($this->ana);
+        $this->bus->messages = [];
+        $this->bus->failure  = new RuntimeException('transport down (fixture)');
+
+        try {
+            // The folder sweeps enqueued after the reconcile meet the same failure and are thrown as before.
+            $this->engine->resume($this->ana);
+        } catch (RuntimeException) {
+        }
+        self::assertTrue($this->log->has('Mailbox send reconcile could not be enqueued on resume'));
+        $this->bus->failure = null;
+    }
+
+    public function testTheRefreshedTokenOfThe401RetryIsCheckedAgainstTheMailboxAccount(): void
+    {
+        // Audit ZBU-L2: after a submit 401 the fresh token belongs to another account: nothing is submitted again.
+        $graph           = $this->graph;
+        $graph->override = static function (string $method, string $path) use ($graph): ?MockResponse {
+            if ($method === 'POST' && str_ends_with($path, '/send')) {
+                $graph->account = ['id' => 'other-account', 'mail' => 'eve@example.org'];
+
+                return MailboxGraphFake::json(['error' => ['code' => 'InvalidAuthenticationToken']], 401);
+            }
+
+            return null;
+        };
+
+        try {
+            $this->sender->send($this->ana, $this->mail());
+            self::fail('Another account.');
+        } catch (MailboxGrantFailure $failure) {
+            self::assertSame(GrantFailureReason::AccountMismatch, $failure->reason);
+        }
+        self::assertSame(1, $this->submits());
+        self::assertSame([], $this->graph->delivered);
+        self::assertSame('sending', $this->row()['status']);
+        self::assertSame(MailboxStatus::PausedGrant, $this->engine->status($this->ana)->status);
+
+        // The account read itself fails after the 401: decided by the draft state, nothing submitted again.
+        $this->mailboxStore->activate($this->ana);
+        $graph->account  = ['id' => MailboxGraphFake::ACCOUNT_ID, 'mail' => 'Ana@Example.com', 'userPrincipalName' => 'ana@example.com'];
+        $first           = true;
+        $graph->override = static function (string $method, string $path) use (&$first): ?MockResponse {
+            if ($method === 'POST' && str_ends_with($path, '/send')) {
+                return MailboxGraphFake::json(['error' => ['code' => 'InvalidAuthenticationToken']], 401);
+            }
+            if ($method === 'GET' && str_starts_with($path, '/v1.0/me') && !str_contains($path, 'messages') && !$first) {
+                return MailboxGraphFake::json([], 503);
+            }
+            if ($method === 'GET' && str_starts_with($path, '/v1.0/me') && !str_contains($path, 'messages')) {
+                $first = false;
+            }
+
+            return null;
+        };
+
+        try {
+            $this->sender->send($this->ana, $this->mail(key: 'second-key-00001'));
+            self::fail('Pending.');
+        } catch (MailboxSendInProgress $pending) {
+            self::assertTrue($pending->reconciling);
+        }
+        self::assertSame(2, $this->submits());
+        self::assertSame([], $this->graph->delivered);
+    }
+
+    public function testASentMessageWhoseRowCannotBeWrittenIsReconciledNotFailed(): void
+    {
+        // Audit ZBU-I5: Graph sent it, the `sent` write throws: the caller is told to retry with the same key.
+        $this->mailboxConnection->executeStatement("CREATE TRIGGER no_sent BEFORE UPDATE ON mail_kit_mailbox_send WHEN NEW.status = 'sent' BEGIN SELECT RAISE(ABORT, 'disk full'); END");
+
+        try {
+            $this->sender->send($this->ana, $this->mail());
+            self::fail('Pending.');
+        } catch (MailboxSendInProgress $pending) {
+            self::assertTrue($pending->reconciling);
+        }
+        self::assertSame(['DRAFT-1'], $this->graph->delivered);
+        self::assertTrue($this->log->has('the message was sent but its row could not be recorded'));
+        self::assertInstanceOf(ReconcileMailboxSend::class, $this->bus->messages[0]);
+
+        $this->mailboxConnection->executeStatement('DROP TRIGGER no_sent');
+        $this->clock->modify('+121 seconds');
+        self::assertTrue($this->sender->send($this->ana, $this->mail())->replayed);
+        self::assertSame(['DRAFT-1'], $this->graph->delivered);
+    }
+
     public function testEverySubmitIsPrecededByAHeartbeatAndInsideItsWindow(): void
     {
         // A 401 on the submit: the sender refreshes the token, renews its claim and submits once more.

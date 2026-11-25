@@ -97,6 +97,13 @@ All notable changes to this project are documented here. The format follows
   call still holds the key; a holder that lost the key answers the row's outcome (replay, failure, unknown or in
   progress). Index on (`mailbox_id`, `provider_message_id`). ZAV-F2: a failure before the submit whose
   `released` / `failed` write finds the key taken over answers the new holder's outcome (a replay when it sent).
+  Audit ZBU (2.5.0 fixes): `mailboxes.http_client` that retries by itself (FrameworkBundle `retry_failed`, a
+  `RetryableHttpClient` around the client, also through aliases, decorators on an alias id, argument wrappers and
+  factory services, ZBUv-L1) fails the build, since it would re-POST a send outside the claim (L1); `resume()`
+  enqueues the reconcile of every key a grant failure at the submit left `sending` (ZBUv-L2); after a 401 on the submit the refreshed token is checked
+  against the bound account before the retry (L2); a send whose `sent` row cannot be written answers
+  `MailboxSendInProgress` (`reconciling`) and is reconciled by the draft state instead of surfacing a DBAL exception
+  (I5).
 - `Mailbox\Port\MailboxMessageIndexInterface` (optional, `mailboxes.message_index`; owner answer Q1 of 2026-11-24):
   which messages of a change page the host already stores in that folder; the sweep asks once per page and fetches
   only the others. No default implementation.
@@ -110,6 +117,16 @@ All notable changes to this project are documented here. The format follows
   `GraphMessageNormalizer::listIdOf()`.
 - REQ-SEC-006: `MailKitExactKeyColumns` declares the mailbox key columns (inactive unless `mailboxes.enabled`),
   including `mail_kit_mailbox_send.mailbox_id` / `idempotency_key`.
+
+### Security
+
+- **Shared-mailbox Graph sending (1.8+) with a retrying HTTP client.** When the client given to `graph.http_client`
+  retries failed requests (FrameworkBundle `retry_failed`), a Graph `POST …/send` that Microsoft accepted but answered
+  502 / 503 can be POSTed again by the client, outside MailKit's control, and in a narrow window Exchange may deliver
+  the message twice. Low severity (needs that host configuration plus a provider-side failure). 2.5.0 keeps the build
+  passing but triggers a deprecation (`Since nowo-tech/mail-kit-bundle 2.5: … retries failed requests`); use a client
+  with `retry_failed: false`. **MailKit 3.0 fails the build** for a retrying `graph.http_client`, as 2.5.0 already does
+  for `mailboxes.http_client`.
 
 ### Changed
 

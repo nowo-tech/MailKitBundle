@@ -260,6 +260,18 @@ Off by default (`mailboxes.enabled`). Threat model: design section 17.
   send rows included. Delegated sends are not written to the sent-mail log (Q-MB-14). Logs carry the mailbox id and
   counts only.
 
+### HTTP clients that retry (2.5.0, audits ZBU / ZBU-v)
+
+A send is a non-idempotent POST: an HTTP client that retries by itself (Symfony `RetryableHttpClient`, FrameworkBundle
+`retry_failed`) can re-POST a send the provider accepted but answered 502 / 503, outside MailKit's idempotency claim.
+
+- `mailboxes.http_client` (delegated Outlook and Gmail mailboxes): a retrying client **fails the build**
+  (`MailboxHttpRetryPass`; aliases, decorators, argument wrappers and factory services are followed).
+- `graph.http_client` (1.8+ shared mailboxes, released): a **deprecation** in 2.x (`Since nowo-tech/mail-kit-bundle
+  2.5: …`) and a compiler-log line; **3.0 fails the build**. Give it a client with `retry_failed: false`.
+- Not detectable: a static factory that returns a retrying client, or a custom retry decorator that is not a
+  `RetryableHttpClient`. The rule is documented: the client given to MailKit must not retry.
+
 ## Logging
 
 - `notice` "Mail settings changed." — section, field names, origin, redacted new transport, readiness.

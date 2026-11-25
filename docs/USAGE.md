@@ -1271,6 +1271,37 @@ on the claim token and state; every update changes the token, the state or a row
 the row even within one second. Two workers with the same key: one sends, the other gets `MailboxSendInProgress`
 and later the stored result.
 
+The HTTP client (`mailboxes.http_client`) must not retry on its own: Symfony's `RetryableHttpClient` (`retry_failed`)
+re-POSTs on 429 / 502 / 503 outside the claim, so the build fails when it wraps the mailbox client (audit ZBU-L1).
+After a 401 on the submit, the refreshed token is checked against the mailbox's account before the one retry (audit
+ZBU-L2). If the send went out but its `sent` row cannot be written, `send()` answers `MailboxSendInProgress`
+(`reconciling`): retry with the **same** key, never a new one (audit ZBU-I5). A grant failure **at** the submit
+(`Revoked`, `AccountMismatch`) keeps the key `sending`: `resume()` enqueues a `ReconcileMailboxSend` for every such key
+of the mailbox, which settles it by the draft state once stale (audit ZBUv-L2); calling `send()` again with the **same**
+key after `resume()` does the same, never with a new key. **Show such a send as pending, not failed:** on Graph a
+`send()` that threw `MailboxGrantFailure` at the submit can still be delivered automatically after `resume()` (possibly
+hours later), because the reconcile submits the draft if it is still a draft. Never let the person resend it with a
+new key: that delivers the message twice (audit ZBUv2-I3). The retry guard follows aliases, decorators of every id on
+the alias chain and HTTP client services referenced by argument or factory (a wrapper such as
+`NoPrivateNetworkHttpClient(@http_client)`); a static factory that returns a retrying client, or a retry decorator of
+your own that is not a `RetryableHttpClient`, cannot be detected: do not give MailKit one.
+
+```yaml
+# config/packages/framework.yaml — when your default client retries, give MailKit its own scoped client
+framework:
+    http_client:
+        default_options:
+            retry_failed: true
+        scoped_clients:
+            mail_kit.http_client:
+                base_uri: 'https://graph.microsoft.com'   # any scope; MailKit sends absolute URLs
+                retry_failed: false                      # explicit: an array-form default retry_failed is inherited
+# config/packages/nowo_mail_kit.yaml
+nowo_mail_kit:
+    mailboxes:
+        http_client: mail_kit.http_client
+```
+
 ## Open and click tracking
 
 Since 1.10 (Beacon spec 230 block B). **Off by default** (`nowo_mail_kit.tracking.enabled: false`): nothing is

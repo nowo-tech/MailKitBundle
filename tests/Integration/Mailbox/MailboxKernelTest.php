@@ -197,6 +197,28 @@ final class MailboxKernelTest extends KernelTestCase
         self::assertCount(1, $events);
     }
 
+    public function testARetryingHttpClientFailsTheBuild(): void
+    {
+        // Audit ZBU-L1: framework.http_client retry_failed would re-POST a send outside MailKit's claim.
+        $this->expectException(LogicException::class);
+        $this->expectExceptionMessage('mailboxes.http_client "http_client" retries failed requests');
+        $this->bootKernel(
+            [
+                'mailer'    => ['dsn_provider' => StaticDsnProvider::class, 'sender_provider' => RequestTenantSenderProvider::class],
+                'log'       => ['enabled' => false],
+                'mailboxes' => ['enabled' => true, 'token_provider' => MemoryMailboxPorts::class, 'directory' => MemoryMailboxPorts::class, 'sink' => MemoryMailboxPorts::class, 'graph' => ['enabled' => true]],
+            ],
+            without: ['orm', 'instance_settings'],
+            extra: static function (ContainerConfigurator $container): void {
+                $container->extension('framework', ['http_client' => ['default_options' => ['retry_failed' => true]]]);
+                $services = $container->services();
+                $services->set(MemoryMailboxPorts::class)->public();
+                $services->set(StaticDsnProvider::class)->args(['memory://default']);
+                $services->set(RequestTenantSenderProvider::class)->args([service('request_stack')]);
+            },
+        );
+    }
+
     public function testMailboxesNeedDoctrine(): void
     {
         $this->expectException(LogicException::class);

@@ -398,7 +398,7 @@ nowo_mail_kit:
 | `token_provider`, `directory`, `sink` | — | Your port services; all three are required when enabled (the build fails otherwise). |
 | `exclusion_policy`, `call_observer` | `null` | Optional ports; without them every message is kept and no call is metered. |
 | `message_index` | `null` | Optional `MailboxMessageIndexInterface`: asked once per change page which messages you already store in that folder; those are not fetched again. Without it every changed message is fetched and the sink answers `Duplicate`. |
-| `http_client` | `http_client` | Keep the decorated client so HttpLog counts the calls under the provider you declare for `graph.microsoft.com`. |
+| `http_client` | `http_client` | Keep the decorated client so HttpLog counts the calls under the provider you declare for `graph.microsoft.com`. It **must not retry** by itself: a client with FrameworkBundle `retry_failed` (on the default client or a scoped one) fails the build, because a retried POST of a send could deliver a message twice outside MailKit's idempotency claim. If your default client retries, point this at a scoped client without `retry_failed`. |
 | `connection` | `null` | DBAL connection of the tables (never the host's entity manager; nothing is flushed). `MailboxSenderInterface::send()` refuses to run inside a transaction on it: use a dedicated connection when your handlers run in a `doctrine_transaction` middleware. |
 | `bus` | `messenger.default_bus` | Receives `SyncMailboxFolder`, `FetchMailboxMessage`, `RenewMailboxSubscriptions`, `DeliverSentCopy`, `ReconcileMailboxSend`. Route them to an async transport (the last two use a `DelayStamp`). |
 | `timeout` | `30.0` | Idle deadline of one Graph call, in seconds. |

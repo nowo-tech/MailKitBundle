@@ -1,0 +1,16 @@
+# DEMO ONLY: delegated Outlook mailboxes (2.5.0) for the manual Outlook.com test harness (src/Outlook,
+# app:outlook:* commands, README "Outlook manual test harness"). The ports read the token from a scratch file outside
+# the repository (MAILKIT_OUTLOOK_TOKEN_FILE) and store envelopes in two demo tables. Nothing calls Microsoft until an
+# app:outlook:* command runs.
+nowo_mail_kit:
+    mailboxes:
+        enabled: true
+        token_provider: App\Outlook\ScratchFileTokenProvider
+        directory: App\Outlook\HarnessMailboxDirectory
+        sink: App\Outlook\HarnessMessageSink
+        graph:
+            enabled: true
+            # No public HTTPS URL in the demo: no Graph subscription, every followed folder is synced by the sweep only
+            # (the mode a personal Outlook.com account may fall back to anyway).
+            webhook:
+                notification_url: ~

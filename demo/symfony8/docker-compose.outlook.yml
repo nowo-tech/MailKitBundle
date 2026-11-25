@@ -1,0 +1,11 @@
+# DEMO ONLY: Outlook manual test harness overlay (README "Outlook manual test harness"; make outlook-up).
+# Mounts the scratch directory that holds the delegated token file. It must be OUTSIDE every repository (the Makefile
+# and the harness both refuse a path inside a git work tree). Never put a token in this repository.
+services:
+  php:
+    volumes:
+      - ${MAILKIT_OUTLOOK_SCRATCH_DIR:?Set MAILKIT_OUTLOOK_SCRATCH_DIR to an absolute directory outside any repository}:/outlook-scratch
+    environment:
+      - MAILKIT_OUTLOOK_TOKEN_FILE=/outlook-scratch/${MAILKIT_OUTLOOK_TOKEN_NAME:-token.json}
+      - MAILKIT_OUTLOOK_CLIENT_ID=${MAILKIT_OUTLOOK_CLIENT_ID:-}
+      - MAILKIT_OUTLOOK_TENANT=${MAILKIT_OUTLOOK_TENANT:-consumers}

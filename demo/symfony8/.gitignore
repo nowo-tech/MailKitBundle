@@ -58,3 +58,9 @@
 
 # Package manager stores
 /.pnpm-store
+
+# Outlook manual test harness: the token lives in a scratch directory OUTSIDE the repository; these only catch a
+# misplaced copy.
+/outlook-scratch/
+token.json
+*.token.json

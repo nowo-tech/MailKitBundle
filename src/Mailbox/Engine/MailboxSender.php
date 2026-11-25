@@ -350,8 +350,18 @@ final readonly class MailboxSender implements MailboxSenderInterface
                 throw $stop;
             } catch (SubmitTokenRejected) {
                 if ($attempt === 1) {
-                    // Graph took nothing; the token was dropped. Refresh, then window and heartbeat again.
-                    continue;
+                    // Graph took nothing; the token was dropped. The fresh token must still be the mailbox's account
+                    // (audit ZBU-L2), then window and heartbeat again.
+                    try {
+                        $same = $this->engine->checkAccount($settings, $gateway, $session);
+                    } catch (Throwable $failure) {
+                        return $this->afterFailedSubmit($settings, $gateway, $session, $key, $token, $draft, $failure, $replayed);
+                    }
+                    if ($same) {
+                        continue;
+                    }
+
+                    return $this->afterFailedSubmit($settings, $gateway, $session, $key, $token, $draft, new MailboxGrantFailure(GrantFailureReason::AccountMismatch, 'The refreshed token belongs to another account than the mailbox; nothing was sent.'), $replayed);
                 }
 
                 return $this->afterFailedSubmit($settings, $gateway, $session, $key, $token, $draft, new MailboxGrantFailure(GrantFailureReason::Revoked, 'Microsoft Graph refused a fresh token of the submit (HTTP 401).'), $replayed);
@@ -471,7 +481,16 @@ final readonly class MailboxSender implements MailboxSenderInterface
      */
     private function markSent(MailboxId $mailbox, string $key, string $token, ProviderMessageId $draft, bool $replayed): SentMessage
     {
-        if (!$this->store->updateSend($mailbox, $key, $token, SendState::Sending, SendState::Sent, ['provider_message_id' => $draft->value, 'sent_at' => $this->now()])) {
+        try {
+            $recorded = $this->store->updateSend($mailbox, $key, $token, SendState::Sending, SendState::Sent, ['provider_message_id' => $draft->value, 'sent_at' => $this->now()]);
+        } catch (Throwable $storage) {
+            // Audit ZBU-I5: Graph sent it but the row could not be written. The row stays `sending` and the reconcile
+            // finds the draft sent; the caller must retry with the same key, never with a new one.
+            $this->logger?->warning('Mailbox send: the message was sent but its row could not be recorded; reconciled later.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value, 'error' => $storage::class]);
+
+            return $this->pending($mailbox, $key);
+        }
+        if (!$recorded) {
             // Taken over meanwhile (this call was slower than send.stale_claim_seconds): the holder's outcome is answered.
             return $this->lostOutcome($mailbox, $key);
         }

@@ -234,6 +234,12 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
     /** Parameter: `mailboxes.connection` when the mailboxes are on (2.5.0, audit ZAV-I3), read by the transaction pass. */
     public const MAILBOX_CONNECTION_PARAMETER = 'nowo_mail_kit.mailboxes.connection';
 
+    /** Parameter: `mailboxes.http_client` when the mailboxes are on (audit ZBU-L1), read by the retry guard pass. */
+    public const MAILBOX_HTTP_CLIENT_PARAMETER = 'nowo_mail_kit.mailboxes.http_client';
+
+    /** Parameter: `graph.http_client` when the shared-mailbox Graph sender is on (audit ZBU-L1), read by the retry guard pass. */
+    public const GRAPH_HTTP_CLIENT_PARAMETER = 'nowo_mail_kit.graph.http_client';
+
     /** Parameter: `mailboxes.graph.outbound_url_guard` when the Graph provider is on (2.5.0), read by the pass. */
     public const MAILBOX_URL_GUARD_PARAMETER = 'nowo_mail_kit.mailboxes.graph.outbound_url_guard';
 
@@ -466,6 +472,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             return;
         }
         $logger = new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE);
+        $container->setParameter(self::GRAPH_HTTP_CLIENT_PARAMETER, $graph['http_client']);
 
         $provider = $graph['mailbox_provider'];
         if (is_string($provider) && $provider !== '') {
@@ -658,6 +665,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $graph  = $mailboxes['graph'];
 
         $container->setParameter(self::MAILBOX_CONNECTION_PARAMETER, $mailboxes['connection']);
+        $container->setParameter(self::MAILBOX_HTTP_CLIENT_PARAMETER, $mailboxes['http_client']);
         $container->setDefinition(MailboxStore::class, new Definition(MailboxStore::class, [new Reference('doctrine'), $mailboxes['connection'], $doctrine['table_prefix'], $clock, $logger]));
         if ($hasOrm) {
             $container->setDefinition(MailboxSchemaListener::class, (new Definition(MailboxSchemaListener::class, [new Reference(MailboxStore::class), new Reference('doctrine'), $doctrine['entity_manager']]))

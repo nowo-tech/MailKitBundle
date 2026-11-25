@@ -2,9 +2,9 @@
 
 **Baseline spec**: [`spec.md`](spec.md)  
 **Package**: `nowo-tech/mail-kit-bundle`  
-**Last audited**: 2026-11-24
+**Last audited**: 2026-11-25
 
-Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **282** (2.5.0).
+Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **283** (2.5.0, audit ZBU retry guard).
 
 ## Bundle and dependency injection
 
@@ -20,6 +20,7 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 | `src/DependencyInjection/Compiler/TwigPathsPass.php` | Bundle and dependency injection | FR-TWIG-001 |
 | `src/DependencyInjection/Compiler/MailboxUrlGuardPass.php` | Bundle and dependency injection | FR-CFG-003, FR-MBX-004 |
 | `src/DependencyInjection/Compiler/MailboxSendTransactionPass.php` | Bundle and dependency injection | FR-CFG-003, FR-MBX-009 |
+| `src/DependencyInjection/Compiler/MailboxHttpRetryPass.php` | Bundle and dependency injection | FR-CFG-003, FR-MBX-009 |
 
 ## Settings
 
@@ -417,7 +418,7 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 
 | Category | Files | Mapped |
 | --- | ---: | ---: |
-| Bundle and dependency injection | 10 | 10 |
+| Bundle and dependency injection | 11 | 11 |
 | Settings | 6 | 6 |
 | DSN and sender | 18 | 18 |
 | Delivery | 5 | 5 |
@@ -442,4 +443,4 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 | Delegated mailboxes: Messenger and commands | 8 | 8 |
 | Delegated mailboxes: store | 2 | 2 |
 | Delegated mailboxes: events and exceptions | 8 | 8 |
-| **Total** | **282** | **282** |
+| **Total** | **283** | **283** |

@@ -248,4 +248,4 @@ sink. Details: [spec 005](../005-delegated-mailboxes/spec.md).
 ## Success criteria
 
 - 100% statement and element coverage of `src/` (CI gate), PHPStan max with empty `ignoreErrors`, Igor clean.
-- Every file of `src/` listed in [`code-inventory.md`](code-inventory.md): **282 / 282** mapped (2.5.0, audited 2026-11-24).
+- Every file of `src/` listed in [`code-inventory.md`](code-inventory.md): **283 / 283** mapped (2.5.0, audited 2026-11-25).

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\MailKitBundle\Tests\Unit\DependencyInjection;
 
 use LogicException;
+use Nowo\MailKitBundle\DependencyInjection\Compiler\MailboxHttpRetryPass;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\MailboxSendTransactionPass;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\MailboxUrlGuardPass;
 use Nowo\MailKitBundle\DependencyInjection\Configuration;
@@ -19,6 +20,9 @@ use Symfony\Component\Config\Definition\Processor;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Definition;
 use Symfony\Component\DependencyInjection\Reference;
+use Symfony\Component\HttpClient\MockHttpClient;
+use Symfony\Component\HttpClient\RetryableHttpClient;
+use Symfony\Component\HttpClient\TraceableHttpClient;
 
 use function implode;
 
@@ -147,6 +151,45 @@ final class MailboxConfigurationTest extends TestCase
         $dedicated->setParameter('messenger.bus.default.middleware', [['id' => 'doctrine_transaction']]);
         (new MailboxSendTransactionPass())->process($dedicated);
         self::assertSame([], $dedicated->getCompiler()->getLog());
+    }
+
+    public function testTheRetryPassRefusesARetryingMailboxClient(): void
+    {
+        // Nothing configured: nothing checked.
+        $container = new ContainerBuilder();
+        (new MailboxHttpRetryPass())->process($container);
+        self::assertSame([], $container->getCompiler()->getLog());
+
+        // A plain client (behind an alias) passes; a decorator that is not a retrying client is ignored.
+        $container = new ContainerBuilder();
+        $container->setParameter(NowoMailKitExtension::MAILBOX_HTTP_CLIENT_PARAMETER, 'app.mail_client');
+        $container->setAlias('app.mail_client', 'app.plain_client');
+        $container->setDefinition('app.plain_client', new Definition(MockHttpClient::class));
+        $container->setDefinition('app.plain_client.logged', (new Definition(TraceableHttpClient::class))->setDecoratedService('app.plain_client'));
+        (new MailboxHttpRetryPass())->process($container);
+        self::assertSame([], $container->getCompiler()->getLog());
+
+        // FrameworkBundle's retry_failed decorator (class given as a parameter) on the mailbox client fails the build.
+        $container->setParameter('app.retry_class', RetryableHttpClient::class);
+        $container->setDefinition('app.plain_client.retryable', (new Definition('%app.retry_class%'))->setDecoratedService('app.plain_client'));
+
+        try {
+            (new MailboxHttpRetryPass())->process($container);
+            self::fail('A retrying client must be refused.');
+        } catch (LogicException $refused) {
+            self::assertStringContainsString('mailboxes.http_client "app.mail_client" retries failed requests', $refused->getMessage());
+        }
+
+        // A client that is itself retrying, and the 1.8 shared-mailbox Graph client: a warning only.
+        $container = new ContainerBuilder();
+        $container->setParameter(NowoMailKitExtension::GRAPH_HTTP_CLIENT_PARAMETER, 'app.retrying');
+        $container->setDefinition('app.retrying', new Definition(RetryableHttpClient::class));
+        (new MailboxHttpRetryPass())->process($container);
+        self::assertStringContainsString('graph.http_client "app.retrying" retries failed requests', implode("\n", $container->getCompiler()->getLog()));
+
+        $container->setParameter(NowoMailKitExtension::MAILBOX_HTTP_CLIENT_PARAMETER, 'app.retrying');
+        $this->expectException(LogicException::class);
+        (new MailboxHttpRetryPass())->process($container);
     }
 
     private function container(string $mode, bool $guard): ContainerBuilder

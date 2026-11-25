@@ -97,6 +97,12 @@ All notable changes to this project are documented here. The format follows
   call still holds the key; a holder that lost the key answers the row's outcome (replay, failure, unknown or in
   progress). Index on (`mailbox_id`, `provider_message_id`). ZAV-F2: a failure before the submit whose
   `released` / `failed` write finds the key taken over answers the new holder's outcome (a replay when it sent).
+  Audit ZBU (2.5.0 fixes): `mailboxes.http_client` that retries by itself (FrameworkBundle `retry_failed`, a
+  `RetryableHttpClient` around the client) fails the build, since it would re-POST a send outside the claim (L1; the
+  1.8 `graph.http_client` gets a compiler-log warning only); after a 401 on the submit the refreshed token is checked
+  against the bound account before the retry (L2); a send whose `sent` row cannot be written answers
+  `MailboxSendInProgress` (`reconciling`) and is reconciled by the draft state instead of surfacing a DBAL exception
+  (I5).
 - `Mailbox\Port\MailboxMessageIndexInterface` (optional, `mailboxes.message_index`; owner answer Q1 of 2026-11-24):
   which messages of a change page the host already stores in that folder; the sweep asks once per page and fetches
   only the others. No default implementation.

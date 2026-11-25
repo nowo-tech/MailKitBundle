@@ -1,3 +1,12 @@
+parameters:
+  # DEMO ONLY (Outlook manual test harness, src/Outlook): the scratch token file must not be inside these directories
+  # (the demo and the bundle checkout mounted in the container); any git work tree is refused as well.
+  app.outlook.forbidden_roots:
+    - '%kernel.project_dir%'
+    - '/var/mail-kit-bundle'
+  # Personal Outlook.com accounts sign in through the "consumers" authority; override with MAILKIT_OUTLOOK_TENANT.
+  app.outlook.default_tenant: consumers
+
 services:
   _defaults:
     autowire: true

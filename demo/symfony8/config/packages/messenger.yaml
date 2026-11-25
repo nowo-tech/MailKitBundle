@@ -1,0 +1,10 @@
+# Needed by MailKit's delegated mailboxes (nowo_mail_kit.mailboxes, Outlook manual test harness).
+# No transport and no routing: every message (SyncMailboxFolder, FetchMailboxMessage, DeliverSentCopy,
+# ReconcileMailboxSend, RenewMailboxSubscriptions) is handled synchronously inside the command that dispatched it,
+# so the demo needs no Messenger worker. DelayStamps are ignored on a synchronous bus. An application routes these
+# messages to an async transport instead (docs/CONFIGURATION.md#mailboxes).
+framework:
+    messenger:
+        default_bus: messenger.bus.default
+        buses:
+            messenger.bus.default: ~

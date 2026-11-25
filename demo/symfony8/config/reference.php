@@ -427,7 +427,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         resources?: Param|string|array<string, scalar|Param|null>,
  *     },
  *     messenger?: bool|array{ // Messenger configuration
- *         enabled?: bool|Param, // Default: false
+ *         enabled?: bool|Param, // Default: true
  *         routing?: array<string, Param|string|list<scalar|Param|null>>,
  *         serializer?: array{
  *             default_serializer?: scalar|Param|null, // Service id to use as the default serializer for the transports. // Default: "messenger.transport.native_php_serializer"
@@ -655,7 +655,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         uuid47_secret?: scalar|Param|null, // A high-entropy secret used by the "uuid47_transformer" service. Defaults to "kernel.secret". // Default: null
  *     },
  *     html_sanitizer?: bool|array{ // HtmlSanitizer configuration
- *         enabled?: bool|Param, // Default: false
+ *         enabled?: bool|Param, // Default: true
  *         sanitizers?: array<string, array{ // Default: []
  *             default_action?: "drop"|"block"|"allow"|Param, // Defines how the sanitizer must behave by default.
  *             allow_safe_elements?: bool|Param, // Allows "safe" elements and attributes. // Default: false
@@ -1137,11 +1137,13 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *             class_metadata_factory_name?: scalar|Param|null, // Default: "Doctrine\\ORM\\Mapping\\ClassMetadataFactory"
  *             default_repository_class?: scalar|Param|null, // Default: "Doctrine\\ORM\\EntityRepository"
  *             auto_mapping?: scalar|Param|null, // Default: false
+ *             auto_discover_entities?: bool|Param|null, // Registers all entity classes discovered by the container scan, removing the need for explicit "mappings". When not set, enabled if neither "mappings" nor "auto_mapping" is configured and Symfony 8.2 and doctrine/orm 3.6 are available. // Default: null
  *             naming_strategy?: scalar|Param|null, // Default: "doctrine.orm.naming_strategy.default"
  *             quote_strategy?: scalar|Param|null, // Default: "doctrine.orm.quote_strategy.default"
  *             typed_field_mapper?: scalar|Param|null, // Default: "doctrine.orm.typed_field_mapper.default"
  *             entity_listener_resolver?: scalar|Param|null, // Default: null
  *             fetch_mode_subselect_batch_size?: scalar|Param|null,
+ *             use_schema_editor_api?: bool|Param|null, // Set to "true" or "false" to explicitly opt in or out of the schema editor API for schema generation. Requires doctrine/dbal 4.5 or higher and doctrine/orm 3.8 or higher. // Default: null
  *             repository_factory?: scalar|Param|null, // Default: "doctrine.orm.container_repository_factory"
  *             schema_ignore_classes?: list<scalar|Param|null>,
  *             validate_xml_mapping?: bool|Param, // Set to "true" to opt-in to the new mapping driver mode that was added in Doctrine ORM 2.14 and will be mandatory in ORM 3.0. See https://github.com/doctrine/orm/pull/6728. // Default: false
@@ -1179,7 +1181,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *                 mapping?: scalar|Param|null, // Default: true
  *                 type?: scalar|Param|null,
  *                 dir?: scalar|Param|null,
- *                 alias?: scalar|Param|null,
+ *                 alias?: scalar|Param|null, // Deprecated: The "doctrine.orm.entity_managers..mappings..alias.alias" option is deprecated and will be removed in DoctrineBundle 4.0, as Doctrine ORM no longer supports entity namespace aliases.
  *                 prefix?: scalar|Param|null,
  *                 is_bundle?: bool|Param,
  *             }>,
@@ -1281,7 +1283,17 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *     },
  * }
  * @psalm-type NowoDoctrineEncryptConfig = array{
+ *     encrypted_fields?: array<string, array{ // Default: []
+ *         properties?: array<string, scalar|Param|null>,
+ *         embedded?: Param|string|list<scalar|Param|null>,
+ *     }>,
+ *     property_access?: "auto"|"reflection"|Param, // How the listener reads and writes encrypted properties: "auto" (default) = getter/one-argument setter when there is one, reflection otherwise; "reflection" = always reflection, so domain setters never receive ciphertext during a flush. // Default: "auto"
+ *     dbal_types?: bool|Param, // Register the encrypted DBAL types (encrypted_string, encrypted_text, encrypted_json, plus "<type>.<profile>" per profile) in DoctrineBundle. Encryption then happens in the DBAL conversion, without the listener or setters, and works with any mapping driver. Same ciphertext format and keys as #[Encrypted]. // Default: false
  *     connections?: Param|string|list<scalar|Param|null>,
+ *     closed_manager_recovery?: bool|array{ // Reset, at the next main request, an entity manager left closed by a failed flush (its identity map still holds re-encrypted entities; needed when the kernel is not reset between requests, e.g. FrankenPHP worker mode). Only the managers the bundle encrypts for are reset, never another manager of the host.
+ *         enabled?: bool|Param, // Default: true
+ *         entity_managers?: Param|string|list<scalar|Param|null>,
+ *     },
  *     default_profile?: scalar|Param|null, // Profile name to use when #[Encrypted] has no alias or uses "default". // Default: "default"
  *     on_decrypt_failure?: "keep"|"null"|"throw"|Param, // What an #[Encrypted] property gets when its stored value cannot be decrypted (wrong or rotated key, corrupted ciphertext): "keep" = the raw ciphertext (2.x default, callers may take it for the secret), "null" = null (recommended; the stored ciphertext is written back unchanged on flush), "throw" = DecryptionFailedException (recommended). A warning is logged for "keep" and "null". // Default: "keep"
  *     generate_missing_key?: bool|Param|null, // Whether the Halite / Defuse encryptors may create a missing key file on first use. null (default) = only when kernel.debug is true; outside debug a missing key file is an error (a wrong path or a lost volume would otherwise encrypt new data with a throwaway key). Create keys explicitly with doctrine:encrypt:generate-secret-key. // Default: null
@@ -1306,6 +1318,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *     icon_set?: "bootstrap-icons"|"tabler-icons"|"ux_icon"|"svg_inline"|"none"|Param, // Icon rendering: bootstrap-icons|tabler-icons|ux_icon|svg_inline|none. // Default: "bootstrap-icons"
  *     row_actions_display?: "icon"|"text"|"icon_text"|Param, // Table/list row actions: icon (glyph only) | text (label only) | icon_text (both). // Default: "icon"
  *     row_actions_confirm?: "inline"|"native"|"dialog"|Param, // confirm_message of 1.x row_actions POST hashes (2.22, REQ-UI-003): inline = onsubmit="return confirm(…)" (default, unchanged markup); native | dialog = no inline handler, the confirm-submit Stimulus peer asks (window.confirm or the kit <dialog>). native / dialog need the confirm-submit peer registered. // Default: "inline"
+ *     table_confirm?: "per_row"|"shared"|Param, // Row actions with a Confirm in the `table` partial (2.68): per_row = one confirm <dialog> (title, message, POST form + CSRF) per row (default, deprecated: the default becomes shared in 3.0); shared = ONE dialog per table filled when it opens, each row keeps only its toggle and a hidden POST form. The `table` partial option confirm_shared wins. // Default: "per_row"
  *     action_icons?: array<string, scalar|Param|null>,
  *     action_variants?: array<string, scalar|Param|null>,
  *     panel_path_rewrites?: array<string, scalar|Param|null>,
@@ -1398,6 +1411,9 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *     auth_panel?: array{ // 2.44: the auth scaffold (page/auth.html.twig) panel (Twig global nowo_ui_kit_auth_panel).
  *         brand?: "auto"|"none"|Param, // auto (default, the 2.43 markup): the panel brand region prints the appearance logo lockup, else AuthPage::brand as text; none: the panel prints no brand region (a host guest layout that prints its own brand). A render variable nowo_ui_auth_brand (auto | none) wins over it. // Default: "auto"
  *     },
+ *     dialogs?: array{ // 2.70: the runtime that drives the on-demand dialogs (the remote_form_dialog shell, confirm_dialog with dialog_src, the shared confirm dialog of confirm_shared / table_confirm: shared).
+ *         runtime?: "iife"|"stimulus"|Param, // iife (default, unchanged markup): js/nowo-ui-dialog.js and js/nowo-ui-confirm.js drive them. stimulus: the shells also carry the Stimulus peers (remote-form-dialog in delegated mode, confirm-shared), for pages that load only the peers; the openers keep their markup, and with both runtimes loaded the peers win (the IIFE runtimes leave a dialog claimed by a peer alone). The partial option `runtime` (or `stimulus: true` on confirm_dialog) wins. // Default: "iife"
+ *     },
  *     remote_dialog?: array{ // 2.28 remote form dialog (X-Nowo-Dialog requests).
  *         convert_redirects?: bool|Param, // Turn a RedirectResponse answered to a dialog request (X-Nowo-Dialog: 1, main request) into 204 + X-Nowo-Redirect when its Location is a same-origin path, so redirectToRoute() controllers work in the dialog without code changes. // Default: false
  *         step_routes?: list<scalar|Param|null>,
@@ -1413,11 +1429,20 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         tokens?: array<string, mixed>,
  *         tokens_dark?: array<string, mixed>,
  *         confirm_message_in_header?: bool|Param, // Confirm dialogs and the full-page confirm render the message inside the header, under the title (hosts whose dialog header is title + message). View\Confirm::messageInHeader wins when set. // Default: false
+ *         form_actions_order?: "cancel_first"|"primary_first"|Param, // 2.66: order of the form actions row (form scaffold, `form_actions` partial). primary_first (default; 2.66.1 restores the 2.65 order) = the primary first, secondary actions, Cancel last; cancel_first (opt-in) = Cancel, secondary actions, then the primary last, on the right. Dialog footers, dialog form fragments (Cancel closes the dialog), the full-page confirm and the wizard always keep Cancel / Back first. The DOM order is the visual and focus order (never reversed with CSS). // Default: "primary_first"
  *         popover_menus?: bool|Param, // 2.4: menu / kebab / row-action menus render their panel as a native [popover] (browser top layer: never clipped by table scrollers or cards; nowo-ui-popover.js places it). The partial option `popover` wins. // Default: false
+ *         context_menus?: bool|Param, // 2.54: kebab / row-action menus also open as the context menu of the row or card around them (right-click, the ContextMenu key, Shift+F10, long press on touch), with the same items. Loads the opt-in context-menu runtime through the scripts partial. The partial option `context_menu` wins; data-nowo-ui-context-menu="off" opts a row out. // Default: false
  *         form_errors_after_widget?: bool|Param, // 2.10: the UiKit form theme (form/nowo_ui_layout.html.twig) prints a field's errors after its widget (and before the help), instead of Symfony's order (label, errors, widget, help). // Default: false
  *         menu_semantics?: null|"menu"|"disclosure"|Param, // 2.28: ARIA of popover menus with items. null (default) = as 2.27; menu = APG menu button (role="menu" / menuitem, arrow keys in nowo-ui-popover.js); disclosure = no aria-haspopup. The menu partial option `menu_semantics` wins. // Default: null
  *         dialog?: array{ // 2.31: kit dialog options (docs/THEMING.md#dialog-sizes-229).
  *             height?: "content"|"size"|Param, // 2.31: content (default, dialog rule v2) = a dialog is as tall as its content, capped at min(the size's height token, 100dvh - 2rem), only the body scrolls; size = every dialog with a field, list, table or fold has the size's height (2.29 / 2.30), printed as --nowo-ui-dialog-fill: 1 by nowo_ui_theme_css(). // Default: "content"
+ *         },
+ *         focus_mode?: array{ // 2.55: shell focus mode — [data-nowo-ui-focus-mode] toggles hide the shell regions (level 1) and optionally enter the browser fullscreen (level 2); js/nowo-ui-focus-mode.js. See docs/USAGE.md#shell-focus-mode-255.
+ *             enabled?: bool|Param, // false (default): no shell attributes, no focus bar, the focus_mode_toggle partial renders nothing and the scripts partial does not load the runtime. // Default: false
+ *             regions?: list<scalar|Param|null>,
+ *             keep?: list<scalar|Param|null>,
+ *             shortcut?: scalar|Param|null, // Key that toggles level 1 on pages with a toggle (never while typing, with a modifier pressed or with a dialog / menu open); e.g. F or Alt+Shift+F. null or false: no shortcut. // Default: "F"
+ *             fullscreen?: bool|Param, // Offer level 2 (the browser fullscreen on the shell, from the focus bar or a fullscreen toggle). Unsupported or refused by the browser: level 1 stays. // Default: true
  *         },
  *         bundles?: array<string, array{ // Default: []
  *             framework_defaults?: bool|Param, // Override of theme.framework_defaults for this bundle (unset = inherit).
@@ -1455,6 +1480,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *                     testids?: bool|Param, // data-testid filters-collapse-toggle / filters-collapse-summary. // Default: false
  *                     morph?: bool|Param, // Add the <morph-icon> of assets/morphicons to the toggle. // Default: false
  *                 },
+ *                 sheet?: bool|Param, // 2.65: below 48rem the filters card folds behind a "Filters (n)" button that opens it in a native modal <dialog> bottom sheet (the filter_bar sheet: macros/filter_sheet.html.twig, runtime filter-sheet, appended to the scripts partial by itself). false = the 2.64 output. // Default: false
  *             },
  *         }>,
  *     },
@@ -1641,17 +1667,31 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  * @psalm-type NowoInstanceSettingsConfig = array{ // Nowo Instance Settings — runtime settings store split into sections, encrypted secrets, admin UI, import / export.
  *     doctrine?: array{
  *         table_prefix?: scalar|Param|null, // Prefix of the bundle table and index names (REQ-ORM-002): "app_" gives app_instance_setting_value. // Default: ""
- *         entity_manager?: scalar|Param|null, // Doctrine ORM entity manager name (null = default). // Default: null
+ *         entity_manager?: scalar|Param|null, // Source manager of the bundle's private entity manager (null = the manager that maps the entity; a literal name maps the entities on that manager only, 1.11). // Default: null
  *     },
  *     web_ui?: array{ // Admin UI (REQ-UI-001 / REQ-UI-003): one UiKit settings page per section + the import / export page.
  *         enabled?: bool|Param, // false = no admin UI (no routes, no controller); the PHP / Twig / CLI API stays available. // Default: true
  *         path_prefix?: scalar|Param|null, // URL prefix of the admin routes; protect it with security.access_control in the host. // Default: "/admin/settings"
  *         layout_template?: scalar|Param|null, // Layout the pages extend. Null (default) = nowo_ui_kit.layouts.admin. // Default: null
+ *         hidden_secrets?: "drop"|"keep_typed"|Param, // 1.9: a secret typed into a provider-dependent row hidden for the submitted provider: "drop" (default: ignored, only an explicit clear deletes) or "keep_typed" (saved whichever provider is selected; never required, its own constraints run). A section implementing SettingsSectionHiddenSecretsInterface overrides it. // Default: "drop"
+ *         hidden_secrets_notice?: bool|Param, // 1.9: while hidden secrets are dropped, a section with provider-dependent secrets shows a notice above its form (translation key notice.hidden_secrets_dropped, NowoInstanceSettingsBundle domain). // Default: false
+ *         unlayered_styles?: bool|Param, // 1.13: the bundle stylesheet (colour input, image cards) sits in UiKit's cascade layer nowo-ui (default false: nowo-instance-settings.css, so host utilities and unlayered host CSS win). true links nowo-instance-settings.unlayered.css instead, for hosts that link UiKit's nowo-ui.unlayered.css. // Default: false
+ *         section_layout?: "stacked"|"tabs"|Param, // 1.14: how a section page lays out its field groups (SettingsSectionGroupsInterface, else the fields' form groups): "stacked" (default: one column, unchanged markup) or "tabs" (one UiKit subtab per group, ?settings_group=<code> in the URL; one form: Save saves every group). A section with fewer than two groups always renders stacked. SectionEmbedOptions::withSectionLayout() overrides it per embed. // Default: "stacked"
+ *         section_group_parameter?: scalar|Param|null, // 1.14 (audit MP-L1): query parameter of the open subtab with section_layout: tabs (default "settings_group", namespaced so a host page keeps its own ?group=). Letters, digits and underscores; SectionEmbedOptions::withGroupParameter() overrides it per embed. // Default: "settings_group"
  *         templates?: array<string, scalar|Param|null>,
+ *         section_icons?: array<string, scalar|Param|null>,
+ *         navigation_hidden?: list<scalar|Param|null>,
+ *         reveal_on_toggle?: bool|Param, // 1.16: on a revealable secret row, the PasswordToggle eye of the "new value" input reveals the STORED secret (the same POST endpoint, CSRF token, rate limiter, access checks and audit as the Reveal button) in a read-only element of the row, never in the input; a second click hides it. Default false: the eye only unmasks what was typed. // Default: false
+ *         reveal_toggle_only?: bool|Param, // 1.16: with reveal_on_toggle, hide the separate Reveal / Copy / Hide buttons on rows that have the eye (rows without it keep them). Default false. // Default: false
+ *         reveal_in_input?: bool|Param, // 1.17: with reveal_on_toggle, every secret row holding a stored secret is LOCKED for every editor: its input is read-only, the eye shows the stored value in that same input (type=text, autofill / spellcheck off) and hides it again, and a new value can only be typed after ticking "Replace the stored value". The server then refuses (422) a value submitted for that row without the Replace box, visible or hidden by visible_when. Ignored without reveal_on_toggle. Default false: the rows behave as in 1.16. // Default: false
  *     },
  *     security?: array{ // REQ-UI-002 private access of the admin UI.
  *         access_roles?: list<scalar|Param|null>,
  *         area_roles?: array<string, list<scalar|Param|null>>,
+ *         reveal_roles?: list<scalar|Param|null>,
+ *         reveal_rate_limiter?: scalar|Param|null, // 1.15: service id of a Symfony RateLimiterFactory (framework.rate_limiter.<name> gives limiter.<name>) consuming one token per reveal, keyed by the hashed actor; null = no limit. // Default: null
+ *         test_roles?: mixed, // 1.18: roles that may run the Test button of a section (any of them), asked on top of the section's own area. Null (default) = whoever may open the section may test it; an empty list refuses every test. With access_checker set, the custom checker decides the "_test" area (asked only when this is not null). // Default: null
+ *         test_rate_limiter?: scalar|Param|null, // 1.18: service id of a Symfony RateLimiterFactory consuming one token per section test, keyed by the hashed actor; null = the built-in limit (10 tests per actor per 10 minutes, kept in the settings store). // Default: null
  *         access_checker?: scalar|Param|null, // Service id implementing InstanceSettingsAccessCheckerInterface; null = role-based default. // Default: null
  *         allow_unauthenticated?: bool|Param, // DEV / DEMO only (refused without kernel.debug): open the UI without login. // Default: false
  *     },
@@ -1660,6 +1700,92 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         schema?: scalar|Param|null, // Envelope "schema" value; imports with another schema are refused. // Default: "nowo-instance-settings"
  *         max_upload_bytes?: int|Param, // Size cap of imported files (upload and CLI), in bytes. // Default: 1048576
  *         sealed_secrets?: bool|Param, // Allow exporting / importing secrets sealed with the instance DoctrineEncrypt key. false = secrets never leave the instance. // Default: true
+ *         max_file_bytes?: int|Param, // Image fields (1.4): cap of the decoded bytes of all the files of one envelope. max_upload_bytes stays the outer bound of the JSON file (raise it for branded instances). // Default: 8388608
+ *     },
+ *     files?: array{ // Image setting fields (1.4): opt-in file table, file route and orphan retention.
+ *         enabled?: bool|Param, // Maps the file table (instance_setting_file) and registers the file store, route and purge command. Off by default: no schema change. A section declaring an image field without it fails at boot. Literal boolean only. // Default: false
+ *         path_prefix?: scalar|Param|null, // URL prefix of the image file route; must be outside web_ui.path_prefix (public images must not sit under the admin firewall). Add an access_control PUBLIC_ACCESS line for it. // Default: "/_settings-file"
+ *         orphan_retention?: int|Param, // Days a replaced or removed image stays servable (e-mails already sent keep it) before nowo:instance-settings:purge-files deletes it. // Default: 30
+ *         store?: "doctrine"|"filesystem"|Param, // Where the images live (1.7): "doctrine" (default, the instance_setting_file table) or "filesystem" (one stable file per field in files.directory, no database blob; ready to commit next to the seed file, mounted as a persistent volume in production). // Default: "doctrine"
+ *         directory?: scalar|Param|null, // Directory of the filesystem store (files.store: filesystem): <directory>/<section>/<field>.<png|jpg|webp>, variants in <section>/.variants/. Must not be under the public web root. Accepts %env(...)%: the path rules are then applied at run time. // Default: "%kernel.project_dir%/config/instance-files"
+ *         crop?: bool|array{ // Crop step of every image field (1.8, UiKit 2.43 image crop): false (default, off), true, or {shape, quality, labels}. The aspect, sizes, format and max_bytes are derived per field from its rules; SettingField::withCrop() / withoutCrop() win. The server still checks and re-encodes every upload. The section page loads the UiKit image-crop script itself; add img-src blob: to a strict CSP.
+ *             enabled?: bool|Param, // Default: false
+ *             shape?: null|"square"|"circle"|Param, // square (default) or circle (a visual mask: the stored image stays square). // Default: null
+ *             quality?: float|Param, // WebP / JPEG encoder quality, 0 to 1 (UiKit default 0.92). // Default: null
+ *             labels?: list<scalar|Param|null>,
+ *         },
+ *     },
+ *     seed?: array{ // Host seed file (1.7): initial values and images loaded fill-only by nowo:instance-settings:seed.
+ *         file?: scalar|Param|null, // Default seed file (.yaml, .yml or .json), e.g. "%kernel.project_dir%/config/instance-seed.yaml". Null: the command needs the file argument. // Default: null
+ *         base_dir?: scalar|Param|null, // Every seed file and seed image path must resolve (symlinks followed) inside this directory. Accepts %env(...)%: the path rules are then applied at run time. // Default: "%kernel.project_dir%"
+ *     },
+ *     brand?: array{ // Brand bridge (1.5): the "brand" and "appearance" sections, nowo-tech/brand-contracts BrandProviderInterface and, when the host set no nowo_ui_kit.appearance.provider, the UiKit appearance provider. Off by default. Implies files.enabled.
+ *         enabled?: bool|Param, // Registers the brand and appearance sections and the bridge. Needs nowo-tech/brand-contracts. Literal boolean only. // Default: false
+ *         public_dir?: scalar|Param|null, // Directory the default asset paths are relative to (served by the web server as plain static files). // Default: "%kernel.project_dir%/public"
+ *         fallback_provider?: scalar|Param|null, // Service id implementing Brand\BrandFallbackProviderInterface: values the two sections seed from (nowo:instance-settings:seed-from-fallbacks). Null = none. // Default: null
+ *         preset_picker?: "select"|"cards"|Param, // 1.6 (IS-2): how the appearance section shows preset / preset_dark: "select" (a select of preset ids, the default) or "cards" (theme cards: a radio group with a colour swatch and UiKit's preset names). // Default: "select"
+ *         defaults?: array{ // Values while nothing is stored. Asset paths are relative to public_dir (committed, trusted files; SVG and ICO allowed).
+ *             name?: scalar|Param|null, // Brand name while none is stored (required with enabled: true; at most 80 characters). // Default: null
+ *             short_name?: scalar|Param|null, // Default: null
+ *             eyebrow?: Param|string|array{ // A literal string, or {key, domain} for a translation key (follows the viewer locale while nothing is stored).
+ *                 text?: scalar|Param|null, // Default: null
+ *                 key?: scalar|Param|null, // Default: null
+ *                 domain?: scalar|Param|null, // Default: "messages"
+ *             },
+ *             wordmark?: scalar|Param|null, // Default: null
+ *             logo_light?: scalar|Param|null, // Default: null
+ *             logo_dark?: scalar|Param|null, // Default: null
+ *             mark?: scalar|Param|null, // Default: null
+ *             app_icon?: scalar|Param|null, // Default: null
+ *             favicon?: scalar|Param|null, // Default: null
+ *         },
+ *         extra_images?: array<string, array{ // Default: []
+ *             label?: scalar|Param|null, // Default: null
+ *             help?: scalar|Param|null, // Default: null
+ *             max_width?: int|Param, // Default: 4096
+ *             max_height?: int|Param, // Default: 4096
+ *             max_bytes?: int|Param, // Default: 1048576
+ *             square?: bool|Param, // Default: false
+ *             default?: scalar|Param|null, // Default: null
+ *         }>,
+ *         error_illustrations?: array{ // 1.13: UiKit error page illustrations from the uploaded brand extra images (service nowo_instance_settings.brand.error_illustration_provider, set it as nowo_ui_kit.error_pages.illustration_provider). For status N: the uploaded extra image error_<N>, else the uploaded base extra image, else UiKit's error_pages.illustrations map. Configured defaults never count. Needs files.store: filesystem.
+ *             base?: scalar|Param|null, // Id of the extra image used for every status without its own uploaded error_<N> image (e.g. mascot). Null = none. // Default: null
+ *             per_code?: bool|Param, // Use the uploaded extra images error_<N> (N = 400 to 599) for their status. // Default: true
+ *         },
+ *     },
+ *     expiring_secrets?: array{ // Expiring secrets (1.17): an expiry date next to the secret fields declaring expires: true, threshold events and a page warning.
+ *         enabled?: bool|Param, // Maps the expiry table (instance_setting_secret_expiry) and registers the store, the read port and nowo:instance-settings:check-expiring-secrets. Off by default: no schema change. A section declaring expires: true without it fails at boot. Literal boolean only. // Default: false
+ *         thresholds?: list<int|Param>,
+ *         warning?: bool|Param, // The settings page warns on the section and next to an expiring secret within warning_days of its date, or expired. // Default: true
+ *         warning_days?: int|Param, // Days before the date from which the page warns (0 = only on the day and once expired). // Default: 30
+ *         timezone?: scalar|Param|null, // Zone of "today" for the thresholds and the warning (e.g. "Europe/Madrid"). Null: the PHP default zone. // Default: null
+ *         notify?: array{ // Default expiry notifier (1.21): a mail and / or a NotifyKit bell notification to the people holding notify.roles at notify.days before a stored secret expires, once per secret, threshold and recipient. Off by default. Needs expiring_secrets.enabled.
+ *             enabled?: bool|Param, // Registers the notifier and maps its sent-marker table (instance_setting_secret_expiry_notice). Off by default: no schema change. Literal boolean only. // Default: false
+ *             days?: list<int|Param>,
+ *             roles?: list<scalar|Param|null>,
+ *             recipient_provider?: scalar|Param|null, // Service id implementing Expiry\Notify\ExpiryRecipientProviderInterface: the active users holding any of the roles (the bundle has no user model). Required when enabled. // Default: null
+ *             mail_template?: scalar|Param|null, // Twig template of the reminder mail without the suffix: <mail_template>.html.twig and <mail_template>.txt.twig. // Default: "@NowoInstanceSettingsBundle/expiry/notice"
+ *             mail_from?: scalar|Param|null, // From address of the reminder mail. Null = the mailer's (MailKit fills it from its settings). // Default: null
+ *             link_route?: scalar|Param|null, // Route of the link (gets the "section" parameter). Null = the section's settings page (no link without web_ui). // Default: null
+ *             fallback_link_route?: scalar|Param|null, // Route (no parameters) of the link for recipients who cannot open the settings (ExpiryRecipient::$canOpenSettings false). Null = no link. // Default: null
+ *             retention_days?: int|Param, // nowo:instance-settings:purge-expiry-notices deletes the sent-markers of expiry dates older than this many days (they hold recipient ids). // Default: 90
+ *             channels?: array{ // auto: mail when nowo-tech/mail-kit-bundle is installed, the bell when nowo-tech/notify-kit-bundle is; on: required (mail needs symfony/mailer); off: never.
+ *                 mail?: "auto"|"on"|"off"|Param, // Default: "auto"
+ *                 notify_kit?: "auto"|"on"|"off"|Param, // Default: "auto"
+ *             },
+ *             notify_kit?: array{ // NotifyKit bell channel options.
+ *                 recipient_type?: scalar|Param|null, // NotifyKit recipient type of ExpiryRecipient ids. // Default: "user"
+ *                 category?: scalar|Param|null, // NotifyKit category of the two types. // Default: "instance_settings"
+ *                 declare_category?: bool|Param, // Declare the category (false: the host declares it). // Default: true
+ *             },
+ *         },
+ *     },
+ *     conflict_response?: array{ // 1.22 (REQ-RUNTIME-003): answer of a lock conflict (deadlock, lock wait timeout, serialization failure) on the bundle's routes. Unset: nowo-tech/transaction-doctrine's conflict_response when that bundle is registered, else 409 with Retry-After 1.
+ *         status?: int|Param, // 409 (default, CONFLICT_001 / CONFLICT_002) or 503 (the 1.19-1.21 answer). Null: follow transaction-doctrine, else 409. // Default: null
+ *         retry_after?: int|Param, // Retry-After seconds of a CONFLICT_001 answer when the failure carries no hint. Null: follow transaction-doctrine, else 1. // Default: null
+ *     },
+ *     runtime_setting?: array{ // 1.20: nowo-tech/runtime-setting-contract source and writer over the settings (section.field ids), with section version tokens and rotation. Needs nowo-tech/runtime-setting-contract. Maps instance_setting_runtime_version and instance_setting_runtime_previous: off by default, no schema change.
+ *         enabled?: bool|Param, // Literal boolean only. // Default: false
  *     },
  * }
  * @psalm-type NowoMailKitConfig = array{ // Nowo Mail Kit — runtime mailer DSN from Instance Settings, validation, test e-mail, sent-mail log.
@@ -1783,6 +1909,72 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *             },
  *         },
  *     },
+ *     mailboxes?: array{ // 2.5.0: sync the folders people follow in their own Outlook mailbox (Microsoft Graph, delegated tokens from your MailboxTokenProviderInterface) into your MailboxMessageSinkInterface. Needs symfony/messenger, symfony/html-sanitizer, ext-fileinfo and a DBAL connection. Off by default.
+ *         enabled?: bool|Param, // Register the ports, services, Messenger handlers, commands and the webhook route loader. // Default: false
+ *         token_provider?: scalar|Param|null, // Required: service id implementing Mailbox\Port\MailboxTokenProviderInterface (the current access token of a mailbox; MailKit never stores it). // Default: null
+ *         directory?: scalar|Param|null, // Required: service id implementing Mailbox\Port\MailboxDirectoryInterface (address, followed folders, pause). // Default: null
+ *         sink?: scalar|Param|null, // Required: service id implementing Mailbox\Port\MailboxMessageSinkInterface (idempotent by mailbox id + provider message id). // Default: null
+ *         exclusion_policy?: scalar|Param|null, // Optional: service id implementing Mailbox\Port\MailboxExclusionPolicyInterface; null = keep every message. // Default: null
+ *         call_observer?: scalar|Param|null, // Optional: service id implementing Mailbox\Port\MailboxCallObserverInterface (metering per mailbox); null = none. // Default: null
+ *         message_index?: scalar|Param|null, // Optional: service id implementing Mailbox\Port\MailboxMessageIndexInterface (which messages of a change page you already store in that folder: they are not fetched again); null = fetch every changed message. // Default: null
+ *         http_client?: scalar|Param|null, // HTTP client service id. Keep the decorated "http_client" so HttpLog counts the calls under the outbound provider you declare for graph.microsoft.com (it never records bodies, query strings or headers). // Default: "http_client"
+ *         connection?: scalar|Param|null, // DBAL connection of the mailbox tables (null = default). // Default: null
+ *         bus?: scalar|Param|null, // Messenger bus service id that receives the sync / fetch / renew messages (route them to an async transport). // Default: "messenger.default_bus"
+ *         timeout?: float|Param, // Idle deadline of one provider call, in seconds (REQ-RUNTIME-001). // Default: 30.0
+ *         max_folders?: int|Param, // Most followed folders per mailbox. // Default: 10
+ *         sync?: array{
+ *             initial_window?: scalar|Param|null, // Window of a folder's first sweep (a mailbox may ask for another one up to max_initial_window). // Default: "P7D"
+ *             max_initial_window?: scalar|Param|null, // Longest window a mailbox may ask for. // Default: "P90D"
+ *             resync_window?: scalar|Param|null, // Window of the sweep after a lost cursor. // Default: "P7D"
+ *             page_size?: int|Param, // Default: 50
+ *             max_pages_per_run?: int|Param, // Pages one sweep reads; a longer backlog continues in the next enqueued sweep. // Default: 20
+ *             lease_seconds?: int|Param, // Lease of a folder sweep (extended after every page); a crashed worker's lease expires after this. // Default: 120
+ *         },
+ *         limits?: array{
+ *             max_message_bytes?: int|Param, // Bytes of one Graph message read (JSON with body and headers); larger ones reach the sink oversized, without body. // Default: 26214400
+ *             max_html_bytes?: int|Param, // Bytes of HTML passed to the sanitiser (longer: cut). // Default: 1048576
+ *             max_attachment_bytes?: int|Param, // Ceiling of MailboxAttachmentReaderInterface::open($maxBytes). // Default: 26214400
+ *         },
+ *         html?: array{
+ *             remote_images?: "blocked"|"dropped"|"allowed"|Param, // blocked: remote image URLs move to data-mail-kit-remote-src (show them through your image proxy); dropped: removed; allowed: kept (tracking pixels reach the sender). // Default: "blocked"
+ *         },
+ *         send?: array{ // 2.5.0: sending from a delegated mailbox (MailboxSenderInterface): draft + send, a mandatory idempotency key per message.
+ *             stale_claim_seconds?: int|Param, // A send without progress for this long may be taken over (and an ambiguous one reconciled by its draft state). Must exceed 8 x timeout: a provider call (max_duration 4 x timeout) and its retry with a fresh token must be over before another worker reads the draft state. // Default: 300
+ *             retention?: scalar|Param|null, // Settled send rows are deleted by nowo:mail-kit:mailbox:purge after this ISO 8601 duration; a key reused after that is sent again. // Default: "P7D"
+ *             max_recipients?: int|Param, // Most recipients (To + Cc + Bcc) of one message. // Default: 100
+ *             max_attachments?: int|Param, // Most attachments of one message. // Default: 50
+ *             max_attachment_bytes?: int|Param, // Largest attachment (upload sessions from 2.9 MB; Graph allows 150 MiB). // Default: 36700160
+ *             max_message_bytes?: int|Param, // Bodies plus attachments of one message (Exchange applies its own limit too, 35 MB by default). // Default: 36700160
+ *             max_html_bytes?: int|Param, // Largest HTML body (it is sanitised; a new message's MIME stays under 2.9 MB). // Default: 1048576
+ *             max_text_bytes?: int|Param, // Largest text body. // Default: 1048576
+ *             max_attempts?: int|Param, // Takeovers of one key (reconciles of an ambiguous submit) before its outcome is reported unknown; it is never sent again. // Default: 5
+ *             sent_copy?: array{ // The copy of each sent message delivered to the sink (MessageOrigin::SentCopy), whether Sent Items is followed or not.
+ *                 delay_ms?: int|Param, // Delay of the DeliverSentCopy message after a send, and between its tries. // Default: 5000
+ *                 attempts?: int|Param, // Tries while the provider has not filed the sent message yet. // Default: 3
+ *             },
+ *         },
+ *         graph?: array{
+ *             enabled?: bool|Param, // Microsoft Graph delegated provider (scopes Mail.ReadWrite, Mail.Send, offline_access, User.Read). // Default: false
+ *             renew_before?: scalar|Param|null, // Renew a subscription that expires within this ISO 8601 duration (subscriptions live just under 7 days). // Default: "P1D"
+ *             upload_hosts?: list<scalar|Param|null>,
+ *             outbound_url_guard?: "auto"|"required"|"off"|Param, // Pin graph.microsoft.com to the public address OutboundUrlGuard resolves: auto = when the OutboundUrlGuard bundle is enabled, required = fail the build without it, off. // Default: "auto"
+ *             webhook?: array{
+ *                 path?: scalar|Param|null, // Path of the notification route (loader type nowo_mail_kit_mailbox_webhook). Make it public and stateless in the firewall, outside the HTTP log. // Default: "/hooks/mail-kit/v1/mailbox/graph"
+ *                 notification_url?: scalar|Param|null, // Public HTTPS URL of that route given to Graph; null = no subscriptions, sweep only. // Default: null
+ *                 max_body_bytes?: int|Param, // Largest notification request read. // Default: 1048576
+ *                 max_notifications?: int|Param, // Most notifications in one request. // Default: 200
+ *                 allowed_ips?: list<scalar|Param|null>,
+ *                 rate_limit?: array{ // Requests with at least one valid notification accepted per interval (all together; 429 above).
+ *                     limit?: int|Param, // Default: 600
+ *                     interval?: scalar|Param|null, // Default: "1 minute"
+ *                 },
+ *                 client_rate_limit?: array{ // Unverified requests accepted per interval and client IP (429 above).
+ *                     limit?: int|Param, // Default: 60
+ *                     interval?: scalar|Param|null, // Default: "1 minute"
+ *                 },
+ *             },
+ *         },
+ *     },
  *     tracking?: array{ // 1.10: open pixel and click tracking of outgoing e-mail (host policy per template and recipient). Off by default: nothing is registered.
  *         enabled?: bool|Param, // Default: false
  *         policy?: scalar|Param|null, // Service id implementing Tracking\EmailTrackingPolicyInterface (which templates and recipients are tracked). Required when enabled. // Default: null
@@ -1831,6 +2023,10 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *             include_bodies?: bool|Param, // Offer an export with the stored text / HTML bodies (personal data). Needs log.store_bodies; never on by default. // Default: false
  *             body_batch_bytes?: int|Param, // Approximate body bytes loaded with one query by an export with bodies (1 MiB … 64 MiB); bounds the memory of that export. // Default: 8388608
  *         },
+ *     },
+ *     conflict_response?: array{ // REQ-RUNTIME-003 rule 6 (1.13): the answer of the bundle's routes to a lock conflict, deadlock or serialization failure: X-Conflict-Code CONFLICT_001 (with Retry-After) or CONFLICT_002 (part committed, no Retry-After).
+ *         status?: 409|503|Param, // 409 (platform default) or 503 (hosts that keep a Service Unavailable answer). // Default: 409
+ *         retry_after?: int|Param, // Retry-After seconds of a CONFLICT_001 answer. // Default: 1
  *     },
  *     security?: array{ // REQ-UI-002 private access of the admin UI.
  *         access_roles?: list<scalar|Param|null>,
@@ -1891,6 +2087,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *     allow_private_resolver?: scalar|Param|null, // Service id of an AllowPrivateResolverInterface read on every OutboundUrlGuardFactory / RuntimeOutboundUrlGuard call. Null uses the static allow_private value. Cloud metadata stays blocked whatever it returns. // Default: null
  *     resolve_dns?: bool|Param, // When true, hostnames are resolved and the first public address is returned as an HttpClient resolve pin. Set false for Docker service names. // Default: true
  *     dns_timeout?: float|Param, // Socket timeout in seconds for DNS lookups. Must stay below the host PHP max_execution_time. // Default: 2.0
+ *     dns_lookup?: scalar|Param|null, // Service id of a HostnameDnsLookupInterface used by every guard the bundle registers (tests that need fixed DNS answers, for example). Null uses the bundled HostnameDnsLookup (dns_timeout, php_binary). It only supplies answers: private, reserved and metadata answers are still rejected. // Default: null
  *     php_binary?: scalar|Param|null, // PHP CLI used for the bounded DNS child process. Null auto-detects it (PHP_BINARY is not the CLI under php-fpm or FrankenPHP). An empty string, or no CLI found, resolves in-process without the dns_timeout bound. // Default: null
  * }
  * @psalm-type ConfigType = array{

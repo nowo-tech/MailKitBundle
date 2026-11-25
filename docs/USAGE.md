@@ -1279,7 +1279,10 @@ ZBU-L2). If the send went out but its `sent` row cannot be written, `send()` ans
 (`reconciling`): retry with the **same** key, never a new one (audit ZBU-I5). A grant failure **at** the submit
 (`Revoked`, `AccountMismatch`) keeps the key `sending`: `resume()` enqueues a `ReconcileMailboxSend` for every such key
 of the mailbox, which settles it by the draft state once stale (audit ZBUv-L2); calling `send()` again with the **same**
-key after `resume()` does the same, never with a new key. The retry guard follows aliases, decorators of every id on
+key after `resume()` does the same, never with a new key. **Show such a send as pending, not failed:** on Graph a
+`send()` that threw `MailboxGrantFailure` at the submit can still be delivered automatically after `resume()` (possibly
+hours later), because the reconcile submits the draft if it is still a draft. Never let the person resend it with a
+new key: that delivers the message twice (audit ZBUv2-I3). The retry guard follows aliases, decorators of every id on
 the alias chain and HTTP client services referenced by argument or factory (a wrapper such as
 `NoPrivateNetworkHttpClient(@http_client)`); a static factory that returns a retrying client, or a retry decorator of
 your own that is not a `RetryableHttpClient`, cannot be detected: do not give MailKit one.

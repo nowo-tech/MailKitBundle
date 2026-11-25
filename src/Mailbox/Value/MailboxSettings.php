@@ -21,7 +21,8 @@ use const FILTER_VALIDATE_EMAIL;
  * account behind the token must have it), followed folders, host pause and the window of the first sweep.
  *
  * The VO enforces the hard bounds (1 to {@see MAX_FOLDERS} distinct folders, a window of days / hours); MailKit also
- * checks the configured `mailboxes.max_folders` and `mailboxes.sync.max_initial_window`.
+ * checks the configured `mailboxes.max_folders` and `mailboxes.sync.max_initial_window`. A send-only provider
+ * ({@see MailboxProvider::isSendOnly()}, Gmail) follows no folder: its list must be empty.
  */
 final readonly class MailboxSettings
 {
@@ -38,7 +39,7 @@ final readonly class MailboxSettings
     public array $folders;
 
     /**
-     * @param list<FolderRef> $folders followed folders (1 to {@see MAX_FOLDERS}, distinct keys)
+     * @param list<FolderRef> $folders followed folders (1 to {@see MAX_FOLDERS}, distinct keys; none for a send-only provider)
      * @param string|null $initialWindow window of the first sweep (`P30D`), null = `mailboxes.sync.initial_window`
      *
      * @throws InvalidArgumentException on an invalid address, folder list or window
@@ -55,7 +56,10 @@ final readonly class MailboxSettings
         if ($address === '' || strlen($address) > 254 || preg_match('/[\x00-\x20<>"]/', $address) === 1 || filter_var($address, FILTER_VALIDATE_EMAIL, FILTER_FLAG_EMAIL_UNICODE) === false) {
             throw new InvalidArgumentException('The mailbox address is not a valid e-mail address.');
         }
-        if ($folders === [] || count($folders) > self::MAX_FOLDERS) {
+        if ($provider->isSendOnly() && $folders !== []) {
+            throw new InvalidArgumentException('A send-only mailbox (' . $provider->value . ') follows no folders: it has no inbox.');
+        }
+        if (!$provider->isSendOnly() && ($folders === [] || count($folders) > self::MAX_FOLDERS)) {
             throw new InvalidArgumentException('A mailbox follows 1 to 100 folders.');
         }
         $keys = [];

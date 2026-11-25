@@ -68,6 +68,8 @@ use function random_bytes;
  * - **Sent copy** (send path, Q-MB-6): {@see deliverSentCopy()} fetches a sent message from Sent Items whether or not
  *   that folder is followed and stores it with `MessageOrigin::SentCopy`, without the exclusion policy (the mailbox's
  *   own send).
+ * - **Send-only providers** (phase B2, Gmail, {@see SendOnlyMailboxGatewayInterface}): start / resume only check the
+ *   account (and bind it); no cursor, subscription, sweep, renewal or sent copy ever runs for such a mailbox.
  */
 final class MailboxSyncEngine implements MailboxSyncInterface
 {
@@ -193,7 +195,7 @@ final class MailboxSyncEngine implements MailboxSyncInterface
             $folders[] = new FolderSyncState(new FolderRef((string) $key), $this->time($state['complete']), $this->time($state['expires']), $state['error'], $this->time($state['error_at']));
         }
 
-        return new MailboxSyncStatus($mailbox, $row['status'], $row['status'] === MailboxStatus::PausedGrant ? $row['reason'] : null, $folders);
+        return new MailboxSyncStatus($mailbox, $row['status'], $row['status'] === MailboxStatus::PausedGrant ? $row['reason'] : null, $folders, MailboxProvider::tryFrom($row['provider']));
     }
 
     /**
@@ -323,6 +325,10 @@ final class MailboxSyncEngine implements MailboxSyncInterface
     {
         $context = $this->active($mailbox);
         if ($context === null) {
+            return true;
+        }
+        if ($context[1] instanceof SendOnlyMailboxGatewayInterface) {
+            // A send-only mailbox has no inbox to read the copy from (phase B2); nothing is enqueued for it anyway.
             return true;
         }
         if (!$this->store->isSentMessage($mailbox, $message->value)) {
@@ -593,7 +599,8 @@ final class MailboxSyncEngine implements MailboxSyncInterface
         $session = new MailboxSession($mailbox, $settings->provider, $settings->address, $this->store->mailbox($mailbox)['account_hash'] ?? null, $this->tokens, $this->observer, $this->logger);
 
         try {
-            if (!$this->checkAccount($settings, $gateway, $session)) {
+            if (!$this->checkAccount($settings, $gateway, $session) || $gateway instanceof SendOnlyMailboxGatewayInterface) {
+                // A send-only mailbox (phase B2) is active once its account is bound: nothing to sync.
                 return;
             }
             foreach ($settings->folders as $folder) {
@@ -736,13 +743,17 @@ final class MailboxSyncEngine implements MailboxSyncInterface
     }
 
     /**
-     * Active mailboxes of the enabled providers that MailKit holds as active.
+     * Active mailboxes of the enabled providers that sync (send-only ones are skipped) that MailKit holds as active.
      *
      * @return iterable<MailboxId>
      */
     private function activeMailboxes(): iterable
     {
         foreach ($this->gateways as $gateway) {
+            if ($gateway instanceof SendOnlyMailboxGatewayInterface) {
+                // Nothing to renew or sweep (phase B2); its grant is checked before every send.
+                continue;
+            }
             foreach ($this->directory->activeMailboxes($gateway->provider()) as $mailbox) {
                 if (($this->store->mailbox($mailbox)['status'] ?? null) === MailboxStatus::Active) {
                     yield $mailbox;

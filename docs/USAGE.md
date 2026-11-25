@@ -19,6 +19,7 @@
 - [Microsoft Graph (shared mailbox)](#microsoft-graph-shared-mailbox)
 - [Inbound mail from a Graph mailbox](#inbound-mail-from-a-graph-mailbox)
 - [Delegated Outlook mailboxes (2.5.0)](#delegated-outlook-mailboxes-250)
+- [Send-only Gmail mailboxes (phase B2)](#send-only-gmail-mailboxes-phase-b2)
 - [Open and click tracking](#open-and-click-tracking)
 - [Admin UI](#admin-ui)
 - [Translations](#translations)
@@ -1270,6 +1271,102 @@ A send claims its key with one insert (a caught duplicate reads the row instead)
 on the claim token and state; every update changes the token, the state or a row version, so MySQL / MariaDB count
 the row even within one second. Two workers with the same key: one sends, the other gets `MailboxSendInProgress`
 and later the stored result.
+
+## Send-only Gmail mailboxes (phase B2)
+
+Owner decision D-20261124-09: a Gmail mailbox **only sends**. MailKit never reads it: no inbox, no folder, no sync, no
+webhook, no attachment download, no sent copy. That keeps the Google grant to one *sensitive* scope (`gmail.send`):
+OAuth verification is needed for production, but no restricted scope and so no yearly CASA assessment. Outlook
+mailboxes keep sync and send ([above](#delegated-outlook-mailboxes-250)). Google Cloud setup:
+[GOOGLE-GMAIL-SETUP](GOOGLE-GMAIL-SETUP.md).
+
+```yaml
+nowo_mail_kit:
+    mailboxes:
+        enabled: true
+        token_provider: App\Mail\MailboxTokens
+        directory: App\Mail\MailboxDirectory
+        sink: App\Mail\MailboxSink        # still required by mailboxes.enabled; a Gmail mailbox never calls it
+        gmail:
+            enabled: true
+```
+
+### Your OAuth connection (the host's side)
+
+MailKit runs no OAuth flow (Q-254-15 = b), exactly as for Outlook. Your connection:
+
+- requests **exactly** `Mailbox\Gmail\GmailScopes::REQUESTED` = `openid email https://www.googleapis.com/auth/gmail.send`
+  (authorization code flow with **PKCE S256**, `access_type=offline`, `prompt=consent` on the first connection so a
+  refresh token is issued);
+- uses a **single-use `state`** bound to the person's session (random, at least 128 bits, compared in constant time,
+  deleted on first use, short-lived), and checks the returned `scope` before storing anything;
+- stores the refresh token encrypted, never logs it, and refreshes the access token when `accessToken()` is asked for
+  one that expired or was `rejected()` (the same contract as Outlook);
+- returns a `MailboxAccessToken` **with the granted scopes** (Google's `scope` field, split on spaces). A token without
+  `gmail.send` pauses the mailbox `ScopeMissing` before any call;
+- throws `MailboxGrantFailure` when Google answers `invalid_grant` (revoked, expired, password change): the mailbox is
+  paused once (`MailboxGrantFailedEvent`) and nothing is retried until you call `resume()` after a reconnect;
+  `MailboxTokenUnavailable` for a transient failure of Google's token endpoint.
+
+### Directory, start and send
+
+```php
+// MailboxDirectoryInterface::mailbox(): a Gmail mailbox follows no folders.
+return new MailboxSettings($id, MailboxProvider::Gmail, 'ana@example.com', []);
+
+$sync->start($id);   // checks the account (OpenID userinfo: verified address + account id), binds it; syncs nothing
+$sent = $sender->send($id, new OutgoingMailboxMail(OutgoingKind::New, null, $to, $cc, $bcc, 'Subject', $text, $html, $attachments, $idempotencyKey));
+```
+
+`start()` / `resume()` call Google's userinfo once: the verified e-mail must be the directory's address and the account
+id the one first bound, otherwise the mailbox is paused `AccountMismatch` (the same check runs before every send).
+`sweep()`, the scheduled sweep and renewal commands, the webhook and the attachment reader skip Gmail mailboxes; the
+attachment reader refuses (`MailboxProviderFailure::REFUSED`).
+
+Only **new** messages are sent: a reply, reply all or forward needs the original, which `gmail.send` cannot read, so
+`send()` refuses it (`InvalidArgumentException`) before claiming the key. MailKit builds one RFC 5322 message (Symfony
+Mime; HTML sanitised with remote images dropped; Bcc in a header Gmail removes; inline parts need a Content-ID of the
+form `name@domain`; at most 35 MB encoded) with a Message-ID derived from the idempotency key, and hands it over with
+**one** `messages.send` call. The answer alone decides, because the mailbox cannot be read afterwards:
+
+| Gmail answer | Key | `send()` |
+| --- | --- | --- |
+| 200 with a message id | `sent` | `SentMessage` (Gmail id, Message-ID, `threadId`, thread key `provider:gmail:<threadId>`); the same key later replays it |
+| 401 | retried once with a fresh token; a second 401 → `released` | `MailboxGrantFailure` `Revoked`, mailbox paused |
+| 403 scope / Workspace policy, 400 Gmail not enabled | `released` | `MailboxGrantFailure` (`ScopeMissing`, `ConsentMissing`, `MailboxNotFound`), mailbox paused |
+| 429, 403 rate or sending limit | `released` | `MailboxProviderFailure` (retryable, with `retryAfter`): call again later with the same key |
+| another 4xx | `failed` | `MailboxSendFailed` (`refused:<reason>`), the same for every retry |
+| timeout, network error, 5xx, 2xx without an id | `unknown` | `MailboxSendOutcomeUnknown`: Gmail may have sent it; **it is never sent again** |
+| (a worker died during the submit) | `unknown` once stale | `MailboxSendInProgress` while fresh, then `MailboxSendOutcomeUnknown` |
+
+No `DeliverSentCopy` is queued for Gmail: keep your own copy of what you sent (your draft, the returned ids).
+
+### Showing it in your UI
+
+Tell people plainly that a Gmail mailbox has no inbox. `MailboxProvider::isSendOnly()` and
+`MailboxSyncStatus::isSendOnly()` (the status now carries `provider`) answer it; the bundle ships the wording in its
+`NowoMailKitBundle` translation domain (7 locales):
+
+| Key | English |
+| --- | --- |
+| `mailbox.provider.graph` | Microsoft 365 / Outlook |
+| `mailbox.provider.gmail` | Gmail (send only) |
+| `mailbox.provider.gmail_send_only_notice` | Gmail mailboxes only send e-mail from your address. There is no inbox: received mail is not shown here and nothing is synced. |
+
+```twig
+{% if status.sendOnly %}<p class="notice">{{ 'mailbox.provider.gmail_send_only_notice'|trans({}, 'NowoMailKitBundle') }}</p>{% endif %}
+```
+
+`nowo:mail-kit:mailbox:status <id>` prints `Provider: gmail (send only: no inbox, nothing is synced)`.
+
+### Worker mode, concurrency and data
+
+The Gmail gateway and its client are stateless (the token lives in the per-call session); only the two Google endpoints
+above ever receive it, without redirects, and no answer body, token or address reaches a log or an exception. The send
+row and its state machine are the Outlook ones (one claim per key, conditional updates, heartbeat before the submit,
+one winner per takeover); with no draft to check, a stale `sending` row is settled `unknown` instead of resubmitted.
+MailKit stores nothing for a Gmail mailbox but its status row (account id hash) and the send rows (ids only, purged
+after `send.retention`).
 
 ## Open and click tracking
 

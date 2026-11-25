@@ -121,6 +121,42 @@ All notable changes to this project are documented here. The format follows
 - The 1.9 webhook controller's HTTP flow moved to `Graph\Inbound\Webhook\AbstractGraphWebhookController`, shared
   with the delegated-mailbox route; savepoint writes moved to `Concurrency\SavepointWrites`. No behaviour change.
 
+
+### Gmail send-only (B2)
+
+Separate from the 2.5.0 Outlook work above: built on its own branch and merged only after 2.5.0 is tagged. Owner
+decision D-20261124-09: Gmail is **send-only**.
+
+#### Added
+
+- **Send-only Gmail mailboxes** (`nowo_mail_kit.mailboxes.gmail.enabled`, off by default; design section 22, spec 005
+  FR-019). A Gmail mailbox sends new messages from the person's own address through `MailboxSenderInterface`, with the
+  token from the host's `MailboxTokenProviderInterface` (MailKit still runs no OAuth flow). Scopes exactly `openid email
+  https://www.googleapis.com/auth/gmail.send` (`Mailbox\Gmail\GmailScopes`): no `gmail.readonly`, so no CASA
+  assessment, no inbox, no folder, no sync, no webhook, no attachment download and no sent copy. The account is checked
+  through the OpenID userinfo (verified address, bound account id) at start, resume and before every send; a token
+  without `gmail.send` pauses the mailbox `ScopeMissing`. One RFC 5322 message (Symfony Mime, sanitised HTML, Bcc
+  header, Message-ID derived from the idempotency key, at most 35 MB) and one `messages.send` call per key, never
+  retried blindly: a 401 is retried once with a fresh token; grant, scope, Workspace-policy and "Gmail not enabled"
+  answers pause the mailbox and release the key; rate and sending limits release it (retryable, `retryAfter`); another
+  4xx fails it; a timeout, a 5xx or a 2xx without an id ends `unknown` and is never sent again, and a `sending` row left
+  by a crashed worker is settled `unknown` once stale. Replies and forwards are refused for Gmail (the original cannot be
+  read). Only `https://openidconnect.googleapis.com/v1/userinfo` and the `messages.send` upload URL receive the token,
+  without redirects; no body, token or address is logged or put in an exception. Quota units reach the call observer.
+- `MailboxProvider::isSendOnly()`, `MailboxSyncStatus::$provider` and `isSendOnly()`; `nowo:mail-kit:mailbox:status`
+  prints the provider and "send only". Translation keys `mailbox.provider.graph`, `mailbox.provider.gmail` and
+  `mailbox.provider.gmail_send_only_notice` (7 locales) for the host's UI.
+- `docs/GOOGLE-GMAIL-SETUP.md`: Google Cloud project, Gmail API, consent screen with the three scopes, web client and
+  redirect URI, the PKCE + single-use `state` authorization request, verification without CASA, limits.
+
+#### Changed
+
+- `MailboxSettings` of a send-only provider (Gmail) must follow no folders (unreleased 2.5.0 class).
+- The engine skips send-only mailboxes in the sweep and renewal schedules, never creates cursors or subscriptions for
+  them and never delivers a sent copy; `MailboxSender` keeps the 2.5.0 rows and claim and adds the direct path for a
+  send-only gateway. Internal: `SendOnlyMailboxGatewayInterface`, `PreparedMessage`, `SubmittedMessage`,
+  `GmailApiClient`, `GmailMailboxGateway`; `SubmitTokenRejected` takes an optional provider name.
+
 ## [2.2.2] - 2026-11-24
 
 ### Security

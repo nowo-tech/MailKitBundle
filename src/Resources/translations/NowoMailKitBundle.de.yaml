@@ -129,3 +129,8 @@ log:
         sent_at: Gesendet am
         failed_at: Fehlgeschlagen am
         error: Fehler
+mailbox:
+    provider:
+        graph: 'Microsoft 365 / Outlook'
+        gmail: 'Gmail (nur Versand)'
+        gmail_send_only_notice: 'Gmail-Postfächer versenden nur E-Mails von Ihrer Adresse. Es gibt keinen Posteingang: Empfangene E-Mails werden hier nicht angezeigt und nichts wird synchronisiert.'

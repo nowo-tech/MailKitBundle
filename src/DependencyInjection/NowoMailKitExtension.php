@@ -86,6 +86,8 @@ use Nowo\MailKitBundle\Mailbox\Engine\MailboxSender;
 use Nowo\MailKitBundle\Mailbox\Engine\MailboxSendOptions;
 use Nowo\MailKitBundle\Mailbox\Engine\MailboxSyncEngine;
 use Nowo\MailKitBundle\Mailbox\Engine\MailboxSyncOptions;
+use Nowo\MailKitBundle\Mailbox\Gmail\GmailApiClient;
+use Nowo\MailKitBundle\Mailbox\Gmail\GmailMailboxGateway;
 use Nowo\MailKitBundle\Mailbox\Graph\GraphMailboxGateway;
 use Nowo\MailKitBundle\Mailbox\Html\MailHtmlSanitizer;
 use Nowo\MailKitBundle\Mailbox\Html\RemoteImages;
@@ -642,7 +644,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
      */
     private function registerMailboxes(ContainerBuilder $container, array $mailboxes, array $doctrine, bool $hasDoctrine, bool $hasOrm): void
     {
-        /** @var array{enabled: bool, token_provider: string, directory: string, sink: string, exclusion_policy: string|null, call_observer: string|null, message_index: string|null, http_client: string, connection: string|null, bus: string, timeout: float, max_folders: int, sync: array{initial_window: string, max_initial_window: string, resync_window: string, page_size: int, max_pages_per_run: int, lease_seconds: int}, limits: array{max_message_bytes: int, max_html_bytes: int, max_attachment_bytes: int}, html: array{remote_images: string}, send: array{stale_claim_seconds: int, retention: string, max_recipients: int, max_attachments: int, max_attachment_bytes: int, max_message_bytes: int, max_html_bytes: int, max_text_bytes: int, max_attempts: int, sent_copy: array{delay_ms: int, attempts: int}}, graph: array{enabled: bool, renew_before: string, upload_hosts: list<string>, outbound_url_guard: string, webhook: array{path: string, notification_url: string|null, max_body_bytes: int, max_notifications: int, allowed_ips: list<string>, rate_limit: array{limit: int, interval: string}, client_rate_limit: array{limit: int, interval: string}}}} $mailboxes */
+        /** @var array{enabled: bool, token_provider: string, directory: string, sink: string, exclusion_policy: string|null, call_observer: string|null, message_index: string|null, http_client: string, connection: string|null, bus: string, timeout: float, max_folders: int, sync: array{initial_window: string, max_initial_window: string, resync_window: string, page_size: int, max_pages_per_run: int, lease_seconds: int}, limits: array{max_message_bytes: int, max_html_bytes: int, max_attachment_bytes: int}, html: array{remote_images: string}, send: array{stale_claim_seconds: int, retention: string, max_recipients: int, max_attachments: int, max_attachment_bytes: int, max_message_bytes: int, max_html_bytes: int, max_text_bytes: int, max_attempts: int, sent_copy: array{delay_ms: int, attempts: int}}, graph: array{enabled: bool, renew_before: string, upload_hosts: list<string>, outbound_url_guard: string, webhook: array{path: string, notification_url: string|null, max_body_bytes: int, max_notifications: int, allowed_ips: list<string>, rate_limit: array{limit: int, interval: string}, client_rate_limit: array{limit: int, interval: string}}}, gmail: array{enabled: bool}} $mailboxes */
         if (!$mailboxes['enabled']) {
             return;
         }
@@ -710,6 +712,19 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
                 new Definition(MailHtmlSanitizer::class, [RemoteImages::from($mailboxes['html']['remote_images']) === RemoteImages::Allowed ? RemoteImages::Allowed : RemoteImages::Dropped, $send['max_html_bytes']]),
             ]));
             $gateways[MailboxProvider::Graph->value] = new Reference(GraphMailboxGateway::class);
+        }
+        if ($mailboxes['gmail']['enabled']) {
+            // Phase B2 (D-20261124-09): send-only; only the userinfo and messages.send endpoints are ever called.
+            $container->setDefinition(GmailApiClient::class, new Definition(GmailApiClient::class, [
+                new Reference($mailboxes['http_client']),
+                $mailboxes['timeout'],
+                $logger,
+            ]));
+            $container->setDefinition(GmailMailboxGateway::class, new Definition(GmailMailboxGateway::class, [
+                new Reference(GmailApiClient::class),
+                new Definition(MailHtmlSanitizer::class, [RemoteImages::from($mailboxes['html']['remote_images']) === RemoteImages::Allowed ? RemoteImages::Allowed : RemoteImages::Dropped, $send['max_html_bytes']]),
+            ]));
+            $gateways[MailboxProvider::Gmail->value] = new Reference(GmailMailboxGateway::class);
         }
 
         $sync = $mailboxes['sync'];

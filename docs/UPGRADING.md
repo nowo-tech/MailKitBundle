@@ -134,13 +134,35 @@ SQLite: as PostgreSQL, with `cursor_value CLOB` and `INTEGER` for `cursor_versio
 The send table (2.5.0 part 2) is new in this version; 2.5.0 is not tagged yet, so no migration from a released
 version is needed.
 
+### Gmail send-only (phase B2, opt-in)
+
+Nothing changes unless you set `nowo_mail_kit.mailboxes.gmail.enabled: true` (it needs `mailboxes.enabled: true`). Owner
+decision D-20261124-09: a Gmail mailbox only sends. Usage: [USAGE — Send-only Gmail mailboxes](USAGE.md#send-only-gmail-mailboxes-phase-b2);
+Google Cloud: [GOOGLE-GMAIL-SETUP](GOOGLE-GMAIL-SETUP.md).
+
+1. Your OAuth connection requests exactly `Mailbox\Gmail\GmailScopes::REQUESTED` (`openid email
+   https://www.googleapis.com/auth/gmail.send`) with PKCE and a single-use `state`, and your
+   `MailboxTokenProviderInterface` returns the granted scopes in `MailboxAccessToken::$scopes` (a token without
+   `gmail.send` pauses the mailbox `ScopeMissing`).
+2. Your directory returns `new MailboxSettings($id, MailboxProvider::Gmail, $address, [])`: a Gmail mailbox follows no
+   folders (a non-empty list is refused).
+3. Send new messages only; `send()` refuses a reply or forward for a Gmail mailbox. No sent copy is delivered.
+4. No new table, route, Messenger message or schedule; Gmail mailboxes are skipped by the sweep and renewal commands.
+5. Show the mailbox as send-only (`MailboxProvider::isSendOnly()`, `MailboxSyncStatus::isSendOnly()`, translation keys
+   `mailbox.provider.*`).
+
+`MailboxSettings` now refuses folders for a send-only provider and `MailboxSyncStatus` has a trailing optional
+`$provider` argument; both are unreleased 2.5.0 classes.
+
 #### For code that used internal classes
 
 `Graph\GraphApiClient` (`@internal`) now accepts `?GraphTokenProvider` and a trailing `?GraphRequestOptionsInterface`,
 and its `call()`, `callUrl()`, `download()`, `uploadChunk()` and `cancelUpload()` take
 `GraphMailbox|GraphCredentialInterface`; `call()` takes a trailing `bool $retryUnauthorized = true`.
 `Graph\Inbound\GraphMessageNormalizer` takes any `Mailbox\Html\MailHtmlSanitizer` (an `InboundHtmlSanitizer` still
-fits). Public 1.x / 2.x classes are unchanged.
+fits). Public 1.x / 2.x classes are unchanged. Phase B2: `Mailbox\Engine\SubmitTokenRejected` takes an optional
+provider name; new internal `SendOnlyMailboxGatewayInterface`, `PreparedMessage`, `SubmittedMessage`,
+`Mailbox\Gmail\GmailApiClient` and `GmailMailboxGateway`.
 
 ## To 2.2.2
 

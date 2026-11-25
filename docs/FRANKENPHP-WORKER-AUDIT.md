@@ -72,6 +72,7 @@ A bundle safe under **B** is safe under **A**, classic mode and PHP-FPM.
 | `EmailTracker`, `HtmlLinkTracker`, `CredentialLinkDetector`, `ConfiguredTrackableLinkFilter`, `NullEmailLinkRewriter`, `TrackingTokenSigner`, `OpenClassifier`, `OpenRecorder`, `TrackingPixelController`, `RecordMailOpenHandler`, `TrackingStore`, `TrackingSchemaListener`, tracking commands, UserKit `email_tracking` bridge (1.10, `tracking.enabled`) | none (`readonly` or no properties beyond injected configuration; per-send data — tracked copy, send id, link map, open — is local to the call; the store resolves its connection per call; no memo, no static) | ✅ | ✅ |
 | `TrackingRouteLoader` (1.10) | `loaded` flag (cache warm-up only) | ✅ | ✅ |
 | `GraphTokenProvider`, `GraphApiClient`, `GraphMailSender`, `ConfiguredGraphMailboxProvider`, `GraphTransportFactory`, `GraphTransport` (1.8, `graph.enabled`) | none (readonly; tokens in the PSR-6 pool keyed per tenant / client / secret; mailbox resolved per send; files opened and closed per attachment) | ✅ | ✅ |
+| `GmailApiClient`, `GmailMailboxGateway` (phase B2, `mailboxes.gmail.enabled`) | none (readonly client; the gateway holds only its immutable outgoing sanitiser; the token lives in the per-call `MailboxSession`; the prepared message is a local of one `send()`; attachment handles opened and closed per message) | ✅ | ✅ |
 
 ## Findings
 
@@ -115,7 +116,8 @@ the cached transport is rebuilt because its DSN no longer matches.
 - `tests/Integration/Mailbox/MailboxKernelTest.php` (2.5.0): one kernel, no services resetter, a strict DDD host
   with in-memory ports; 400 webhook requests alternating two mailboxes (each message stored under its own mailbox with
   its own token, a forged notification for the other mailbox refused, memory under 2 MiB), and 20 sends with replays
-  and sent copies on a synchronous bus.
+  and sent copies on a synchronous bus. Phase B2: 50 Gmail sends with replays alternating two send-only mailboxes in one
+  kernel, each request carrying only its own mailbox's token.
 - `reset()` is tested directly: `tests/Unit/Settings/LegacyResendSettingsTest.php`, `tests/Unit/EventListener/LegacyResendSettingsResetListenerTest.php`.
 
 Static checks: `composer igor` (107 service files in 1.8, 0 KO, 0 WARN) and PHPStan with the FrankenPHP rulesets pass.

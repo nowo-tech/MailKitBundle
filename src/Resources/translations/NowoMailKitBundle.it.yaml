@@ -129,3 +129,8 @@ log:
         sent_at: Inviata il
         failed_at: Non riuscita il
         error: Errore
+mailbox:
+    provider:
+        graph: 'Microsoft 365 / Outlook'
+        gmail: 'Gmail (solo invio)'
+        gmail_send_only_notice: 'Le caselle Gmail inviano soltanto e-mail dal tuo indirizzo. Non c’è una posta in arrivo: la posta ricevuta non compare qui e non viene sincronizzato nulla.'

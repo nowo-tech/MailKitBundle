@@ -51,6 +51,7 @@ request or a replayed Messenger message. It applies from **1.13.0**.
 | Folder sweep lease and cursor (`acquireLease`, `requestRerun`, `advanceCursor`, `extendLease`, `releaseLease`, 2.5.0) | One statement each, in a savepoint inside a host transaction | Lease by a conditional `UPDATE` with a random owner; cursor compare-and-set on `cursor_version` and the owner; a 0-row extension confirmed by a read (MySQL changed-rows count, ZAT-R4) | A lost lease stops the run without writing; the fetches are idempotent |
 | Delegated subscriptions (`saveSubscription` swap, renewal, deletion, 2.5.0) | Swap in **one transaction**; the rest one statement | All or nothing; by id | Exception to Messenger or the command |
 | Delegated send (`claimSend`, `updateSend`, `takeOverSend`, 2.5.0 part 2) | One statement each; `send()` refuses an open transaction on the mailbox connection | Primary key (mailbox, key) plus a caught duplicate; every transition conditional on the claim token and state and bumps `row_version`; takeover of a stale row by a conditional `UPDATE` with a new token (one winner); a heartbeat right before every submit (ZAV-L1) | `MailboxSendInProgress` (map to 409 `CONFLICT_001`), `MailboxSendKeyConflict` (`CONFLICT_002`) |
+| Send-only Gmail send (phase B2, same rows and statements) | One statement each, as the delegated send | As the delegated send; the heartbeat runs right before the single submit; with no draft to check, an unconfirmed answer ends `unknown` and a stale `sending` row is taken over by one caller and settled `unknown` (never resubmitted); a 4xx answer releases (`released`) or fails (`failed`) the key | As the delegated send |
 | Send purge (`purgeSends`, `nowo:mail-kit:mailbox:purge`) | One `DELETE` per row of a batch | Settled states only, re-checked in the `WHERE` | Exception to the command |
 | Delegated mailbox webhook (`MailboxGraphWebhookController`) | Writes nothing itself; it only dispatches messages | — | As the Graph webhook |
 | Schema commands (`nowo:mail-kit:graph:schema`, `nowo:mail-kit:tracking:schema`, `nowo:mail-kit:mailbox:schema`) | DDL, one statement at a time | `CREATE` only for missing tables | Exception to the command |
@@ -158,7 +159,9 @@ twice:
 - `tests/Integration/Concurrency/MailboxConcurrencyRaceTest.php` and `MailboxSendRaceTest.php` (2.5.0): one sweeper
   per folder, no cursor lost update after a takeover, one grant transition, same-second lease extensions and send
   heartbeats on MySQL / MariaDB, one takeover winner against an open transaction, and two workers sending one key
-  (one delivery, also after an ambiguous submit), with an injected `MockClock`.
+  (one delivery, also after an ambiguous submit), with an injected `MockClock`. Phase B2 adds two workers sending one
+  Gmail key (one delivery; a submit that hangs past the stale delay is settled `unknown` by the other worker, never
+  resubmitted).
 - Unit tests with injected deadlocks, lock wait timeouts, serialization failures, lost savepoints, unique violations
   and lost connections: `StorageConflictsTest`, `MailKitConflictListenerTest`, `TrackingConflictsTest`,
   `GraphInboundStoreTest`, `GraphInboundProcessorTest`, `GraphWebhookControllerTest`.

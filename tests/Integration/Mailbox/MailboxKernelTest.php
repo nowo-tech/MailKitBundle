@@ -23,6 +23,7 @@ use Nowo\MailKitBundle\Mailbox\Value\OutgoingMailboxMail;
 use Nowo\MailKitBundle\Sender\MailAddress;
 use Nowo\MailKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\MailKitBundle\Tests\Integration\Kernel\MailKitTestKernel;
+use Nowo\MailKitBundle\Tests\Support\MailboxGmailFake;
 use Nowo\MailKitBundle\Tests\Support\MailboxGraphFake;
 use Nowo\MailKitBundle\Tests\Support\MemoryMailboxPorts;
 use Nowo\MailKitBundle\Tests\Support\RequestTenantSenderProvider;
@@ -37,6 +38,8 @@ use Symfony\Component\HttpKernel\HttpKernel;
 use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\Routing\Loader\Configurator\RoutingConfigurator;
 
+use function array_slice;
+use function count;
 use function gc_collect_cycles;
 use function json_encode;
 use function memory_get_usage;
@@ -195,6 +198,60 @@ final class MailboxKernelTest extends KernelTestCase
         self::assertSame(MailboxStatus::PausedGrant, $sync->status(new MailboxId('mbx-ana'))->status);
         self::assertSame('paused_grant', $this->connection($kernel)->fetchOne("SELECT status FROM mail_kit_mailbox WHERE mailbox_id = 'mbx-ana'"));
         self::assertCount(1, $events);
+    }
+
+    public function testDddHostSendsFromTwoGmailMailboxesInOneWorkerWithoutStateBleed(): void
+    {
+        // Phase B2: send-only Gmail, no Graph, kept-alive kernel without the services resetter (FrankenPHP worker mode).
+        $kernel = $this->bootKernel(
+            [
+                'mailer'    => ['dsn_provider' => StaticDsnProvider::class, 'sender_provider' => RequestTenantSenderProvider::class],
+                'log'       => ['enabled' => false],
+                'mailboxes' => [
+                    'enabled'        => true,
+                    'token_provider' => MemoryMailboxPorts::class,
+                    'directory'      => MemoryMailboxPorts::class,
+                    'sink'           => MemoryMailboxPorts::class,
+                    'http_client'    => 'test.gmail_http_client',
+                    'gmail'          => ['enabled' => true],
+                ],
+            ],
+            without: ['orm', 'instance_settings'],
+            extra: static function (ContainerConfigurator $container): void {
+                $services = $container->services();
+                $services->set(MailboxGmailFake::class)->public();
+                $services->set('test.gmail_http_client', MockHttpClient::class)->factory([service(MailboxGmailFake::class), 'client']);
+                $services->set(MemoryMailboxPorts::class)->public();
+                $services->set(StaticDsnProvider::class)->args(['memory://default']);
+                $services->set(RequestTenantSenderProvider::class)->args([service('request_stack')]);
+            },
+        );
+        self::assertFalse($this->container($kernel)->has(MailboxGraphWebhookController::class));
+        $ports  = $this->service($kernel, MemoryMailboxPorts::class);
+        $google = $this->service($kernel, MailboxGmailFake::class);
+        $ports->add(MemoryMailboxPorts::gmailSettings('mbx-ana', 'ana@example.com'));
+        $ports->add(MemoryMailboxPorts::gmailSettings('mbx-bob', 'ana@example.com'));
+        $store = $this->service($kernel, MailboxStore::class);
+        $store->execute($store->missingTablesSql());
+        foreach (['mail_kit_mailbox_send', 'mail_kit_mailbox_subscription', 'mail_kit_mailbox_cursor', 'mail_kit_mailbox'] as $table) {
+            $this->connection($kernel)->executeStatement('DELETE FROM ' . $table);
+        }
+        $sync = $this->service($kernel, MailboxSyncInterface::class);
+        self::assertTrue($sync->start(new MailboxId('mbx-ana'))->isSendOnly());
+        self::assertTrue($sync->start(new MailboxId('mbx-bob'))->isSendOnly());
+        $sender = $this->service($kernel, MailboxSenderInterface::class);
+        for ($i = 0; $i < 50; ++$i) {
+            $mailbox = $i % 2 === 0 ? 'mbx-ana' : 'mbx-bob';
+            $before  = count($google->requests);
+            $mail    = new OutgoingMailboxMail(OutgoingKind::New, null, [new MailAddress('pedro@example.org')], [], [], 'Plan ' . $i, 'Hello', null, [], 'gmail-kernel-key-' . $i);
+            self::assertFalse($sender->send(new MailboxId($mailbox), $mail)->replayed);
+            self::assertTrue($sender->send(new MailboxId($mailbox), $mail)->replayed);
+            foreach (array_slice($google->requests, $before) as $request) {
+                self::assertStringStartsWith('Bearer fake-' . $mailbox . '-', $request['authorization'], 'one mailbox\'s token never serves the other');
+            }
+        }
+        self::assertCount(50, $google->sent);
+        self::assertSame([], $ports->stored, 'no sent copy: there is no inbox');
     }
 
     public function testMailboxesNeedDoctrine(): void

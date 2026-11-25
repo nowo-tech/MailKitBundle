@@ -129,3 +129,8 @@ log:
         sent_at: Envoyé le
         failed_at: Échoué le
         error: Erreur
+mailbox:
+    provider:
+        graph: 'Microsoft 365 / Outlook'
+        gmail: 'Gmail (envoi uniquement)'
+        gmail_send_only_notice: 'Les boîtes Gmail envoient seulement des e-mails depuis votre adresse. Il n’y a pas de boîte de réception : le courrier reçu n’apparaît pas ici et rien n’est synchronisé.'

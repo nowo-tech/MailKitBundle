@@ -48,12 +48,14 @@ final class TranslationCatalogueTest extends TestCase
             'log.field.bcc',
             'log.field.cc',
             'log.filter.status',
+            'mailbox.provider.graph',
         ],
         'es' => [
             'log.export.column.cc',
             'log.export.column.error',
             'log.field.cc',
             'log.field.error',
+            'mailbox.provider.graph',
         ],
         'fr' => [
             'log.column.queued_at',
@@ -61,10 +63,12 @@ final class TranslationCatalogueTest extends TestCase
             'log.export.column.cc',
             'log.export.column.date',
             'log.field.cc',
+            'mailbox.provider.graph',
         ],
         'it' => [
             'log.export.column.cc',
             'log.field.cc',
+            'mailbox.provider.graph',
             'settings.mailer.provider',
         ],
         'nl' => [
@@ -76,6 +80,7 @@ final class TranslationCatalogueTest extends TestCase
             'log.field.bcc',
             'log.field.cc',
             'log.filter.status',
+            'mailbox.provider.graph',
             'settings.mailer.provider',
         ],
         'pt' => [
@@ -84,6 +89,7 @@ final class TranslationCatalogueTest extends TestCase
             'log.field.bcc',
             'log.field.cc',
             'log.show.envelope',
+            'mailbox.provider.graph',
         ],
     ];
 

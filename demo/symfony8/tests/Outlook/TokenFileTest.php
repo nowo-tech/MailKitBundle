@@ -9,7 +9,9 @@ use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 
-use function in_array;
+use function array_diff;
+use function is_dir;
+use function scandir;
 
 final class TokenFileTest extends TestCase
 {
@@ -23,10 +25,11 @@ final class TokenFileTest extends TestCase
 
     protected function tearDown(): void
     {
-        foreach (glob($this->dir . '/{,.}*', GLOB_BRACE) ?: [] as $entry) {
-            if (is_dir($entry) && !in_array(basename($entry), ['.', '..'], true)) {
+        foreach (array_diff(scandir($this->dir) ?: [], ['.', '..']) as $name) {
+            $entry = $this->dir . '/' . $name;
+            if (is_dir($entry)) {
                 @rmdir($entry);
-            } elseif (is_file($entry)) {
+            } else {
                 @unlink($entry);
             }
         }

@@ -503,6 +503,25 @@ final class MailboxStore
     }
 
     /**
+     * Idempotency keys of a mailbox left `sending` (audit ZBUv-L2): reconciled when the mailbox is resumed.
+     *
+     * @return list<string>
+     */
+    public function sendingKeys(MailboxId $mailbox, int $limit = 500): array
+    {
+        $connection = $this->connection();
+        $keys       = [];
+        foreach ($connection->fetchFirstColumn(
+            $connection->getDatabasePlatform()->modifyLimitQuery('SELECT idempotency_key FROM ' . $this->sendTable() . ' WHERE mailbox_id = ? AND status = ? ORDER BY updated_at', $limit),
+            [$mailbox->value, SendState::Sending->value],
+        ) as $key) {
+            $keys[] = (string) $key;
+        }
+
+        return $keys;
+    }
+
+    /**
      * Settled rows (`released`, `failed`) not updated since `$before` that still name a draft (audit ZAV-I4).
      *
      * @return list<array{mailbox_id: string, idempotency_key: string, token: string, status: SendState, draft: string}>

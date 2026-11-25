@@ -12,6 +12,7 @@ use Nowo\MailKitBundle\Mailbox\Event\MailboxResyncedEvent;
 use Nowo\MailKitBundle\Mailbox\Exception\MailboxGrantFailure;
 use Nowo\MailKitBundle\Mailbox\Exception\MailboxProviderFailure;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\FetchMailboxMessage;
+use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\ReconcileMailboxSend;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\RenewMailboxSubscriptions;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\SyncMailboxFolder;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Store\MailboxStore;
@@ -603,6 +604,7 @@ final class MailboxSyncEngine implements MailboxSyncInterface
                 // A send-only mailbox (phase B2) is active once its account is bound: nothing to sync.
                 return;
             }
+            $this->reconcileSends($mailbox);
             foreach ($settings->folders as $folder) {
                 $this->store->ensureCursor($mailbox, $folder->key);
             }
@@ -614,6 +616,22 @@ final class MailboxSyncEngine implements MailboxSyncInterface
         }
         foreach ($settings->folders as $folder) {
             $this->bus->dispatch(new SyncMailboxFolder($mailbox->value, $folder->key));
+        }
+    }
+
+    /**
+     * Enqueues the reconcile of every key the mailbox left `sending` (a grant failure at the submit keeps it there;
+     * audit ZBUv-L2), so a host that never sends with that key again still gets it settled. Best effort: a failed
+     * enqueue is logged and the next send() with the key reconciles it.
+     */
+    private function reconcileSends(MailboxId $mailbox): void
+    {
+        try {
+            foreach ($this->store->sendingKeys($mailbox) as $key) {
+                $this->bus->dispatch(new ReconcileMailboxSend($mailbox->value, $key));
+            }
+        } catch (Throwable $failure) {
+            $this->logger?->warning('Mailbox send reconcile could not be enqueued on resume; the next send() with the key reconciles it.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value, 'error' => $failure::class]);
         }
     }
 

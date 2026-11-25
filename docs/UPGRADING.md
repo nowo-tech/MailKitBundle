@@ -101,7 +101,9 @@ four tables and schedule three commands. Usage: [USAGE — Delegated Outlook mai
    `nowo:mail-kit:mailbox:purge` daily (settled send rows after `send.retention`).
 5. If `framework.http_client` (or the scoped client you give MailKit) uses `retry_failed`, set
    `mailboxes.http_client` to a client without it: a retrying client fails the build (a retried send could go out
-   twice). The 1.8 `graph.http_client` only gets a warning in the container compiler log.
+   twice). The 1.8 `graph.http_client` (shared mailboxes) keeps building in 2.x but triggers a deprecation
+   (`Since nowo-tech/mail-kit-bundle 2.5: … retries failed requests`, shown by the profiler and the deprecation log):
+   give it a client with `retry_failed: false` now; **MailKit 3.0 fails the build** for a retrying `graph.http_client`.
 6. Sending (`MailboxSenderInterface`): call `send()` **outside** a transaction on the mailbox connection. If your
    Messenger handlers run inside a `doctrine_transaction` middleware, point `mailboxes.connection` at a dedicated
    DBAL connection (the same database is fine) so the send rows commit on their own.

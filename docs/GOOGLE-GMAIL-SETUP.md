@@ -36,7 +36,9 @@ Google Cloud console → *IAM & Admin* → *Create project*. Note the project id
 ## 2. Enable the Gmail API
 
 *APIs & Services* → *Library* → *Gmail API* → *Enable*. Without it every send answers 403 `accessNotConfigured`
-(MailKit reports `MailboxSendFailed`; the mailbox is not paused, since the problem is the project, not the person).
+(MailKit reports `MailboxSendFailed` `refused:accessNotConfigured`; the mailbox is not paused, since the problem is the
+project, not the person). The key of such a send ends `failed` for good: once the API is enabled, send the message
+again with a **new** idempotency key.
 
 No Pub/Sub topic, service account or push subscription is needed: send-only mailboxes have no inbox and no watch.
 
@@ -91,8 +93,13 @@ https://accounts.google.com/o/oauth2/v2/auth
   and expired after a few minutes; a callback with an unknown or reused `state` is refused.
 - `include_granted_scopes=false` keeps earlier grants of the same client from widening this token.
 - Exchange the code at `https://oauth2.googleapis.com/token` with the `code_verifier`; check that the returned `scope`
-  contains `gmail.send` and nothing broader before storing the refresh token (encrypted). Read the address with the
-  `id_token` or the userinfo endpoint and store it as the mailbox address (`MailboxSettings`).
+  contains `gmail.send` and nothing broader before storing the refresh token (encrypted). MailKit logs a warning when a
+  token declares a Gmail scope beyond `gmail.send`.
+- Read the address with the `id_token` or the userinfo endpoint and store it as the mailbox address
+  (`MailboxSettings`) **only when `email_verified` is true**. If you use the `id_token`, validate it: `aud` equals your
+  client id, `iss` is `https://accounts.google.com` (or `accounts.google.com`) and `exp` is in the future (the TLS
+  token response lets you skip the signature, not these claims). Store the `sub` with the grant and refuse a reconnect
+  whose `sub` differs from the mailbox's (connect it as a new mailbox instead).
 - Refresh with `grant_type=refresh_token`; an `invalid_grant` answer means the grant is gone: throw
   `MailboxGrantFailure(GrantFailureReason::Revoked)` from your token port and ask the person to reconnect.
 - On disconnect, revoke at `https://oauth2.googleapis.com/revoke` and call `MailboxSyncInterface::disconnect()`.
@@ -110,6 +117,11 @@ nowo_mail_kit:
             enabled: true
 ```
 
+The HTTP client must **not retry** by itself: with FrameworkBundle `retry_failed` on the client MailKit uses, a
+`messages.send` that Gmail accepted but answered 502 / 503 would be POSTed again outside MailKit's idempotency claim,
+so the build fails (`MailboxHttpRetryPass`). Give `mailboxes.http_client` a scoped client without `retry_failed` if
+your default client retries.
+
 MailKit calls only `https://openidconnect.googleapis.com/v1/userinfo` (account check) and
 `https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send` (one call per message). Declare both hosts as the
 Google provider in HttpLog's outbound metering if you use it; the token endpoint is the host's own call.
@@ -126,7 +138,9 @@ Google provider in HttpLog's outbound metering if you use it; the token endpoint
 ## Limits
 
 - 35 MB per message after encoding (attachments grow by about a third); MailKit refuses a larger message before
-  calling Google (`MailboxSendFailed` `too_large`).
+  calling Google (`MailboxSendFailed` `too_large`), from the sizes alone when the attachments cannot fit (nothing is
+  rendered), else once rendered (rendering peaks at about five times the message size in memory: keep
+  `memory_limit` well above that for large attachments).
 - Gmail's per-user sending limits (Google Workspace and consumer accounts differ) answer 429 / 403
   `dailyLimitExceeded` / `userRateLimitExceeded`: MailKit releases the key (nothing was sent) and throws a retryable
   `MailboxProviderFailure` with `retryAfter`.

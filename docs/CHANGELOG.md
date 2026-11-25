@@ -152,6 +152,13 @@ decision D-20261124-09: Gmail is **send-only**.
 - `MailboxProvider::isSendOnly()`, `MailboxSyncStatus::$provider` and `isSendOnly()`; `nowo:mail-kit:mailbox:status`
   prints the provider and "send only". Translation keys `mailbox.provider.graph`, `mailbox.provider.gmail` and
   `mailbox.provider.gmail_send_only_notice` (7 locales) for the host's UI.
+- Audit ZBU fixes (Pass-Low): the HTTP client must not retry by itself (shared `MailboxHttpRetryPass`, merged from the
+  2.5.0 fix branch) (L1); after a 401 on the submit the refreshed token's account is checked before the one retry
+  (L2); a message whose attachments cannot fit 35 MB once encoded is refused before it is rendered in memory
+  (`GmailMailboxGateway::minimumMimeBytes()`) (L3); a token declaring Gmail scopes beyond `gmail.send` is logged as a
+  warning (I4); a send whose `sent` row cannot be written answers `MailboxSendOutcomeUnknown` instead of a DBAL
+  exception (I5); the setup guide requires `email_verified`, `id_token` `aud` / `iss` / `exp` checks and a new key after
+  `accessNotConfigured` (I2, I3).
 - `docs/GOOGLE-GMAIL-SETUP.md`: Google Cloud project, Gmail API, consent screen with the three scopes, web client and
   redirect URI, the PKCE + single-use `state` authorization request, verification without CASA, limits.
 

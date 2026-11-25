@@ -70,7 +70,7 @@ final class GmailMailboxGatewayTest extends TestCase
         $this->google  = new MailboxGmailFake();
         $this->ports   = (new MemoryMailboxPorts())->add(MemoryMailboxPorts::gmailSettings());
         $this->log     = new RecordingLogger();
-        $this->gateway = new GmailMailboxGateway(new GmailApiClient($this->google->client(), 5.0, $this->log));
+        $this->gateway = new GmailMailboxGateway(new GmailApiClient($this->google->client(), 5.0, $this->log), null, $this->log);
     }
 
     public function testScopesAreExactlyTheSendOnlyOnes(): void
@@ -98,6 +98,16 @@ final class GmailMailboxGatewayTest extends TestCase
 
         $this->google->userinfo = ['sub' => 'bad sub', 'email' => 'ana@example.com', 'email_verified' => true];
         $this->expectFailure(MailboxProviderFailure::REFUSED, fn (): ProviderAccount => $this->gateway->account($this->session()));
+    }
+
+    public function testBroaderGmailScopesAreLoggedNotUsed(): void
+    {
+        // Audit ZBU-I4: a token that also declares a restricted scope is used for the two fixed calls only, with a warning.
+        $this->ports->gmailScopes = ['openid', GmailScopes::SEND, 'https://www.googleapis.com/auth/gmail.readonly', 'https://mail.google.com/', 'https://www.googleapis.com/auth/calendar'];
+        self::assertSame(MailboxGmailFake::SUB, $this->gateway->account($this->session())->id);
+        self::assertTrue($this->log->has('Gmail token declares Gmail scopes beyond gmail.send'));
+        self::assertSame(['https://www.googleapis.com/auth/gmail.readonly', 'https://mail.google.com/'], $this->log->records[0]['context']['scopes'] ?? null);
+        self::assertSame(1, GmailMailboxGateway::minimumMimeBytes(new OutgoingMailboxMail(OutgoingKind::New, null, [new MailAddress('pedro@example.org')], [], [], 'Plan', 'x', null, [], 'gmail-send-key-0010')));
     }
 
     public function testATokenWithoutTheSendScopePausesBeforeAnyCall(): void
@@ -176,8 +186,19 @@ final class GmailMailboxGatewayTest extends TestCase
         $badId = new OutgoingMailboxMail(OutgoingKind::New, null, [new MailAddress('pedro@example.org')], [], [], 'Plan', 'Hi', null, [], 'gmail-send-key-0005');
         $this->expectFailure(MailboxProviderFailure::REFUSED, fn (): PreparedMessage => $this->gateway->prepare($this->session(), $badId, 'no-at-sign'));
 
+        // Audit ZBU-L3: refused from the sizes alone, before anything is rendered (the bytes are never read).
         $big = new OutgoingMailboxMail(OutgoingKind::New, null, [new MailAddress('pedro@example.org')], [], [], 'Plan', 'Hi', null, [OutgoingAttachment::fromString(str_repeat('x', 28_000_000), 'big.bin')], 'gmail-send-key-0006');
+        self::assertGreaterThan(GmailMailboxGateway::MAX_MIME_BYTES, GmailMailboxGateway::minimumMimeBytes($big));
+        $before = memory_get_peak_usage();
         $this->expectFailure(MailboxProviderFailure::TOO_LARGE, fn (): PreparedMessage => $this->gateway->prepare($this->session(), $big, 'x.mailkit@example.com'));
+        self::assertLessThan(8_000_000, memory_get_peak_usage() - $before, 'nothing rendered');
+
+        // Just under the lower bound: rendered, then refused by the exact size (headers and line breaks on top).
+        $attachment = OutgoingAttachment::fromString(str_repeat('y', 26_700_000), 'edge.bin');
+        $probe      = new OutgoingMailboxMail(OutgoingKind::New, null, [new MailAddress('pedro@example.org')], [], [], 'Plan', '', null, [$attachment], 'gmail-send-key-0008');
+        $edge       = new OutgoingMailboxMail(OutgoingKind::New, null, [new MailAddress('pedro@example.org')], [], [], 'Plan', str_repeat('a', GmailMailboxGateway::MAX_MIME_BYTES - GmailMailboxGateway::minimumMimeBytes($probe) - 10), null, [$attachment], 'gmail-send-key-0009');
+        self::assertLessThanOrEqual(GmailMailboxGateway::MAX_MIME_BYTES, GmailMailboxGateway::minimumMimeBytes($edge));
+        $this->expectFailure(MailboxProviderFailure::TOO_LARGE, fn (): PreparedMessage => $this->gateway->prepare($this->session(), $edge, 'x.mailkit@example.com'));
     }
 
     public function testSubmitSendsTheRawMessageOnceWithQuotaUnits(): void

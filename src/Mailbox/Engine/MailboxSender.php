@@ -261,14 +261,14 @@ final readonly class MailboxSender implements MailboxSenderInterface
             return $this->abandon($settings, $gateway, $session, $key, $token, null, $failure);
         }
 
-        return $this->submitDirect($settings, $direct, $session, $key, $token, $prepared, $since);
+        return $this->submitDirect($settings, $gateway, $direct, $session, $key, $token, $prepared, $since);
     }
 
     /**
      * Send-only provider, step 5: one submit at a time, each preceded by the token, the submit window and the heartbeat
      * (as the draft path); one retry after a 401. The answer alone decides (the mailbox cannot be read).
      */
-    private function submitDirect(MailboxSettings $settings, SendOnlyMailboxGatewayInterface $direct, MailboxSession $session, string $key, string $token, PreparedMessage $prepared, int $since): SentMessage
+    private function submitDirect(MailboxSettings $settings, MailboxGatewayInterface $gateway, SendOnlyMailboxGatewayInterface $direct, MailboxSession $session, string $key, string $token, PreparedMessage $prepared, int $since): SentMessage
     {
         $mailbox = $settings->id;
         for ($attempt = 1;; ++$attempt) {
@@ -290,7 +290,18 @@ final readonly class MailboxSender implements MailboxSenderInterface
                 throw $stop;
             } catch (SubmitTokenRejected) {
                 if ($attempt === 1) {
-                    continue;
+                    // Audit ZBU-L2: the refreshed token must still be the mailbox's account before the one retry (another
+                    // account's Gmail would send it from its own address).
+                    try {
+                        $same = $this->engine->checkAccount($settings, $gateway, $session);
+                    } catch (Throwable $failure) {
+                        return $this->afterDirectFailure($settings, $key, $token, $failure, false);
+                    }
+                    if ($same) {
+                        continue;
+                    }
+
+                    return $this->releaseDirect($settings, $key, $token, new MailboxGrantFailure(GrantFailureReason::AccountMismatch, 'The refreshed token belongs to another account than the mailbox; nothing was sent.'));
                 }
 
                 return $this->releaseDirect($settings, $key, $token, new MailboxGrantFailure(GrantFailureReason::Revoked, 'The provider refused a fresh token of the submit (HTTP 401); nothing was sent.'));
@@ -301,7 +312,16 @@ final readonly class MailboxSender implements MailboxSenderInterface
                 return $this->releaseDirect($settings, $key, $token, new MailboxProviderFailure('The submit window passed before the message was handed to the provider (slow token refresh); nothing was sent.', MailboxProviderFailure::TRANSIENT));
             }
 
-            if (!$this->store->updateSend($mailbox, $key, $token, SendState::Sending, SendState::Sent, ['provider_message_id' => $sent->id->value, 'thread_id' => $sent->threadId, 'sent_at' => $this->now()])) {
+            try {
+                $recorded = $this->store->updateSend($mailbox, $key, $token, SendState::Sending, SendState::Sent, ['provider_message_id' => $sent->id->value, 'thread_id' => $sent->threadId, 'sent_at' => $this->now()]);
+            } catch (Throwable $storage) {
+                // Audit ZBU-I5: Gmail sent it but the row could not be written. The row stays `sending` (settled
+                // `unknown` once stale, never resent); the caller must not send it again with a new key.
+                $this->logger?->warning('Mailbox send: the message was sent but its row could not be recorded; the key ends unknown and is never sent again.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value, 'error' => $storage::class]);
+
+                throw new MailboxSendOutcomeUnknown();
+            }
+            if (!$recorded) {
                 return $this->lostOutcome($mailbox, $key, $settings->provider);
             }
             $this->logger?->info('Mailbox message sent.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value]);

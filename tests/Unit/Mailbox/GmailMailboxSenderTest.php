@@ -156,6 +156,68 @@ final class GmailMailboxSenderTest extends TestCase
         self::assertCount(1, $this->google->sent);
     }
 
+    public function testThe401RetryChecksTheRefreshedTokensAccountFirst(): void
+    {
+        // Audit ZBU-L2: the fresh token after a submit 401 belongs to another Google account: nothing is sent.
+        $google                 = $this->google;
+        $this->google->override = static function (string $method, string $url) use ($google): ?MockResponse {
+            if ($url === GmailApiClient::SEND_URL) {
+                $google->userinfo = ['sub' => '100000000000000000099', 'email' => 'eve@example.com', 'email_verified' => true];
+
+                return MailboxGmailFake::json([], 401);
+            }
+
+            return null;
+        };
+
+        try {
+            $this->sender->send($this->ana, $this->mail());
+            self::fail('Another account.');
+        } catch (MailboxGrantFailure $failure) {
+            self::assertSame(GrantFailureReason::AccountMismatch, $failure->reason);
+        }
+        self::assertCount(1, $this->google->to(GmailApiClient::SEND_URL));
+        self::assertSame([], $this->google->sent);
+        self::assertSame(SendState::Released, $this->store->sendRow($this->ana, self::KEY)['status'] ?? null);
+        self::assertSame(GrantFailureReason::AccountMismatch, $this->engine->status($this->ana)->reason);
+
+        // The account read after the 401 fails transiently: released, nothing sent, retryable.
+        $this->google->userinfo = ['sub' => MailboxGmailFake::SUB, 'email' => 'ana@example.com', 'email_verified' => true];
+        $this->connection->executeStatement("UPDATE mail_kit_mailbox SET status = 'active', reason = NULL, account_hash = NULL");
+        $reads                  = 0;
+        $this->google->override = static function (string $method, string $url) use (&$reads): ?MockResponse {
+            if ($url === GmailApiClient::SEND_URL) {
+                return MailboxGmailFake::json([], 401);
+            }
+
+            return ++$reads === 2 ? MailboxGmailFake::json([], 503) : null;
+        };
+
+        try {
+            $this->sender->send($this->ana, $this->mail(key: 'retry-key-0000001'));
+            self::fail('Transient.');
+        } catch (MailboxProviderFailure $failure) {
+            self::assertTrue($failure->isRetryable());
+        }
+        self::assertSame(SendState::Released, $this->store->sendRow($this->ana, 'retry-key-0000001')['status'] ?? null);
+        self::assertSame([], $this->google->sent);
+    }
+
+    public function testASentMessageWhoseRowCannotBeWrittenIsUnknownNotFailed(): void
+    {
+        // Audit ZBU-I5: Gmail sent it, the `sent` write throws: a MailKit outcome, never a raw DBAL exception.
+        $this->connection->executeStatement("CREATE TRIGGER no_sent BEFORE UPDATE ON mail_kit_mailbox_send WHEN NEW.status = 'sent' BEGIN SELECT RAISE(ABORT, 'disk full'); END");
+
+        try {
+            $this->sender->send($this->ana, $this->mail());
+            self::fail('Unknown.');
+        } catch (MailboxSendOutcomeUnknown) {
+        }
+        self::assertCount(1, $this->google->sent);
+        self::assertSame(SendState::Sending, $this->store->sendRow($this->ana, self::KEY)['status'] ?? null);
+        self::assertTrue($this->log->has('the message was sent but its row could not be recorded'));
+    }
+
     public function testASecond401PausesTheMailboxAndReleasesTheKey(): void
     {
         $this->google->override = static fn (string $method, string $url): ?MockResponse => $url === GmailApiClient::SEND_URL ? MailboxGmailFake::json([], 401) : null;

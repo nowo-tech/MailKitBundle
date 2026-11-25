@@ -32,6 +32,7 @@ use Nowo\MailKitBundle\Mailbox\Value\OutgoingMailboxMail;
 use Nowo\MailKitBundle\Mailbox\Value\ProviderAttachmentId;
 use Nowo\MailKitBundle\Mailbox\Value\ProviderMessageId;
 use Nowo\MailKitBundle\Mailbox\Value\SyncedMessage;
+use Psr\Log\LoggerInterface;
 use SensitiveParameter;
 use Symfony\Component\Mime\Address;
 use Symfony\Component\Mime\Email;
@@ -39,12 +40,16 @@ use Symfony\Component\Mime\Exception\ExceptionInterface as MimeException;
 use Symfony\Component\Mime\Header\MailboxListHeader;
 use Symfony\Component\Mime\Part\DataPart;
 
+use function array_filter;
+use function array_values;
 use function in_array;
+use function intdiv;
 use function is_array;
 use function is_bool;
 use function is_string;
 use function preg_match;
 use function str_contains;
+use function str_starts_with;
 use function strlen;
 use function strtolower;
 use function trim;
@@ -96,6 +101,7 @@ final class GmailMailboxGateway implements MailboxGatewayInterface, SendOnlyMail
     public function __construct(
         private readonly GmailApiClient $api,
         ?MailHtmlSanitizer $outgoingSanitizer = null,
+        private readonly ?LoggerInterface $logger = null,
     ) {
         $this->outgoing = $outgoingSanitizer ?? new MailHtmlSanitizer(RemoteImages::Dropped, 2_000_000);
     }
@@ -116,8 +122,14 @@ final class GmailMailboxGateway implements MailboxGatewayInterface, SendOnlyMail
      */
     public function account(MailboxSession $session): ProviderAccount
     {
-        if (!in_array(GmailScopes::SEND, $session->token()->scopes, true)) {
+        $scopes = $session->token()->scopes;
+        if (!in_array(GmailScopes::SEND, $scopes, true)) {
             throw new MailboxGrantFailure(GrantFailureReason::ScopeMissing, 'The Gmail token was not granted the gmail.send scope.');
+        }
+        $broader = array_values(array_filter($scopes, static fn (string $scope): bool => $scope !== GmailScopes::SEND && (str_starts_with($scope, 'https://www.googleapis.com/auth/gmail.') || $scope === 'https://mail.google.com/')));
+        if ($broader !== []) {
+            // Audit ZBU-I4: D-20261124-09 allows gmail.send only; MailKit still calls only the two fixed endpoints.
+            $this->logger?->warning('Gmail token declares Gmail scopes beyond gmail.send; request exactly GmailScopes::REQUESTED.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $session->mailbox->value, 'scopes' => $broader]);
         }
         for ($attempt = 1;; ++$attempt) {
             $answer = $this->api->request($session, 'GET', GmailApiClient::USERINFO_URL, [], 'account', 0, self::MAX_SMALL_BYTES);
@@ -150,6 +162,10 @@ final class GmailMailboxGateway implements MailboxGatewayInterface, SendOnlyMail
     {
         if ($mail->kind !== OutgoingKind::New) {
             throw $this->sendOnly('reply or forward');
+        }
+        if (self::minimumMimeBytes($mail) > self::MAX_MIME_BYTES) {
+            // Audit ZBU-L3: refused before the message is rendered in memory (rendering peaks at about 5x its size).
+            throw new MailboxProviderFailure('The message is too large for Gmail (35 MB with its attachments encoded).', MailboxProviderFailure::TOO_LARGE);
         }
         $handles = [];
 
@@ -391,6 +407,21 @@ final class GmailMailboxGateway implements MailboxGatewayInterface, SendOnlyMail
         }
 
         return $attachment->inline ? $part->asInline() : $part;
+    }
+
+    /**
+     * A lower bound of the rendered message: the bodies as given plus every attachment in base64 with Mime's 76-character
+     * CRLF lines. A message above it can never fit, whatever its headers; one below is still checked once rendered.
+     */
+    public static function minimumMimeBytes(OutgoingMailboxMail $mail): int
+    {
+        $bytes = strlen($mail->text) + strlen((string) $mail->html);
+        foreach ($mail->attachments as $attachment) {
+            $encoded = intdiv($attachment->size + 2, 3) * 4;
+            $bytes += $encoded + 2 * intdiv($encoded + 75, 76);
+        }
+
+        return $bytes;
     }
 
     /**

@@ -1327,7 +1327,10 @@ MailKit runs no OAuth flow (Q-254-15 = b), exactly as for Outlook. Your connecti
   `gmail.send` pauses the mailbox `ScopeMissing` before any call;
 - throws `MailboxGrantFailure` when Google answers `invalid_grant` (revoked, expired, password change): the mailbox is
   paused once (`MailboxGrantFailedEvent`) and nothing is retried until you call `resume()` after a reconnect;
-  `MailboxTokenUnavailable` for a transient failure of Google's token endpoint.
+  `MailboxTokenUnavailable` for a transient failure of Google's token endpoint;
+- stores the address only when Google says `email_verified: true`, validates the `id_token` (`aud`, `iss`, `exp`) if
+  it reads the address from it, and keeps the `sub` with the grant (a reconnect with another `sub` is another
+  mailbox). A token that declares Gmail scopes beyond `gmail.send` is logged as a warning.
 
 ### Directory, start and send
 
@@ -1356,9 +1359,15 @@ form `name@domain`; at most 35 MB encoded) with a Message-ID derived from the id
 | 401 | retried once with a fresh token; a second 401 → `released` | `MailboxGrantFailure` `Revoked`, mailbox paused |
 | 403 scope / Workspace policy, 400 Gmail not enabled | `released` | `MailboxGrantFailure` (`ScopeMissing`, `ConsentMissing`, `MailboxNotFound`), mailbox paused |
 | 429, 403 rate or sending limit | `released` | `MailboxProviderFailure` (retryable, with `retryAfter`): call again later with the same key |
-| another 4xx | `failed` | `MailboxSendFailed` (`refused:<reason>`), the same for every retry |
+| another 4xx | `failed` | `MailboxSendFailed` (`refused:<reason>`), the same for every retry; e.g. `refused:accessNotConfigured` (Gmail API off in the Google project): enable it, then send again with a **new** key |
 | timeout, network error, 5xx, 2xx without an id | `unknown` | `MailboxSendOutcomeUnknown`: Gmail may have sent it; **it is never sent again** |
 | (a worker died during the submit) | `unknown` once stale | `MailboxSendInProgress` while fresh, then `MailboxSendOutcomeUnknown` |
+| 200, but the `sent` row cannot be written | `unknown` once stale | `MailboxSendOutcomeUnknown` (the message went out; never send it again with a new key) |
+
+After a 401, the refreshed token is checked against the mailbox's Google account before the one retry: another account
+pauses the mailbox `AccountMismatch` and releases the key. A message whose attachments cannot fit 35 MB once encoded is
+refused before it is rendered. The HTTP client must not retry by itself (see [Concurrency and worker
+mode](#concurrency-and-worker-mode)); a `retry_failed` client fails the build.
 
 No `DeliverSentCopy` is queued for Gmail: keep your own copy of what you sent (your draft, the returned ids).
 

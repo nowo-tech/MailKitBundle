@@ -731,6 +731,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             $container->setDefinition(GmailMailboxGateway::class, new Definition(GmailMailboxGateway::class, [
                 new Reference(GmailApiClient::class),
                 new Definition(MailHtmlSanitizer::class, [RemoteImages::from($mailboxes['html']['remote_images']) === RemoteImages::Allowed ? RemoteImages::Allowed : RemoteImages::Dropped, $send['max_html_bytes']]),
+                $logger,
             ]));
             $gateways[MailboxProvider::Gmail->value] = new Reference(GmailMailboxGateway::class);
         }

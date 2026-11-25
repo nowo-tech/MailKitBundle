@@ -242,10 +242,13 @@ sink. Details: [spec 005](../005-delegated-mailboxes/spec.md).
   the purge command and the build-time transaction warning.
 - **FR-MBX-010** — Events (`MailboxGrantFailedEvent`, `MailboxResyncedEvent`, `MailboxFolderSyncFailedEvent`) and the
   exceptions of the mailbox layer.
+- **FR-MBX-011** — Phase B2, send-only Gmail (D-20261124-09; spec 005 FR-019): `GmailMailboxGateway` and
+  `GmailApiClient` (userinfo account check, one `messages.send` per key, two fixed URLs), `GmailScopes`, and the
+  sender's direct path (`SendOnlyMailboxGatewayInterface`, `PreparedMessage`, `SubmittedMessage`).
 
 ---
 
 ## Success criteria
 
 - 100% statement and element coverage of `src/` (CI gate), PHPStan max with empty `ignoreErrors`, Igor clean.
-- Every file of `src/` listed in [`code-inventory.md`](code-inventory.md): **283 / 283** mapped (2.5.0, audited 2026-11-25).
+- Every file of `src/` listed in [`code-inventory.md`](code-inventory.md): **289 / 289** mapped (2.5.0 + phase B2, audited 2026-11-25).

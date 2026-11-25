@@ -1272,6 +1272,27 @@ on the claim token and state; every update changes the token, the state or a row
 the row even within one second. Two workers with the same key: one sends, the other gets `MailboxSendInProgress`
 and later the stored result.
 
+The HTTP client (`mailboxes.http_client`) must not retry on its own: Symfony's `RetryableHttpClient` (`retry_failed`)
+re-POSTs on 429 / 502 / 503 outside the claim, so the build fails when it wraps the mailbox client (audit ZBU-L1).
+After a 401 on the submit, the refreshed token is checked against the mailbox's account before the one retry (audit
+ZBU-L2). If the send went out but its `sent` row cannot be written, `send()` answers `MailboxSendInProgress`
+(`reconciling`): retry with the **same** key, never a new one (audit ZBU-I5).
+
+```yaml
+# config/packages/framework.yaml — when your default client retries, give MailKit its own scoped client
+framework:
+    http_client:
+        default_options:
+            retry_failed: true
+        scoped_clients:
+            mail_kit.http_client:
+                base_uri: 'https://graph.microsoft.com'   # any scope; MailKit sends absolute URLs
+# config/packages/nowo_mail_kit.yaml
+nowo_mail_kit:
+    mailboxes:
+        http_client: mail_kit.http_client
+```
+
 ## Send-only Gmail mailboxes (phase B2)
 
 Owner decision D-20261124-09: a Gmail mailbox **only sends**. MailKit never reads it: no inbox, no folder, no sync, no

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\MailKitBundle;
 
 use Nowo\MailKitBundle\DependencyInjection\Compiler\CsrfProtectionPass;
+use Nowo\MailKitBundle\DependencyInjection\Compiler\MailboxHttpRetryPass;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\MailboxSendTransactionPass;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\MailboxUrlGuardPass;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\MailerIntegrationPass;
@@ -48,6 +49,7 @@ final class NowoMailKitBundle extends Bundle
         $container->addCompilerPass(new MailboxUrlGuardPass());
         // Before the Messenger pass (priority 0), which removes the <bus>.middleware parameters.
         $container->addCompilerPass(new MailboxSendTransactionPass(), PassConfig::TYPE_BEFORE_OPTIMIZATION, 10);
+        $container->addCompilerPass(new MailboxHttpRetryPass(), PassConfig::TYPE_BEFORE_OPTIMIZATION);
     }
 
     /**

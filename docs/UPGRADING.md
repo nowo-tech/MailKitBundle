@@ -99,10 +99,13 @@ four tables and schedule three commands. Usage: [USAGE — Delegated Outlook mai
    `ReconcileMailboxSend` to an async transport that supports delays (the last two are sent with a `DelayStamp`).
 4. Schedule `nowo:mail-kit:mailbox:sweep` every 5 minutes, `nowo:mail-kit:mailbox:subscriptions` hourly and
    `nowo:mail-kit:mailbox:purge` daily (settled send rows after `send.retention`).
-5. Sending (`MailboxSenderInterface`): call `send()` **outside** a transaction on the mailbox connection. If your
+5. If `framework.http_client` (or the scoped client you give MailKit) uses `retry_failed`, set
+   `mailboxes.http_client` to a client without it: a retrying client fails the build (a retried send could go out
+   twice). The 1.8 `graph.http_client` only gets a warning in the container compiler log.
+6. Sending (`MailboxSenderInterface`): call `send()` **outside** a transaction on the mailbox connection. If your
    Messenger handlers run inside a `doctrine_transaction` middleware, point `mailboxes.connection` at a dedicated
    DBAL connection (the same database is fine) so the send rows commit on their own.
-6. Create the tables: with the ORM the `postGenerateSchema` listener adds them to `doctrine:migrations:diff`;
+7. Create the tables: with the ORM the `postGenerateSchema` listener adds them to `doctrine:migrations:diff`;
    otherwise run `nowo:mail-kit:mailbox:schema --force`, or apply the DDL below (no table prefix shown; key columns
    use the binary NO PAD collation, REQ-SEC-006).
 

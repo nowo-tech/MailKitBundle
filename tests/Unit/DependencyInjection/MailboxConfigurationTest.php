@@ -12,17 +12,22 @@ use Nowo\MailKitBundle\DependencyInjection\Configuration;
 use Nowo\MailKitBundle\DependencyInjection\NowoMailKitExtension;
 use Nowo\MailKitBundle\Graph\GraphApiClient;
 use Nowo\MailKitBundle\Graph\GuardedGraphRequestOptions;
+use Nowo\MailKitBundle\Tests\Support\DeprecationRecorder;
 use Nowo\OutboundUrlGuardBundle\Guard\OutboundUrlGuard;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use stdClass;
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\Config\Definition\Processor;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Definition;
 use Symfony\Component\DependencyInjection\Reference;
+use Symfony\Component\HttpClient\HttpClient;
 use Symfony\Component\HttpClient\MockHttpClient;
+use Symfony\Component\HttpClient\NoPrivateNetworkHttpClient;
 use Symfony\Component\HttpClient\RetryableHttpClient;
 use Symfony\Component\HttpClient\TraceableHttpClient;
+use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 use function implode;
 
@@ -165,31 +170,92 @@ final class MailboxConfigurationTest extends TestCase
         $container->setParameter(NowoMailKitExtension::MAILBOX_HTTP_CLIENT_PARAMETER, 'app.mail_client');
         $container->setAlias('app.mail_client', 'app.plain_client');
         $container->setDefinition('app.plain_client', new Definition(MockHttpClient::class));
-        $container->setDefinition('app.plain_client.logged', (new Definition(TraceableHttpClient::class))->setDecoratedService('app.plain_client'));
+        $container->setDefinition('app.plain_client.logged', (new Definition(TraceableHttpClient::class, [new Reference('.inner')]))->setDecoratedService('app.plain_client'));
         (new MailboxHttpRetryPass())->process($container);
         self::assertSame([], $container->getCompiler()->getLog());
 
         // FrameworkBundle's retry_failed decorator (class given as a parameter) on the mailbox client fails the build.
         $container->setParameter('app.retry_class', RetryableHttpClient::class);
         $container->setDefinition('app.plain_client.retryable', (new Definition('%app.retry_class%'))->setDecoratedService('app.plain_client'));
+        $this->expectRefusal($container, 'app.mail_client');
+    }
 
-        try {
-            (new MailboxHttpRetryPass())->process($container);
-            self::fail('A retrying client must be refused.');
-        } catch (LogicException $refused) {
-            self::assertStringContainsString('mailboxes.http_client "app.mail_client" retries failed requests', $refused->getMessage());
+    public function testTheRetryPassFollowsWrappersFactoriesAndAliases(): void
+    {
+        // Audit ZBUv-L1: the poc4 cases.
+        $base = static function (): ContainerBuilder {
+            $container = new ContainerBuilder();
+            $container->register('http_client', HttpClientInterface::class)->setFactory([HttpClient::class, 'create']);
+            $container->register('http_client.retryable', RetryableHttpClient::class)->setDecoratedService('http_client', null, 25)->setArguments([new Reference('.inner')]);
+
+            return $container;
+        };
+
+        // A host wrapper that takes the retrying client as an argument (inline definitions and arrays followed too).
+        $container = $base();
+        $container->register('app.guarded', NoPrivateNetworkHttpClient::class)->setArguments([['client' => new Definition(TraceableHttpClient::class, [new Reference('http_client')])]]);
+        $this->expectRefusal($container, 'app.guarded');
+
+        // A factory service that builds the client from the retrying one.
+        $container = $base();
+        $container->register('app.client_factory', HttpClientInterface::class)->setArguments([new Reference('http_client')]);
+        $container->register('app.factory', HttpClientInterface::class)->setFactory([new Reference('app.client_factory'), 'create']);
+        $this->expectRefusal($container, 'app.factory');
+
+        // A retry decorator on the alias id rather than on its target.
+        $container = $base();
+        $container->register('app.mail', HttpClientInterface::class)->setFactory([HttpClient::class, 'create']);
+        $container->setAlias('app.mail_alias', 'app.mail');
+        $container->register('app.mail.retry', RetryableHttpClient::class)->setDecoratedService('app.mail_alias');
+        $this->expectRefusal($container, 'app.mail_alias');
+
+        // Not followed: references to services that are not HTTP clients, missing ids, cycles, and beyond the depth limit.
+        $container = new ContainerBuilder();
+        $container->register('app.logger', stdClass::class);
+        $container->register('app.loop_a', TraceableHttpClient::class)->setArguments([new Reference('app.loop_b'), new Reference('app.logger'), new Reference('app.missing')]);
+        $container->register('app.loop_b', TraceableHttpClient::class)->setArguments([new Reference('app.loop_alias')]);
+        $container->setAlias('app.loop_alias', 'app.loop_a');
+        $container->register('app.tagged', stdClass::class)->addTag('http_client.client')->setArguments([new Reference('app.loop_a')]);
+        $previous = 'app.deep_retry';
+        $container->register($previous, RetryableHttpClient::class);
+        for ($i = 0; $i <= MailboxHttpRetryPass::MAX_DEPTH; ++$i) {
+            $container->register('app.deep_' . $i, TraceableHttpClient::class)->setArguments([new Reference($previous)]);
+            $previous = 'app.deep_' . $i;
         }
+        foreach (['app.tagged', $previous] as $id) {
+            $container->setParameter(NowoMailKitExtension::MAILBOX_HTTP_CLIENT_PARAMETER, $id);
+            (new MailboxHttpRetryPass())->process($container);
+        }
+        self::assertSame([], $container->getCompiler()->getLog());
+    }
 
-        // A client that is itself retrying, and the 1.8 shared-mailbox Graph client: a warning only.
+    public function testARetryingSharedMailboxGraphClientIsDeprecatedNotRefused(): void
+    {
+        // The released 1.8 graph.http_client: a visible deprecation in 2.x (3.0 fails the build).
         $container = new ContainerBuilder();
         $container->setParameter(NowoMailKitExtension::GRAPH_HTTP_CLIENT_PARAMETER, 'app.retrying');
         $container->setDefinition('app.retrying', new Definition(RetryableHttpClient::class));
-        (new MailboxHttpRetryPass())->process($container);
+        $notices = DeprecationRecorder::record(static fn () => (new MailboxHttpRetryPass())->process($container));
+        self::assertCount(1, $notices);
+        self::assertStringStartsWith('Since nowo-tech/mail-kit-bundle 2.5: nowo_mail_kit.graph.http_client "app.retrying" retries failed requests', $notices[0]);
+        self::assertStringContainsString('MailKit 3.0 fails the build', $notices[0]);
         self::assertStringContainsString('graph.http_client "app.retrying" retries failed requests', implode("\n", $container->getCompiler()->getLog()));
 
         $container->setParameter(NowoMailKitExtension::MAILBOX_HTTP_CLIENT_PARAMETER, 'app.retrying');
         $this->expectException(LogicException::class);
         (new MailboxHttpRetryPass())->process($container);
+    }
+
+    private function expectRefusal(ContainerBuilder $container, string $id): void
+    {
+        $container->setParameter(NowoMailKitExtension::MAILBOX_HTTP_CLIENT_PARAMETER, $id);
+
+        try {
+            (new MailboxHttpRetryPass())->process($container);
+            self::fail('A retrying client must be refused: ' . $id);
+        } catch (LogicException $refused) {
+            self::assertStringContainsString('mailboxes.http_client "' . $id . '" retries failed requests', $refused->getMessage());
+        }
     }
 
     private function container(string $mode, bool $guard): ContainerBuilder

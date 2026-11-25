@@ -821,6 +821,44 @@ final class MailboxSenderTest extends TestCase
         self::assertSame([], $this->bus->messages);
     }
 
+    public function testResumeReconcilesTheKeysAGrantFailureLeftSending(): void
+    {
+        // Audit ZBUv-L2: a grant failure at the submit keeps the key `sending`; resume() enqueues its reconcile, so the
+        // host need not call send() with that key again.
+        $this->graph->override = static fn (string $method, string $path): ?MockResponse => $method === 'POST' && str_ends_with($path, '/send') ? MailboxGraphFake::json(['error' => ['code' => 'InvalidAuthenticationToken']], 401) : null;
+
+        try {
+            $this->sender->send($this->ana, $this->mail());
+            self::fail('Revoked.');
+        } catch (MailboxGrantFailure) {
+        }
+        self::assertSame('sending', $this->row()['status']);
+        $this->graph->override = null;
+        self::assertSame(MailboxStatus::Active, $this->engine->resume($this->ana)->status);
+        $reconciles = array_values(array_filter($this->bus->messages, static fn (object $m): bool => $m instanceof ReconcileMailboxSend));
+        self::assertEquals([new ReconcileMailboxSend('mbx-ana', self::KEY)], $reconciles);
+
+        // Once stale, the background reconcile submits that same draft once; nothing else is sent.
+        $this->clock->modify('+121 seconds');
+        $this->drain();
+        self::assertSame('sent', $this->row()['status']);
+        self::assertSame(['DRAFT-1'], $this->graph->delivered);
+
+        // An enqueue failure on resume is logged; the next send() with the key still reconciles it.
+        $this->mailboxConnection->executeStatement("UPDATE mail_kit_mailbox_send SET status = 'sending'");
+        $this->engine->pause($this->ana);
+        $this->bus->messages = [];
+        $this->bus->failure  = new RuntimeException('transport down (fixture)');
+
+        try {
+            // The folder sweeps enqueued after the reconcile meet the same failure and are thrown as before.
+            $this->engine->resume($this->ana);
+        } catch (RuntimeException) {
+        }
+        self::assertTrue($this->log->has('Mailbox send reconcile could not be enqueued on resume'));
+        $this->bus->failure = null;
+    }
+
     public function testTheRefreshedTokenOfThe401RetryIsCheckedAgainstTheMailboxAccount(): void
     {
         // Audit ZBU-L2: after a submit 401 the fresh token belongs to another account: nothing is submitted again.

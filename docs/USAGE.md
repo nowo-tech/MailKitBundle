@@ -1368,7 +1368,7 @@ form `name@domain`; at most 35 MB encoded) with a Message-ID derived from the id
 | 429, 403 rate or sending limit | `released` | `MailboxProviderFailure` (retryable, with `retryAfter`): call again later with the same key |
 | another 4xx | `failed` | `MailboxSendFailed` (`refused:<reason>`), the same for every retry; e.g. `refused:accessNotConfigured` (Gmail API off in the Google project): enable it, then send again with a **new** key |
 | timeout, network error, 5xx, 2xx without an id | `unknown` | `MailboxSendOutcomeUnknown`: Gmail may have sent it; **it is never sent again** |
-| (a worker died during the submit) | `unknown` once stale | `MailboxSendInProgress` while fresh, then `MailboxSendOutcomeUnknown` |
+| (a worker died during the submit) | `unknown` once stale | `MailboxSendInProgress` while fresh, then `MailboxSendOutcomeUnknown`; `resume()` also enqueues its reconcile |
 | 200, but the `sent` row cannot be written | `unknown` once stale | `MailboxSendOutcomeUnknown` (the message went out; never send it again with a new key) |
 
 After a 401, the refreshed token is checked against the mailbox's Google account before the one retry: another account

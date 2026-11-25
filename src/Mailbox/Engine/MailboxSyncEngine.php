@@ -600,11 +600,14 @@ final class MailboxSyncEngine implements MailboxSyncInterface
         $session = new MailboxSession($mailbox, $settings->provider, $settings->address, $this->store->mailbox($mailbox)['account_hash'] ?? null, $this->tokens, $this->observer, $this->logger);
 
         try {
-            if (!$this->checkAccount($settings, $gateway, $session) || $gateway instanceof SendOnlyMailboxGatewayInterface) {
-                // A send-only mailbox (phase B2) is active once its account is bound: nothing to sync.
+            if (!$this->checkAccount($settings, $gateway, $session)) {
                 return;
             }
             $this->reconcileSends($mailbox);
+            if ($gateway instanceof SendOnlyMailboxGatewayInterface) {
+                // A send-only mailbox (phase B2) is active once its account is bound: nothing to sync.
+                return;
+            }
             foreach ($settings->folders as $folder) {
                 $this->store->ensureCursor($mailbox, $folder->key);
             }

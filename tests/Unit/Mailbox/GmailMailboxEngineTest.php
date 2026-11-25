@@ -10,10 +10,12 @@ use InvalidArgumentException;
 use Nowo\MailKitBundle\Mailbox\Engine\MailboxAttachmentReader;
 use Nowo\MailKitBundle\Mailbox\Engine\MailboxSyncEngine;
 use Nowo\MailKitBundle\Mailbox\Engine\MailboxSyncOptions;
+use Nowo\MailKitBundle\Mailbox\Engine\SendState;
 use Nowo\MailKitBundle\Mailbox\Exception\MailboxProviderFailure;
 use Nowo\MailKitBundle\Mailbox\Gmail\GmailApiClient;
 use Nowo\MailKitBundle\Mailbox\Gmail\GmailMailboxGateway;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Command\MailboxStatusCommand;
+use Nowo\MailKitBundle\Mailbox\Infrastructure\Messenger\ReconcileMailboxSend;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Store\MailboxStore;
 use Nowo\MailKitBundle\Mailbox\Value\FolderRef;
 use Nowo\MailKitBundle\Mailbox\Value\GrantFailureReason;
@@ -117,11 +119,15 @@ final class GmailMailboxEngineTest extends TestCase
         $command->execute(['mailbox' => 'mbx-unknown']);
         self::assertStringNotContainsString('Provider:', $command->getDisplay());
 
-        // Resume after a pause checks the account again.
+        // Resume after a pause checks the account again and enqueues the reconcile of a key left `sending` (a worker
+        // that died during the submit; audit ZBUv-L2): it is settled `unknown`, never resent.
         $this->engine->pause($this->ana);
+        $this->store->claimSend($this->ana, 'crashed-key-00001', 'h', 't0');
+        $this->store->updateSend($this->ana, 'crashed-key-00001', 't0', SendState::Drafting, SendState::Sending);
         self::assertSame(MailboxStatus::Active, $this->engine->resume($this->ana)->status);
         self::assertCount(2, $this->google->requests);
-        self::assertSame(1, $this->engine->disconnect($this->ana)->rowsDeleted);
+        self::assertEquals([new ReconcileMailboxSend('mbx-ana', 'crashed-key-00001')], $this->bus->messages);
+        self::assertSame(2, $this->engine->disconnect($this->ana)->rowsDeleted);
     }
 
     public function testStartPausesOnAnotherAccountOrAMissingScope(): void

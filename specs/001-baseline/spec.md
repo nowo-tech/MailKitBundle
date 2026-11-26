@@ -180,7 +180,7 @@ sink. Details: [spec 005](../005-delegated-mailboxes/spec.md).
 ### Microsoft Graph sending (1.8)
 
 - **FR-GRS-001** — Mailbox port `GraphMailboxProviderInterface` (configured profiles by default), `GraphMailbox`,
-  `GraphSecret` (never printed), `GraphTokenProvider` (PSR-6 cached app-only tokens), `GraphApiClient` (deadline,
+  `GraphSecret` (never printed, kept out of stack traces via `#[\SensitiveParameter]`, 2.2.2), `GraphTokenProvider` (PSR-6 cached app-only tokens), `GraphApiClient` (deadline,
   allowed upload hosts), `GraphException`.
 - **FR-GRS-002** — `GraphMailSender`: value objects in (`GraphOutgoingMail`, `GraphRecipient`, `GraphAttachment`,
   `PlusAddress`, `AttachmentFilename`), Graph id and internetMessageId out (`GraphSendResult`), limits
@@ -229,7 +229,7 @@ sink. Details: [spec 005](../005-delegated-mailboxes/spec.md).
 - **FR-MBX-004** — Microsoft Graph provider: `GraphMailboxGateway` (`/me` paths only, delta-link guard, failure
   mapping), `DelegatedGraphCredential`, the credential / request-option abstractions of `GraphApiClient`, the optional
   OutboundUrlGuard pin (`MailboxUrlGuardPass`).
-- **FR-MBX-005** — `MailHtmlSanitizer` with `RemoteImages` modes (`blocked` by default).
+- **FR-MBX-005** — `MailHtmlSanitizer` with `RemoteImages` modes (`blocked` by default); `srcset` is stripped (2.2.2).
 - **FR-MBX-006** — Webhook (`MailboxGraphWebhookController`, `MailboxWebhookRouteLoader`, shared
   `AbstractGraphWebhookController`): validation echo, hashed client state, enqueue only.
 - **FR-MBX-007** — Messenger messages and handler (bounded retries) and the CLI `nowo:mail-kit:mailbox:schema`,
@@ -239,7 +239,10 @@ sink. Details: [spec 005](../005-delegated-mailboxes/spec.md).
 - **FR-MBX-009** — Send: `MailboxSenderInterface` / `MailboxSender` (draft + send, mandatory idempotency key, the
   `SendState` machine with fenced submits, reconcile by draft state, sent copy), `OutgoingMailboxMail`,
   `OutgoingAttachment`, `OutgoingKind`, `SentMessage`, the send exceptions, `DeliverSentCopy`, `ReconcileMailboxSend`,
-  the purge command and the build-time transaction warning.
+  the purge command, the build-time transaction warning and the build-time HTTP retry guard (`MailboxHttpRetryPass`:
+  `mailboxes.http_client` must not retry by itself, because a provider 502 / 503 after an accepted send would re-POST it
+  outside the claim and submit window; the 1.8 `graph.http_client` is deprecated for the same reason; audits ZBU-L1,
+  ZBUv-L1, 2.5.0). The 401 retry rechecks the account first.
 - **FR-MBX-010** — Events (`MailboxGrantFailedEvent`, `MailboxResyncedEvent`, `MailboxFolderSyncFailedEvent`) and the
   exceptions of the mailbox layer.
 
@@ -248,4 +251,4 @@ sink. Details: [spec 005](../005-delegated-mailboxes/spec.md).
 ## Success criteria
 
 - 100% statement and element coverage of `src/` (CI gate), PHPStan max with empty `ignoreErrors`, Igor clean.
-- Every file of `src/` listed in [`code-inventory.md`](code-inventory.md): **283 / 283** mapped (2.5.0, audited 2026-11-25).
+- Every file of `src/` listed in [`code-inventory.md`](code-inventory.md): **283 / 283** mapped (2.5.0, audited 2026-11-26).

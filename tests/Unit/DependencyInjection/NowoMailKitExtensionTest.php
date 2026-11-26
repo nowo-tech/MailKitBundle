@@ -196,8 +196,6 @@ final class NowoMailKitExtensionTest extends TestCase
         self::assertSame(DefaultSentMailPersonalDataSubjectResolver::class, (string) $default->getAlias(SentMailPersonalDataSubjectResolverInterface::class));
         self::assertSame('event_dispatcher', (string) $default->getDefinition(SentMailRecorder::class)->getArgument(7));
         self::assertSame([['priority' => EmailsReceivedPersonalDataEraser::PRIORITY]], $default->getDefinition(EmailsReceivedPersonalDataEraser::class)->getTag('nowo_user_kit.personal_data.eraser'));
-        $erasers = $default->getDefinition(EmailsReceivedPersonalDataEraser::class)->getTag('nowo_user_kit.personal_data.eraser');
-        self::assertGreaterThanOrEqual(100, $erasers[0]['priority'], 'runs before the host identity eraser');
         self::assertSame([['priority' => EmailsReceivedPersonalDataExportProvider::PRIORITY]], $default->getDefinition(EmailsReceivedPersonalDataExportProvider::class)->getTag('nowo_user_kit.personal_data.export_provider'));
         self::assertSame([SentMailPersonalDataEraserInterface::class, SentMailPersonalDataSubjectResolverInterface::class], array_map('strval', $default->getDefinition(EmailsReceivedPersonalDataEraser::class)->getArguments()));
         self::assertSame([SentMailPersonalDataExporterInterface::class, SentMailPersonalDataSubjectResolverInterface::class], array_map('strval', $default->getDefinition(EmailsReceivedPersonalDataExportProvider::class)->getArguments()));

@@ -2,9 +2,9 @@
 
 **Baseline spec**: [`spec.md`](spec.md)  
 **Package**: `nowo-tech/mail-kit-bundle`  
-**Last audited**: 2026-11-25
+**Last audited**: 2026-11-26
 
-Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **283** (2.5.0, audit ZBU retry guard).
+Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **283** (2.5.0, audit ZBU retry guard; re-checked against `git ls-files src` on 2026-11-26: no unmapped file, no stale row).
 
 ## Bundle and dependency injection
 

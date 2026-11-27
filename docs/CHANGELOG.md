@@ -41,6 +41,35 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+Planned as **2.8.0**: tag-scoped GDPR erasure and export of the sent-mail log, for a module that owns only the rows it
+tagged (for example one tenant's messages). Additive, no BC break, no schema change; hosts need not act.
+
+### Added
+
+- `Log\SentMailTaggedPersonalDataEraserInterface::eraseTagged(SentMailPersonalDataSubject, string $tag)`: the erasure of
+  `SentMailPersonalDataEraserInterface::erase()` limited to the rows whose tag (`MailHeaders::tag()`) is exactly the
+  given one. Same semantics within the tag: exact address match, rows with other recipients unlinked and the address
+  masked, rows with nobody else deleted with their body, the address masked in the subjects, errors and stored bodies of
+  the other rows with that tag; idempotent; joins the caller's transaction or runs its own and dispatches
+  `SentMailPersonalDataErasedEvent` after the commit. Rows with another tag, a case variant of the tag or no tag are
+  never read or changed.
+- `Log\SentMailTaggedPersonalDataExporterInterface::exportTagged(SentMailPersonalDataSubject, string $tag)`: the export
+  of `SentMailPersonalDataExporterInterface::export()` limited to the same rows, same row shape.
+- Both ports are always registered: `SentMailRecorder` whenever Doctrine is, `NullSentMailErasure` /
+  `NullSentMailPersonalDataExporter` otherwise. Separate interfaces, so existing implementations of the 1.7 ports keep
+  compiling.
+- `SentMailRecorder::tagFilter()`: the tag a scoped call matches, trimmed like `MailHeaders::tag()` stores it; an empty
+  tag, control characters, invalid UTF-8 or more than 64 characters (`MailHeaders::TAG_MAX`, the `tag` column length)
+  throw `InvalidArgumentException` instead of being truncated.
+- `Event\SentMailPersonalDataErasedEvent::$tag` (optional last constructor argument, default `null`): the tag a scoped
+  erasure was limited to.
+
+### Notes
+
+- Exact tag match: SQL pre-filters with `tag = ?` and every row is re-checked in PHP with `===`, so a case- or
+  pad-insensitive collation (MySQL / MariaDB) never widens the scope. No index on `tag` is added: the lookup keeps the
+  address pre-filter of 1.7 (`recipient_index` / `sender`) and only narrows it, so no migration is needed.
+
 ## [2.7.0] - 2026-11-27
 
 Planned as **2.7.0**: editable stored e-mail templates and snippets (this roadmap's Phase 2 and the CrmKit A-2 request,

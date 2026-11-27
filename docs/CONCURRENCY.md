@@ -32,7 +32,7 @@ request or a replayed Messenger message. It applies from **1.13.0**.
 | Path | Transaction | Control | Conflict answer |
 | --- | --- | --- | --- |
 | Sent-mail log row (`SentMailRecorder::queued/sent/failed`) | One `INSERT` (plus the optional body row), or one `UPDATE … attempts = attempts + 1` by id; autocommit | New UUIDv7 primary key; atomic counter | Best effort: a failure is logged and the e-mail is not affected (see [Residual risks](#residual-risks)) |
-| GDPR erasure of an address (`forgetAddress()` / `erase()`) | One transaction (`transactional()`), or the caller's | Exact re-check in PHP of every pre-filtered row; delete by id in batches of 500 | Exception to the caller (UserKit eraser, `nowo:mail-kit:forget-recipient`) |
+| GDPR erasure of an address (`forgetAddress()` / `erase()` / `eraseTagged()`) | One transaction (`transactional()`), or the caller's | Exact re-check in PHP of every pre-filtered row; delete by id in batches of 500 | Exception to the caller (UserKit eraser, `nowo:mail-kit:forget-recipient`) |
 | Log retention (`purgeBefore()`, `nowo:mail-kit:purge`) | One `DELETE` per keyset batch | Idempotent (delete by id) | Exception to the command; run it again |
 | Graph inbound claim (`GraphInboundStore::claim()`) | One `INSERT`; inside a host transaction it runs in a savepoint, rolled back on any failure | Unique `message_key` plus a caught duplicate; stale takeover with a conditional `UPDATE … WHERE claimed_at < ?` | Messenger retries; the retry sees the claim |
 | Graph inbound decision (`complete()`) | One `UPDATE`, in a savepoint inside a host transaction | By key; one retry on a lock conflict outside a transaction | Rethrown, and the claim is kept (no second hand-over to your handler) |

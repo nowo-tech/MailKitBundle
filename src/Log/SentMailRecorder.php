@@ -11,6 +11,7 @@ use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\Persistence\ManagerRegistry;
+use InvalidArgumentException;
 use LogicException;
 use Normalizer;
 use Nowo\MailKitBundle\Entity\SentMail;
@@ -51,8 +52,10 @@ use function json_decode;
 use function json_encode;
 use function max;
 use function mb_strcut;
+use function mb_strlen;
 use function mb_strtolower;
 use function mb_substr;
+use function preg_match;
 use function preg_quote;
 use function preg_replace;
 use function rawurlencode;
@@ -79,7 +82,7 @@ use const JSON_UNESCAPED_UNICODE;
  * Privacy: envelope data only by default (subject, sender, recipients); bodies only with `log.store_bodies`, with the
  * {@see MailHeaders::REDACT} values masked. Errors are scrubbed of credentials ({@see ErrorScrubber}).
  */
-final readonly class SentMailRecorder implements SentMailErasureInterface, SentMailPersonalDataEraserInterface, SentMailPersonalDataExporterInterface
+final readonly class SentMailRecorder implements SentMailErasureInterface, SentMailPersonalDataEraserInterface, SentMailPersonalDataExporterInterface, SentMailTaggedPersonalDataEraserInterface, SentMailTaggedPersonalDataExporterInterface
 {
     /** Separator of the recipient index (unit separator: refused in addresses). */
     public const SEPARATOR = "\x1F";
@@ -222,27 +225,7 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
      */
     public function forgetAddress(string $email): array
     {
-        $forms = self::forms($email);
-        if ($forms === []) {
-            return ['deleted' => 0, 'unlinked' => 0, 'redacted' => 0];
-        }
-        $connection    = $this->connection();
-        [$main, $body] = $this->tables($connection);
-        if (!$main) {
-            return ['deleted' => 0, 'unlinked' => 0, 'redacted' => 0];
-        }
-
-        if ($connection->isTransactionActive()) {
-            // The caller's transaction may still roll back: no event, the counts are the outcome.
-            $result = $this->eraseRows($connection, $forms, $body);
-        } else {
-            // @igor-ignore - Closure runs synchronously inside transactional(); it is not stored on the service.
-            $result = $connection->transactional(fn (Connection $connection): array => $this->eraseRows($connection, $forms, $body));
-            $this->dispatcher?->dispatch(new SentMailPersonalDataErasedEvent($forms[0], $result['deleted'], $result['redacted'], $result['unlinked']));
-        }
-        $this->assertBodyTable($body, $result['deleted'], $result['redacted']);
-
-        return $result;
+        return $this->forget(self::forms($email), null);
     }
 
     /**
@@ -258,6 +241,21 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
     }
 
     /**
+     * {@see self::erase()} limited to the rows with exactly this tag (2.8): rows with another tag or none, and their
+     * subjects and bodies, are never touched. Same matching, transaction and event semantics (the event carries the
+     * tag).
+     *
+     * @throws InvalidArgumentException for an invalid tag ({@see self::tagFilter()})
+     * @throws SentMailLogTableMissingException when a log table is missing and the entities are mapped
+     */
+    public function eraseTagged(SentMailPersonalDataSubject $subject, string $tag): SentMailErasureResult
+    {
+        $result = $this->forget($subject->forms(), self::tagFilter($tag));
+
+        return new SentMailErasureResult($result['deleted'], $result['redacted'], $result['unlinked']);
+    }
+
+    /**
      * Rows the address received (to, cc, bcc) or sent (1.7, GDPR art. 15 / 20): envelope only, exact match (SQL
      * pre-filter, PHP re-check), read in id batches of {@see self::PERSONAL_DATA_BATCH}.
      *
@@ -267,6 +265,55 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
      */
     public function export(SentMailPersonalDataSubject $subject): array
     {
+        return $this->exportRows($subject->forms(), null);
+    }
+
+    /**
+     * {@see self::export()} limited to the rows with exactly this tag (2.8).
+     *
+     * @throws InvalidArgumentException for an invalid tag ({@see self::tagFilter()})
+     * @throws SentMailLogTableMissingException when the log table is missing and the entities are mapped
+     *
+     * @return list<array{id: string, roles: list<'recipient'|'sender'>, status: string, template: string|null, subject: string, queued_at: string|null, sent_at: string|null, failed_at: string|null}>
+     */
+    public function exportTagged(SentMailPersonalDataSubject $subject, string $tag): array
+    {
+        return $this->exportRows($subject->forms(), self::tagFilter($tag));
+    }
+
+    /**
+     * The tag a tag-scoped erasure or export matches (2.8): trimmed like {@see MailHeaders::tag()} stores it, and
+     * refused instead of truncated, so a caller never matches a shorter tag than the one it asked for.
+     *
+     * @throws InvalidArgumentException for an empty tag, control characters, invalid UTF-8 or more than
+     *                                  {@see MailHeaders::TAG_MAX} characters
+     */
+    public static function tagFilter(string $tag): string
+    {
+        // Before trimming: trim() also strips NUL and other control characters at the edges.
+        if (preg_match('//u', $tag) !== 1 || preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', $tag) === 1) {
+            throw new InvalidArgumentException('A sent-mail log tag must be valid UTF-8 without control characters.');
+        }
+        $tag = trim($tag);
+        if ($tag === '' || preg_match('/[\x00-\x1F]/', $tag) === 1) {
+            throw new InvalidArgumentException('A sent-mail log tag must not be empty or hold line breaks or tabs.');
+        }
+        if (mb_strlen($tag) > MailHeaders::TAG_MAX) {
+            throw new InvalidArgumentException('A sent-mail log tag must not be longer than 64 characters.');
+        }
+
+        return $tag;
+    }
+
+    /**
+     * Export rows of the forms, all of them or only those with the tag.
+     *
+     * @param list<string> $forms
+     *
+     * @return list<array{id: string, roles: list<'recipient'|'sender'>, status: string, template: string|null, subject: string, queued_at: string|null, sent_at: string|null, failed_at: string|null}>
+     */
+    private function exportRows(array $forms, ?string $tag): array
+    {
         $connection = $this->connection();
         [$main]     = $this->tables($connection);
         if (!$main) {
@@ -274,7 +321,7 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
         }
 
         $rows = [];
-        foreach ($this->rowsOf($connection, $subject->forms(), ', status, tag, subject, queued_at, sent_at, failed_at') as [$row, $roles]) {
+        foreach ($this->rowsOf($connection, $forms, ', status, tag, subject, queued_at, sent_at, failed_at', $tag) as [$row, $roles]) {
             $rows[] = [
                 'id'        => (string) $row['id'],
                 'roles'     => $roles,
@@ -380,18 +427,52 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
     }
 
     /**
+     * Erasure of {@see self::forgetAddress()} (tag null) and {@see self::eraseTagged()} (only rows with the tag).
+     *
+     * @param list<string> $forms
+     *
+     * @throws SentMailLogTableMissingException
+     *
+     * @return array{deleted: int, unlinked: int, redacted: int}
+     */
+    private function forget(array $forms, ?string $tag): array
+    {
+        if ($forms === []) {
+            return ['deleted' => 0, 'unlinked' => 0, 'redacted' => 0];
+        }
+        $connection    = $this->connection();
+        [$main, $body] = $this->tables($connection);
+        if (!$main) {
+            return ['deleted' => 0, 'unlinked' => 0, 'redacted' => 0];
+        }
+
+        if ($connection->isTransactionActive()) {
+            // The caller's transaction may still roll back: no event, the counts are the outcome.
+            $result = $this->eraseRows($connection, $forms, $body, $tag);
+        } else {
+            // @igor-ignore - Closure runs synchronously inside transactional(); it is not stored on the service.
+            $result = $connection->transactional(fn (Connection $connection): array => $this->eraseRows($connection, $forms, $body, $tag));
+            $this->dispatcher?->dispatch(new SentMailPersonalDataErasedEvent($forms[0], $result['deleted'], $result['redacted'], $result['unlinked'], $tag));
+        }
+        $this->assertBodyTable($body, $result['deleted'], $result['redacted']);
+
+        return $result;
+    }
+
+    /**
      * Unlinks the address from the rows other people still share, deletes the rows nobody else is left in, and masks
-     * the address elsewhere (inside the transaction of {@see self::forgetAddress()}).
+     * the address elsewhere (inside the transaction of {@see self::forgetAddress()}). With a tag (2.8) every step is
+     * limited to the rows with exactly that tag.
      *
      * @param list<string> $forms
      *
      * @return array{deleted: int, unlinked: int, redacted: int}
      */
-    private function eraseRows(Connection $connection, array $forms, bool $body): array
+    private function eraseRows(Connection $connection, array $forms, bool $body, ?string $tag = null): array
     {
         $ids      = [];
         $unlinked = 0;
-        foreach ($this->rowsOf($connection, $forms, ', recipients, subject, error') as [$row, $roles]) {
+        foreach ($this->rowsOf($connection, $forms, ', recipients, subject, error', $tag) as [$row, $roles]) {
             $recipients = $this->withoutAddress($this->decodeRecipients($row['recipients']), $forms);
             if ($recipients === []) {
                 // Nobody else is left in this row (sole recipient, or own message to self): delete it.
@@ -417,9 +498,14 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
         }
 
         $redacted = 0;
+        // 2.8: with a tag only the rows (and bodies) carrying it; the PHP `===` re-check below keeps a case- or
+        // pad-insensitive collation from widening the scope.
+        $mainScope = $tag === null ? '' : ' AND tag = ?';
+        $bodyScope = $tag === null ? '' : ' AND id IN (SELECT id FROM ' . $this->table() . ' WHERE tag = ?)';
+        $scope     = $tag === null ? [] : [$tag];
         foreach ($forms as $form) {
             $pattern = '%' . self::likeEscape($form) . '%';
-            foreach ($connection->fetchAllAssociative('SELECT id, subject, error FROM ' . $this->table() . " WHERE LOWER(subject) LIKE ? ESCAPE '!' OR LOWER(error) LIKE ? ESCAPE '!'", [$pattern, $pattern]) as $row) {
+            foreach ($this->withTag($connection->fetchAllAssociative('SELECT id, tag, subject, error FROM ' . $this->table() . " WHERE (LOWER(subject) LIKE ? ESCAPE '!' OR LOWER(error) LIKE ? ESCAPE '!')" . $mainScope, [$pattern, $pattern, ...$scope]), $tag, 'tag') as $row) {
                 $subject = $this->mask((string) $row['subject'], $forms);
                 $error   = is_string($row['error']) ? $this->mask($row['error'], $forms) : null;
                 // The LIKE is only a pre-filter (case / accent-insensitive collations): count real changes only.
@@ -427,7 +513,11 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
                     $redacted += (int) $connection->update($this->table(), ['subject' => $subject, 'error' => $error], ['id' => $row['id']]);
                 }
             }
-            $bodies = $body ? $connection->fetchAllAssociative('SELECT id, html_body, text_body FROM ' . $this->bodyTable() . " WHERE LOWER(html_body) LIKE ? ESCAPE '!' OR LOWER(text_body) LIKE ? ESCAPE '!'", [$pattern, $pattern]) : [];
+            $bodies = $body ? $connection->fetchAllAssociative('SELECT id, html_body, text_body FROM ' . $this->bodyTable() . " WHERE (LOWER(html_body) LIKE ? ESCAPE '!' OR LOWER(text_body) LIKE ? ESCAPE '!')" . $bodyScope, [$pattern, $pattern, ...$scope]) : [];
+            if ($tag !== null && $bodies !== []) {
+                $owned  = $this->idsTagged($connection, array_map(static fn (array $row): string => (string) $row['id'], $bodies), $tag);
+                $bodies = array_filter($bodies, static fn (array $row): bool => in_array((string) $row['id'], $owned, true));
+            }
             foreach ($bodies as $row) {
                 $html = is_string($row['html_body']) ? $this->mask($row['html_body'], $forms) : null;
                 $text = is_string($row['text_body']) ? $this->mask($row['text_body'], $forms) : null;
@@ -482,12 +572,14 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
      * Rows whose recipient index or sender holds one of the forms, with the roles of the address: SQL pre-filter
      * (index LIKE, sender IN), then an exact re-check in PHP (`===` on the index entries and the sender), in id batches.
      *
+     * With a tag (2.8) only rows whose tag is exactly that one (SQL `tag = ?`, then `===` in PHP).
+     *
      * @param list<string> $forms
      * @param string $columns extra columns, each preceded by a comma
      *
      * @return list<array{array<string, mixed>, list<'recipient'|'sender'>}>
      */
-    private function rowsOf(Connection $connection, array $forms, string $columns = ''): array
+    private function rowsOf(Connection $connection, array $forms, string $columns = '', ?string $tag = null): array
     {
         $where  = [];
         $params = [];
@@ -496,14 +588,15 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
             $params[] = '%' . self::likeEscape(self::SEPARATOR . $form . self::SEPARATOR) . '%';
         }
         $where[] = 'sender IN (' . implode(', ', array_fill(0, count($forms), '?')) . ')';
-        $sql     = 'SELECT id, recipient_index, sender' . $columns . ' FROM ' . $this->table() . ' WHERE (' . implode(' OR ', $where) . ') AND id > ? ORDER BY id LIMIT ' . self::PERSONAL_DATA_BATCH;
+        $sql     = 'SELECT id, recipient_index, sender, tag AS row_tag' . $columns . ' FROM ' . $this->table() . ' WHERE (' . implode(' OR ', $where) . ')' . ($tag === null ? '' : ' AND tag = ?') . ' AND id > ? ORDER BY id LIMIT ' . self::PERSONAL_DATA_BATCH;
+        $scope   = $tag === null ? [] : [$tag];
 
         $rows = [];
         $last = '';
         do {
-            $page = $connection->fetchAllAssociative($sql, [...$params, ...$forms, $last]);
-            foreach ($page as $row) {
-                $last  = (string) $row['id'];
+            $page = $connection->fetchAllAssociative($sql, [...$params, ...$forms, ...$scope, $last]);
+            $last = $page === [] ? $last : (string) $page[count($page) - 1]['id'];
+            foreach ($this->withTag($page, $tag, 'row_tag') as $row) {
                 $roles = $this->roles($row, $forms);
                 if ($roles !== []) {
                     $rows[] = [$row, $roles];
@@ -539,6 +632,38 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
         }
 
         return $roles;
+    }
+
+    /**
+     * The ids among the given ones whose tag is exactly the tag (PHP `===` re-check of a SQL pre-filter, 2.8).
+     *
+     * @param list<string> $ids
+     *
+     * @return list<string>
+     */
+    private function idsTagged(Connection $connection, array $ids, string $tag): array
+    {
+        $owned = [];
+        foreach (array_chunk($ids, self::PERSONAL_DATA_BATCH) as $batch) {
+            foreach ($this->withTag($connection->fetchAllAssociative('SELECT id, tag FROM ' . $this->table() . ' WHERE id IN (?)', [$batch], [ArrayParameterType::STRING]), $tag, 'tag') as $row) {
+                $owned[] = (string) $row['id'];
+            }
+        }
+
+        return $owned;
+    }
+
+    /**
+     * The rows whose tag column is exactly the tag (all of them without a tag, 2.8): the `===` re-check of a SQL
+     * `tag = ?` pre-filter that a case- or pad-insensitive collation may have widened.
+     *
+     * @param list<array<string, mixed>> $rows
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function withTag(array $rows, ?string $tag, string $column): array
+    {
+        return $tag === null ? $rows : array_values(array_filter($rows, static fn (array $row): bool => $row[$column] === $tag));
     }
 
     private function atom(Connection $connection, mixed $value): ?string

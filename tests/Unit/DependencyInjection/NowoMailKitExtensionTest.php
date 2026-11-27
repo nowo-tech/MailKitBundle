@@ -19,6 +19,8 @@ use Nowo\MailKitBundle\Log\SentMailPersonalDataEraserInterface;
 use Nowo\MailKitBundle\Log\SentMailPersonalDataExporterInterface;
 use Nowo\MailKitBundle\Log\SentMailPersonalDataSubjectResolverInterface;
 use Nowo\MailKitBundle\Log\SentMailRecorder;
+use Nowo\MailKitBundle\Log\SentMailTaggedPersonalDataEraserInterface;
+use Nowo\MailKitBundle\Log\SentMailTaggedPersonalDataExporterInterface;
 use Nowo\MailKitBundle\Mailer\RuntimeTransport;
 use Nowo\MailKitBundle\NowoMailKitBundle;
 use Nowo\MailKitBundle\Resend\ResendApiChecker;
@@ -218,6 +220,8 @@ final class NowoMailKitExtensionTest extends TestCase
         (new NowoMailKitExtension())->load([['log' => ['enabled' => false], 'personal_data' => ['enabled' => true]]], $noDoctrine);
         self::assertSame(NullSentMailPersonalDataExporter::class, (string) $noDoctrine->getAlias(SentMailPersonalDataExporterInterface::class));
         self::assertSame(NullSentMailErasure::class, (string) $noDoctrine->getAlias(SentMailPersonalDataEraserInterface::class));
+        self::assertSame(NullSentMailErasure::class, (string) $noDoctrine->getAlias(SentMailTaggedPersonalDataEraserInterface::class));
+        self::assertSame(NullSentMailPersonalDataExporter::class, (string) $noDoctrine->getAlias(SentMailTaggedPersonalDataExporterInterface::class));
         self::assertFalse($noDoctrine->hasDefinition(EmailsReceivedPersonalDataEraser::class));
     }
 

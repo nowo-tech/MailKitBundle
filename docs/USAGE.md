@@ -454,6 +454,8 @@ implementations on a host without Doctrine.
 | `Log\SentMailErasureInterface` (1.6; shared rows unlinked since 1.7) | `forgetAddress(string $email)` | `['deleted' => n, 'unlinked' => n, 'redacted' => n]`, see [What is and is not erased](#what-is-and-is-not-erased). |
 | `Log\SentMailPersonalDataEraserInterface` (1.7) | `erase(SentMailPersonalDataSubject $subject)` | `Log\SentMailErasureResult` (`deleted`, `unlinked`, `redacted`, `toArray()`, `total()`): the same erasure as `forgetAddress()`, with a validated subject. |
 | `Log\SentMailPersonalDataExporterInterface` (1.7) | `export(SentMailPersonalDataSubject $subject)` | List of rows, oldest id first. |
+| `Log\SentMailTaggedPersonalDataEraserInterface` (2.8) | `eraseTagged(SentMailPersonalDataSubject $subject, string $tag)` | `Log\SentMailErasureResult`: the same erasure, limited to the rows whose tag is exactly `$tag`. |
+| `Log\SentMailTaggedPersonalDataExporterInterface` (2.8) | `exportTagged(SentMailPersonalDataSubject $subject, string $tag)` | The export rows with exactly that tag. |
 | `Log\SentMailPersonalDataSubjectResolverInterface` (1.7, SPI) | `subjectsFor(object $user, ?string $originalIdentifier)` | The addresses of a host user (used by the UserKit bridge). |
 
 `Log\SentMailPersonalDataSubject::fromEmail($email)` builds the subject. It refuses an empty value, a value without
@@ -469,6 +471,18 @@ $subject = SentMailPersonalDataSubject::fromEmail('alice@example.com');
 $rows    = $exporter->export($subject);
 $result  = $eraser->erase($subject);           // SentMailErasureResult: deleted 3, unlinked 2, redacted 1
 // 1.6 port, same erasure: $erasure->forgetAddress('alice@example.com') returns ['deleted' => 3, 'unlinked' => 2, 'redacted' => 1]
+```
+
+Tag-scoped ports (2.8): a module that shares the log with other owners (for example one tenant of a multi-tenant
+application) tags every message it sends (`MailHeaders::tag($email, 'crm:7f3a…')`) and erases or exports with that tag
+only. Rows with another tag, a case variant of it or no tag are never read or changed, also their subjects and bodies;
+everything else (exact address match, unlinking, masking, idempotency, transactions, event) is as above, and the event
+carries the tag. The tag is trimmed and must be 1 to 64 characters without control characters
+(`InvalidArgumentException` otherwise; it is never truncated).
+
+```php
+$rows   = $taggedExporter->exportTagged($subject, 'crm:7f3a…');
+$result = $taggedEraser->eraseTagged($subject, 'crm:7f3a…');
 ```
 
 One exported row:

@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[2.8.0] - 2026-11-27](#280---2026-11-27)
 - [[2.7.0] - 2026-11-27](#270---2026-11-27)
 - [[2.6.0] - 2026-11-27](#260---2026-11-27)
 - [[2.5.0] - 2026-11-27](#250---2026-11-27)
@@ -40,6 +41,8 @@ All notable changes to this project are documented here. The format follows
 - [[1.0.0] - 2026-10-31](#100---2026-10-31)
 
 ## [Unreleased]
+
+## [2.8.0] - 2026-11-27
 
 Planned as **2.8.0**: tag-scoped GDPR erasure and export of the sent-mail log, for a module that owns only the rows it
 tagged (for example one tenant's messages). Additive, no BC break, no schema change; hosts need not act.

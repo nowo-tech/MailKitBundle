@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 2.8.0](#to-280)
 - [To 2.7.0](#to-270)
   - [Stored e-mail templates (2.7.0, opt-in)](#stored-e-mail-templates-270-opt-in)
   - [Images in template HTML: https only](#images-in-template-html-https-only)
@@ -79,6 +80,14 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+## To 2.8.0
+
+From **2.7.0**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
 
 ## To 2.7.0
 

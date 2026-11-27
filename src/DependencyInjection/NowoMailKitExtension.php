@@ -25,6 +25,7 @@ use Nowo\MailKitBundle\Command\PurgeSentMailLogCommand;
 use Nowo\MailKitBundle\Command\SendTestMailCommand;
 use Nowo\MailKitBundle\Controller\MailKitController;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\MailerIntegrationPass;
+use Nowo\MailKitBundle\DependencyInjection\Compiler\TemplatePlaceholderPass;
 use Nowo\MailKitBundle\Doctrine\MailKitExactKeyColumns;
 use Nowo\MailKitBundle\Doctrine\TablePrefixListener;
 use Nowo\MailKitBundle\Dsn\DsnHostGuard;
@@ -69,6 +70,8 @@ use Nowo\MailKitBundle\Graph\Transport\GraphTransportFactory;
 use Nowo\MailKitBundle\Integration\AuthKit\MailKitOutboundMailReadyChecker;
 use Nowo\MailKitBundle\Integration\UserKit\EmailsReceivedPersonalDataEraser;
 use Nowo\MailKitBundle\Integration\UserKit\EmailsReceivedPersonalDataExportProvider;
+use Nowo\MailKitBundle\Integration\UserKit\EmailTemplatesPersonalDataEraser;
+use Nowo\MailKitBundle\Integration\UserKit\EmailTemplatesPersonalDataExportProvider;
 use Nowo\MailKitBundle\Integration\UserKit\EmailTrackingPersonalDataEraser;
 use Nowo\MailKitBundle\Integration\UserKit\EmailTrackingPersonalDataExportProvider;
 use Nowo\MailKitBundle\Log\DefaultSentMailPersonalDataSubjectResolver;
@@ -134,6 +137,20 @@ use Nowo\MailKitBundle\Sender\SenderPolicy;
 use Nowo\MailKitBundle\Settings\LegacyResendSettings;
 use Nowo\MailKitBundle\Settings\MailerSettingsSection;
 use Nowo\MailKitBundle\Settings\MailSettings;
+use Nowo\MailKitBundle\Template\Engine\PlaceholderResolver;
+use Nowo\MailKitBundle\Template\Engine\TemplateLibrary;
+use Nowo\MailKitBundle\Template\Engine\TemplatePersonalData;
+use Nowo\MailKitBundle\Template\Engine\TemplateRenderer;
+use Nowo\MailKitBundle\Template\Infrastructure\Command\TemplateSchemaCommand;
+use Nowo\MailKitBundle\Template\Infrastructure\Store\TemplateSchemaListener;
+use Nowo\MailKitBundle\Template\Infrastructure\Store\TemplateStore;
+use Nowo\MailKitBundle\Template\Placeholder\PlaceholderProviderInterface;
+use Nowo\MailKitBundle\Template\Port\DenyAllTemplatePermission;
+use Nowo\MailKitBundle\Template\Port\TemplateOwnerResolverInterface;
+use Nowo\MailKitBundle\Template\Port\TemplatePermissionInterface;
+use Nowo\MailKitBundle\Template\Service\TemplateLibraryInterface;
+use Nowo\MailKitBundle\Template\Service\TemplatePersonalDataInterface;
+use Nowo\MailKitBundle\Template\Service\TemplateRendererInterface;
 use Nowo\MailKitBundle\TestMail\TestMailGuard;
 use Nowo\MailKitBundle\TestMail\TestMailSender;
 use Nowo\MailKitBundle\Tracking\Command\TrackingPurgeCommand;
@@ -174,6 +191,7 @@ use Nowo\UserKitBundle\PersonalData\PersonalDataEraserInterface;
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\DependencyInjection\Argument\IteratorArgument;
 use Symfony\Component\DependencyInjection\Argument\ServiceClosureArgument;
+use Symfony\Component\DependencyInjection\Argument\ServiceLocatorArgument;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\DependencyInjection\Definition;
@@ -381,7 +399,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $config = $this->processConfiguration(new Configuration(), $configs);
         $this->assertLiteralBooleans($config);
 
-        /** @var array{mailer: array{decorate: bool, dsn_provider: string|null, sender_provider: string|null, fallback_counts_as_ready: bool}, dsn: array{allowed_schemes: list<string>, allowed_hosts: list<string>, allow_private_hosts: bool, allow_insecure_tls: bool, resolve_dns: bool, dns_timeout: float}, sender: array{default_from: string|null, default_from_name: string|null, require_public_domain: bool}, resend: array{enabled: bool, api_timeout: float}, bootstrap: array{mailer_dsn: string|null, resend_api_key: string|null}, test_email: array{rate_limit: int, rate_interval: string}, log: array{enabled: bool, map_entities: bool, store_bodies: bool, retention_days: int, purge_batch_size: int}, personal_data: array{enabled: bool, subject_resolver: string|null}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>, page_size: int, export: array{enabled: bool, max_rows: int, access_roles: list<string>, include_bodies: bool, body_batch_bytes: int}}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}, conflict_response: array{status: int, retry_after: int}, brand: array{mode: string, name: string|null, colors: array<string, string>, max_image_bytes: int, max_total_bytes: int, max_image_side: int}, graph: array{enabled: bool, mailbox_provider: string|null, default_profile: string, profiles: array<string, array{tenant_id: string, client_id: string, client_secret: string, mailbox: string}>, http_client: string, token_cache: string, timeout: float, draft_cleanup: array{bus: string|null, delay_ms: int}, upload_hosts: list<string>, limits: array{max_attachments: int, max_attachment_bytes: int, max_message_bytes: int}, inbound: array{enabled: bool, webhook: array{path: string}}}, tracking: array<string, mixed>, mailboxes: array<string, mixed>} $config */
+        /** @var array{mailer: array{decorate: bool, dsn_provider: string|null, sender_provider: string|null, fallback_counts_as_ready: bool}, dsn: array{allowed_schemes: list<string>, allowed_hosts: list<string>, allow_private_hosts: bool, allow_insecure_tls: bool, resolve_dns: bool, dns_timeout: float}, sender: array{default_from: string|null, default_from_name: string|null, require_public_domain: bool}, resend: array{enabled: bool, api_timeout: float}, bootstrap: array{mailer_dsn: string|null, resend_api_key: string|null}, test_email: array{rate_limit: int, rate_interval: string}, log: array{enabled: bool, map_entities: bool, store_bodies: bool, retention_days: int, purge_batch_size: int}, personal_data: array{enabled: bool, subject_resolver: string|null}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>, page_size: int, export: array{enabled: bool, max_rows: int, access_roles: list<string>, include_bodies: bool, body_batch_bytes: int}}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}, conflict_response: array{status: int, retry_after: int}, brand: array{mode: string, name: string|null, colors: array<string, string>, max_image_bytes: int, max_total_bytes: int, max_image_side: int}, graph: array{enabled: bool, mailbox_provider: string|null, default_profile: string, profiles: array<string, array{tenant_id: string, client_id: string, client_secret: string, mailbox: string}>, http_client: string, token_cache: string, timeout: float, draft_cleanup: array{bus: string|null, delay_ms: int}, upload_hosts: list<string>, limits: array{max_attachments: int, max_attachment_bytes: int, max_message_bytes: int}, inbound: array{enabled: bool, webhook: array{path: string}}}, tracking: array<string, mixed>, mailboxes: array<string, mixed>, templates: array{enabled: bool, permission: string|null, owner_resolver: string|null, connection: string|null, max_body_bytes: int, max_output_bytes: int, max_placeholders: int, max_per_scope: int}} $config */
         $webUi = $config['web_ui'];
 
         $settings = $this->hasBundle($container, 'NowoInstanceSettingsBundle') || $container->hasExtension('nowo_instance_settings');
@@ -416,6 +434,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $this->registerGraph($container, $config['graph'], $config['doctrine'], $hasOrm);
         $this->registerMailboxes($container, $config['mailboxes'], $config['doctrine'], $hasDoctrine, $hasOrm);
         $this->registerTracking($container, $config['tracking'], $config['doctrine'], $config['personal_data']['enabled'], $hasDoctrine, $hasOrm);
+        $this->registerTemplates($container, $config['templates'], $config['doctrine'], $config['personal_data']['enabled'], $hasDoctrine, $hasOrm);
         $this->registerConflictResponse($container, $config['conflict_response']);
         // REQ-SEC-006: the bundle's own declaration of its identity / access-key columns. Autoconfigured so that
         // MigrationsKit tags it (nowo:migrations:check-key-collations) without the host registering anything; the
@@ -425,6 +444,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             $config['tracking']['enabled'] === true,
             $config['graph']['inbound']['enabled'],
             $config['mailboxes']['enabled'],
+            $config['templates']['enabled'],
         ]))->setAutoconfigured(true));
 
         $container->setParameter('nowo_mail_kit.graph.webhook_path', $config['graph']['inbound']['webhook']['path']);
@@ -979,6 +999,85 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
     }
 
     /**
+     * 2.7.0 (docs/TEMPLATES.md "Stored e-mail templates"): the template store, library, renderer and GDPR port, only
+     * with `templates.enabled` (nothing is registered otherwise). The placeholder providers are collected by
+     * {@see TemplatePlaceholderPass}; the UserKit bridge (`email_templates`) needs `personal_data.enabled`, UserKit and
+     * `templates.owner_resolver`.
+     *
+     * @param array{enabled: bool, permission: string|null, owner_resolver: string|null, connection: string|null, max_body_bytes: int, max_output_bytes: int, max_placeholders: int, max_per_scope: int} $templates
+     * @param array{table_prefix: string, entity_manager: string|null} $doctrine
+     */
+    private function registerTemplates(ContainerBuilder $container, array $templates, array $doctrine, bool $personalData, bool $hasDoctrine, bool $hasOrm): void
+    {
+        $container->registerForAutoconfiguration(PlaceholderProviderInterface::class)->addTag(PlaceholderProviderInterface::TAG);
+        if (!$templates['enabled']) {
+            return;
+        }
+        self::requireInterface(HtmlSanitizer::class, 'NowoMailKitBundle: nowo_mail_kit.templates requires symfony/html-sanitizer (template HTML is sanitised).');
+        if (!$hasDoctrine) {
+            throw new LogicException('NowoMailKitBundle: nowo_mail_kit.templates requires doctrine/doctrine-bundle (DBAL connection of the template table).');
+        }
+        $logger = new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE);
+        $events = new Reference('event_dispatcher', ContainerInterface::NULL_ON_INVALID_REFERENCE);
+        $clock  = new Reference('clock', ContainerInterface::NULL_ON_INVALID_REFERENCE);
+
+        $container->setDefinition(TemplateStore::class, new Definition(TemplateStore::class, [new Reference('doctrine'), $templates['connection'], $doctrine['table_prefix'], $logger]));
+        if ($hasOrm) {
+            $container->setDefinition(TemplateSchemaListener::class, (new Definition(TemplateSchemaListener::class, [new Reference(TemplateStore::class), new Reference('doctrine'), $doctrine['entity_manager']]))
+                ->addTag('doctrine.event_listener', ['event' => 'postGenerateSchema']));
+        }
+        $container->setDefinition(TemplateSchemaCommand::class, (new Definition(TemplateSchemaCommand::class, [new Reference(TemplateStore::class)]))
+            ->addTag('console.command', ['command' => TemplateSchemaCommand::NAME]));
+
+        $permission = $templates['permission'];
+        if (is_string($permission) && $permission !== '') {
+            $container->setAlias(TemplatePermissionInterface::class, $permission);
+        } else {
+            $container->setDefinition(DenyAllTemplatePermission::class, new Definition(DenyAllTemplatePermission::class));
+            $container->setAlias(TemplatePermissionInterface::class, DenyAllTemplatePermission::class);
+        }
+        $sanitizer = new Definition(MailHtmlSanitizer::class, [RemoteImages::HttpsOnly, $templates['max_output_bytes']]);
+        $container->setDefinition(PlaceholderResolver::class, new Definition(PlaceholderResolver::class, [new ServiceLocatorArgument([]), $templates['max_placeholders'], $templates['max_output_bytes']]));
+        $container->setDefinition(TemplateLibrary::class, new Definition(TemplateLibrary::class, [
+            new Reference(TemplateStore::class),
+            new Reference(TemplatePermissionInterface::class),
+            new Reference(PlaceholderResolver::class),
+            $sanitizer,
+            $templates['max_body_bytes'],
+            $templates['max_per_scope'],
+            $events,
+            $clock,
+        ]));
+        $container->setAlias(TemplateLibraryInterface::class, TemplateLibrary::class)->setPublic(true);
+        $container->setDefinition(TemplateRenderer::class, new Definition(TemplateRenderer::class, [
+            new Reference(TemplateLibrary::class),
+            new Reference(PlaceholderResolver::class),
+            $sanitizer,
+            $templates['max_output_bytes'],
+        ]));
+        $container->setAlias(TemplateRendererInterface::class, TemplateRenderer::class)->setPublic(true);
+        $container->setDefinition(TemplatePersonalData::class, new Definition(TemplatePersonalData::class, [new Reference(TemplateStore::class), $events]));
+        $container->setAlias(TemplatePersonalDataInterface::class, TemplatePersonalData::class)->setPublic(true);
+
+        if (!$personalData || !interface_exists(PersonalDataEraserInterface::class)) {
+            return;
+        }
+        $resolver = $templates['owner_resolver'];
+        if (!is_string($resolver) || $resolver === '') {
+            throw new InvalidConfigurationException('nowo_mail_kit.templates.owner_resolver is required with templates.enabled and personal_data.enabled when UserKit is installed (the owner references of a user for the email_templates export and erasure).');
+        }
+        $container->setAlias(TemplateOwnerResolverInterface::class, $resolver);
+        $container->setDefinition(EmailTemplatesPersonalDataEraser::class, (new Definition(EmailTemplatesPersonalDataEraser::class, [
+            new Reference(TemplatePersonalDataInterface::class),
+            new Reference(TemplateOwnerResolverInterface::class),
+        ]))->addTag('nowo_user_kit.personal_data.eraser', ['priority' => EmailTemplatesPersonalDataEraser::PRIORITY]));
+        $container->setDefinition(EmailTemplatesPersonalDataExportProvider::class, (new Definition(EmailTemplatesPersonalDataExportProvider::class, [
+            new Reference(TemplatePersonalDataInterface::class),
+            new Reference(TemplateOwnerResolverInterface::class),
+        ]))->addTag('nowo_user_kit.personal_data.export_provider', ['priority' => EmailTemplatesPersonalDataExportProvider::PRIORITY]));
+    }
+
+    /**
      * Without Instance Settings (1.6) every configuration value must come from a host port: the DSN provider and the
      * sender provider. The Resend settings live in the Instance Settings `mailer` section, so `resend.enabled` needs it.
      *
@@ -1487,6 +1586,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             'graph.inbound.enabled'             => $config['graph']['inbound']['enabled'] ?? null,
             'graph.inbound.allow_remote_images' => $config['graph']['inbound']['allow_remote_images'] ?? null,
             'tracking.enabled'                  => $config['tracking']['enabled'] ?? null,
+            'templates.enabled'                 => $config['templates']['enabled'] ?? null,
             'tracking.skip_redacted'            => $config['tracking']['skip_redacted'] ?? null,
             'web_ui.enabled'                    => $config['web_ui']['enabled'] ?? null,
             'web_ui.export.enabled'             => $config['web_ui']['export']['enabled'] ?? null,

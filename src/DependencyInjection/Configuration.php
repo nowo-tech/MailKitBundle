@@ -267,6 +267,7 @@ final class Configuration implements ConfigurationInterface
                 ->append($this->brandNode())
                 ->append($this->graphNode())
                 ->append($this->mailboxesNode())
+                ->append($this->templatesNode())
                 ->append($this->trackingNode())
                 ->arrayNode('doctrine')
                     ->addDefaultsIfNotSet()
@@ -983,6 +984,35 @@ final class Configuration implements ConfigurationInterface
             ->validate()
                 ->ifTrue(static fn (array $v): bool => (int) ($v['send']['stale_claim_seconds'] ?? 300) <= 8 * (float) ($v['timeout'] ?? 30.0))
                 ->thenInvalid('nowo_mail_kit.mailboxes.send.stale_claim_seconds must exceed 8 x mailboxes.timeout (a submit and its retry must be over before its draft state is read by another worker).')
+            ->end();
+
+        return $node;
+    }
+
+    /**
+     * `templates` (2.7.0, docs/TEMPLATES.md "Stored e-mail templates"): editable stored templates and snippets with
+     * personal / shared scopes and the closed placeholder registry. Off by default: no table, service or command.
+     */
+    private function templatesNode(): ArrayNodeDefinition
+    {
+        /** @var ArrayNodeDefinition $node */
+        $node = (new TreeBuilder('templates'))->getRootNode();
+        $node
+            ->info('2.7.0: stored e-mail templates and snippets (personal / shared, per tenant and locale) rendered with a closed placeholder registry (no Twig evaluation). Needs symfony/html-sanitizer and a DBAL connection. Off by default.')
+            ->addDefaultsIfNotSet()
+            ->children()
+                ->booleanNode('enabled')->info('Register the store, the library, the renderer, the GDPR port and the schema command.')->defaultFalse()->end()
+                ->scalarNode('permission')->info('Service id implementing Template\\Port\\TemplatePermissionInterface (who may use personal templates, use shared ones, manage shared ones); null = deny everything.')->defaultNull()->end()
+                ->scalarNode('owner_resolver')->info('Service id implementing Template\\Port\\TemplateOwnerResolverInterface (the owner references of a user); required for the UserKit GDPR bridge (personal_data.enabled with UserKit).')->defaultNull()->end()
+                ->scalarNode('connection')->info('DBAL connection of the template table (null = default).')->defaultNull()->end()
+                ->integerNode('max_body_bytes')->info('Bytes of each body (HTML, text) a template or snippet may store.')->defaultValue(262_144)->min(1024)->max(1_048_576)->end()
+                ->integerNode('max_output_bytes')->info('Bytes of each rendered body (HTML, text) after substitution; larger renders are refused.')->defaultValue(1_048_576)->min(1024)->max(4_194_304)->end()
+                ->integerNode('max_placeholders')->info('Placeholder occurrences one template or snippet may hold (subject and bodies together).')->defaultValue(200)->min(1)->max(2000)->end()
+                ->integerNode('max_per_scope')->info('Rows per tenant, kind and scope (per owner for personal rows); also what a list returns per scope.')->defaultValue(500)->min(1)->max(10_000)->end()
+            ->end()
+            ->validate()
+                ->ifTrue(static fn (array $v): bool => (int) ($v['max_body_bytes'] ?? 0) > (int) ($v['max_output_bytes'] ?? 0))
+                ->thenInvalid('nowo_mail_kit.templates.max_body_bytes must not exceed templates.max_output_bytes.')
             ->end();
 
         return $node;

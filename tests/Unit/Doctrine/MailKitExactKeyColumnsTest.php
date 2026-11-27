@@ -9,14 +9,14 @@ use Nowo\MigrationsKitContracts\Collation\ExactKeyColumn;
 use PHPUnit\Framework\TestCase;
 
 /**
- * REQ-SEC-006: the declaration names the key columns of the bundle's four tables on the *configured* table names, and
+ * REQ-SEC-006: the declaration names the key columns of the bundle's tables on the *configured* table names, and
  * declares the columns of a feature that is off inactive instead of omitting them.
  */
 final class MailKitExactKeyColumnsTest extends TestCase
 {
-    public function testItDeclaresTheKeyColumnsOfTheFourTables(): void
+    public function testItDeclaresTheKeyColumnsOfEveryTable(): void
     {
-        $columns = (new MailKitExactKeyColumns('', true, true, true))->exactKeyColumns();
+        $columns = (new MailKitExactKeyColumns('', true, true, true, true))->exactKeyColumns();
 
         self::assertSame([
             'mail_kit_tracking_send.send_id',
@@ -35,6 +35,13 @@ final class MailKitExactKeyColumnsTest extends TestCase
             'mail_kit_mailbox_subscription.folder_key',
             'mail_kit_mailbox_send.mailbox_id',
             'mail_kit_mailbox_send.idempotency_key',
+            'mail_kit_template.id',
+            'mail_kit_template.tenant',
+            'mail_kit_template.owner_id',
+            'mail_kit_template.template_key',
+            'mail_kit_template.locale',
+            'mail_kit_template.created_by',
+            'mail_kit_template.updated_by',
         ], array_map(static fn (ExactKeyColumn $column): string => $column->describe(), $columns));
 
         foreach ($columns as $column) {
@@ -47,7 +54,7 @@ final class MailKitExactKeyColumnsTest extends TestCase
 
     public function testItResolvesTheConfiguredTablePrefix(): void
     {
-        $columns = (new MailKitExactKeyColumns('app_', true, true, true))->exactKeyColumns();
+        $columns = (new MailKitExactKeyColumns('app_', true, true, true, true))->exactKeyColumns();
 
         foreach ($columns as $column) {
             self::assertStringStartsWith('app_mail_kit_', $column->table);
@@ -59,13 +66,14 @@ final class MailKitExactKeyColumnsTest extends TestCase
         // Both off is the default configuration: nothing is registered, and there is no table either.
         $columns = (new MailKitExactKeyColumns())->exactKeyColumns();
 
-        self::assertCount(16, $columns);
+        self::assertCount(23, $columns);
         foreach ($columns as $column) {
             self::assertFalse($column->active, $column->describe());
             self::assertSame(
                 match (true) {
                     str_starts_with($column->table, 'mail_kit_tracking') => MailKitExactKeyColumns::TRACKING_CONDITION,
                     str_starts_with($column->table, 'mail_kit_graph')    => MailKitExactKeyColumns::GRAPH_INBOUND_CONDITION,
+                    $column->table === 'mail_kit_template'               => MailKitExactKeyColumns::TEMPLATES_CONDITION,
                     default                                              => MailKitExactKeyColumns::MAILBOXES_CONDITION,
                 },
                 $column->condition,
@@ -92,6 +100,12 @@ final class MailKitExactKeyColumnsTest extends TestCase
 
         foreach ($mailboxes as $column) {
             self::assertSame(str_starts_with($column->table, 'mail_kit_mailbox'), $column->active, $column->describe());
+        }
+
+        $templates = (new MailKitExactKeyColumns('', false, false, false, true))->exactKeyColumns();
+
+        foreach ($templates as $column) {
+            self::assertSame($column->table === 'mail_kit_template', $column->active, $column->describe());
         }
     }
 

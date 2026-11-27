@@ -40,6 +40,61 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+Planned as **2.7.0**: editable stored e-mail templates and snippets (this roadmap's Phase 2 and the CrmKit A-2 request,
+Beacon spec 254 T003). Opt-in, no BC break. See [UPGRADING](UPGRADING.md#to-270).
+
+### Added
+
+- **Stored e-mail templates and snippets** (`nowo_mail_kit.templates.enabled`, off by default; contract
+  [TEMPLATES — Stored e-mail templates](TEMPLATES.md#stored-e-mail-templates-270), spec 006). One DBAL table
+  `<prefix>mail_kit_template` (key, locale, name, subject, sanitised HTML and text body, optimistic version, authors)
+  with `personal` (owner only) and `shared` (tenant) scopes, created by the ORM `postGenerateSchema` listener or
+  `nowo:mail-kit:templates:schema` (CREATE statement for MySQL / MariaDB, PostgreSQL or SQLite). API-first, no admin
+  UI: `Template\Service\TemplateLibraryInterface` (list, get, findByKey with language fallback, create, update, delete),
+  `TemplateRendererInterface` (render, renderDraft preview, placeholders) and `TemplatePersonalDataInterface`; every
+  call takes the acting `TemplateActor(tenant, owner)`.
+- **Host ports, deny by default**: `Template\Port\TemplatePermissionInterface` (`Personal`, `UseShared`,
+  `ManageShared`; `DenyAllTemplatePermission` without `templates.permission`) and `TemplateOwnerResolverInterface`
+  (GDPR). Tenant isolation in every query; personal rows visible to their owner only; invisible rows read as
+  `TemplateNotFound`.
+- **Closed placeholder registry**: `{{ namespace.name }}` resolved by services implementing
+  `Template\Placeholder\PlaceholderProviderInterface` (autoconfigured, tag `nowo_mail_kit.template_placeholder_provider`,
+  one provider per namespace, checked at build time by `TemplatePlaceholderPass`). Pure substitution in one pass, never
+  evaluated or re-expanded; unknown placeholders stay as literal text (`RenderedTemplate::$unresolved`); values
+  HTML-escaped in the HTML body and sanitised again, plain in subject and text, control / bidi characters removed;
+  `max_body_bytes`, `max_output_bytes`, `max_placeholders` and `max_per_scope` limits. MailKit ships no provider.
+- Template HTML keeps **https images only** (and `cid:` inline parts): `http`, `data:` and relative image sources,
+  `srcset` / `background` / `style` URLs and audio / video are removed on save and on render. New
+  `Mailbox\Html\RemoteImages::HttpsOnly` sanitiser mode (not offered by `mailboxes.html.remote_images`).
+- Audit ZCZ (pre-tag): placeholders inside URL attributes (`href`, `src`, …; also percent-encoded or as character
+  references) are refused on save with `InvalidTemplate('html')` (L1); `TemplateDeletedEvent` is dispatched inside the
+  delete's transaction, so a throwing listener rolls the delete or the erasure back (L2); provider values are cut at
+  64 KiB and a render stops once a part passes `max_output_bytes` (I2); zero-width and direction-mark characters are
+  removed from values and refused in subjects, and braces written as character references never form a live
+  placeholder (I3).
+- `RenderedTemplate::applyTo(Email)` puts subject, HTML and text on a Symfony `Email` and tags it with the template key
+  (sent-mail log tag and tracking template id).
+- `TemplateDeletedEvent` after a delete and for each personal row a GDPR erasure deletes (dispatched inside the
+  host's transaction when one is open).
+- GDPR: UserKit `email_templates` eraser and export section (with `personal_data.enabled`): personal rows exported with
+  content and deleted; shared rows the person wrote exported without content and their authorship cleared.
+- REQ-RUNTIME-003: caught duplicate keys (`TemplateKeyTaken`), compare-and-set versions (`TemplateVersionConflict`),
+  savepoints inside host transactions, the erasure in one transaction-doctrine unit; race tests on MySQL, MariaDB and
+  PostgreSQL; worker-mode kernel test (400 renders, two tenants, no state bleed).
+- REQ-SEC-006: the seven key columns of `mail_kit_template` are declared to MigrationsKit (`MailKitExactKeyColumns`
+  fifth argument `$templates`, inactive until enabled).
+
+### Changed
+
+- **Lost savepoints close the connection** (audit ZCZ-I1, every DBAL store: Graph inbound, tracking, mailboxes,
+  templates): when a write inside a host transaction fails and its savepoint cannot be rolled back (MySQL / MariaDB
+  drop savepoints on a deadlock), the connection is now closed before the original failure is rethrown, instead of
+  leaving the host's (already server-side rolled back) transaction open. The host's commit then fails; the next use
+  reconnects.
+
+- ROADMAP: editable templates are 2.7.0 (were planned as 2.4.0), `sending_domains` moves to 2.8.0, ICS invites (planned
+  as 2.3.0) are not built yet.
+
 ## [2.6.0] - 2026-11-27
 
 Gmail send-only mailboxes (phase B2), on top of the 2.5.0 Outlook mailboxes. Owner decision D-20261124-09: Gmail is **send-only**. See [UPGRADING](UPGRADING.md#to-260).

@@ -241,13 +241,16 @@ final class GraphInboundStore
         $connection = $this->connection();
         $sql        = 'UPDATE ' . $this->inboundTable() . ' SET status = ?, completed_at = ? WHERE message_key = ?';
         $params     = [$action->value, $this->now(), self::key($profile, $internetMessageId)];
+        // Read before the write: a lost savepoint closes the connection (2.7.0, ZCZ-I1), which must not look like
+        // "no transaction" and trigger a retry outside the host's (discarded) transaction.
+        $nested = $connection->isTransactionActive();
 
         try {
             $this->write($connection, $sql, $params);
         } catch (Throwable $failure) {
             // 1.13 (audit UE-MK-4): one retry of a lock conflict outside a transaction; the host already handled the
             // message, so a lost decision would keep the claim until the stale-claim timeout.
-            if ($connection->isTransactionActive() || !StorageConflicts::isTransient($failure)) {
+            if ($nested || !StorageConflicts::isTransient($failure)) {
                 throw $failure;
             }
             $connection->executeStatement($sql, $params);
@@ -265,11 +268,12 @@ final class GraphInboundStore
         $connection = $this->connection();
         $sql        = 'DELETE FROM ' . $this->inboundTable() . ' WHERE message_key = ?';
         $key        = self::key($profile, $internetMessageId);
+        $nested     = $connection->isTransactionActive();
 
         try {
             $this->write($connection, $sql, [$key]);
         } catch (Throwable $failure) {
-            if ($connection->isTransactionActive() || !StorageConflicts::isTransient($failure)) {
+            if ($nested || !StorageConflicts::isTransient($failure)) {
                 throw $failure;
             }
             $connection->executeStatement($sql, [$key]);

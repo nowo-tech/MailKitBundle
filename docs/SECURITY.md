@@ -12,6 +12,7 @@ Bundle-specific security analysis. The short GitHub reporting policy lives in [`
 - [Personal data (GDPR)](#personal-data-gdpr)
 - [E-mail open and click tracking (1.10)](#e-mail-open-and-click-tracking-110)
 - [Delegated mailboxes (2.5.0)](#delegated-mailboxes-250)
+- [Stored e-mail templates (2.7.0)](#stored-e-mail-templates-270)
 - [Logging](#logging)
 - [Resource limits and timeouts](#resource-limits-and-timeouts)
 - [CSRF](#csrf)
@@ -136,6 +137,9 @@ when not every admin may change the transport.
   retention purge and the erasure command. Limit it with `web_ui.export.access_roles`, keep `include_bodies` off, and
   record in your processing register who may export and how long files are kept. Bodies need three explicit opt-ins
   (`log.store_bodies`, `web_ui.export.include_bodies`, `?bodies=1`). Errors are scrubbed again on export.
+- **Stored e-mail templates** (2.7.0, `templates.enabled`): a person's personal templates and snippets are personal
+  data; shared ones carry their author. `TemplatePersonalDataInterface` / UserKit `email_templates` exports them and
+  deletes the personal ones, clearing the authorship of shared ones ([details](#stored-e-mail-templates-270)).
 
 ## E-mail open and click tracking (1.10)
 
@@ -271,6 +275,44 @@ A send is a non-idempotent POST: an HTTP client that retries by itself (Symfony 
   2.5: …`) and a compiler-log line; **3.0 fails the build**. Give it a client with `retry_failed: false`.
 - Not detectable: a static factory that returns a retrying client, or a custom retry decorator that is not a
   `RetryableHttpClient`. The rule is documented: the client given to MailKit must not retry.
+
+## Stored e-mail templates (2.7.0)
+
+Opt-in (`templates.enabled`). Contract: [TEMPLATES](TEMPLATES.md#stored-e-mail-templates-270).
+
+- **Access, deny by default.** Without `templates.permission` every call is refused. MailKit fixes the rest: the
+  tenant is in every SQL statement, a personal row is visible to its owner only, and a row the actor may not see reads
+  as not found (no existence oracle across tenants or people). The actor (tenant, owner) is passed by the host on
+  every call; MailKit never takes it from input.
+- **No template evaluation.** Placeholders are substituted from a closed registry of tagged providers (build-time
+  checked, one per namespace), in one pass: nothing is evaluated (no Twig, no expression) and a value is never
+  expanded again. Unknown placeholders stay as literal text.
+- **Injection.** Values are HTML-escaped in the HTML body and the result is sanitised again (`MailHtmlSanitizer`: no
+  script, style, event handler, `style` attribute, relative or `javascript:` URL); the stored HTML is sanitised on
+  save. A placeholder inside an address (`href`, `src` or any other attribute except `title` / `alt`, also
+  percent-encoded or as character references) is **refused on save** (`InvalidTemplate('html')`, audit ZCZ-L1): a
+  value is never put into a URL, so no recipient data reaches an image host and no value picks a redirect target or
+  adds query parameters. Braces written as character references never form a live placeholder (ZCZ-I3). The stored
+  subject refuses control, bidi, zero-width and direction-mark characters; substituted values lose them (header
+  injection, bidi spoofing). Provider values are cut at 64 KiB and a render stops once a part passes
+  `max_output_bytes` (ZCZ-I2).
+- **Lost savepoints.** When a template write fails and its savepoint is already gone (MySQL / MariaDB deadlock), the
+  connection is closed and the original failure rethrown (audit ZCZ-I1, shared `SavepointWrites` helper of every DBAL
+  store), so a host cannot commit the remains of a transaction the server already rolled back.
+- **Images: https only** (owner answer Q2, 2026-11-27). Template HTML keeps absolute `https` images and `cid:`
+  references only, on save and again on render (`RemoteImages::HttpsOnly`): no `http` image (no clear-text fetch, no
+  downgrade), no `data:` URI, no relative source, no `srcset` / `background` / `style` URL, no audio / video. An author
+  can still embed an https tracking pixel; that is the tenant's own content (use the open tracking with its policy
+  instead).
+- **Caller-passed actor** (owner answer Q1). The host's permission adapter must verify that the person belongs to
+  `actor.tenant`; MailKit only enforces the tenant it is given. No admin override for personal rows (Q3). The per-scope
+  cap is soft (Q4). Owner references must be unique host-wide (Q5).
+- **Resource limits.** `max_body_bytes`, `max_output_bytes`, `max_placeholders`, `max_per_scope`; each provider is
+  asked once per render.
+- **Providers** must check that the actor may see the data they return; a provider that ignores the actor leaks
+  across people.
+- **GDPR.** Export and erasure by owner reference (exact match), shared rows keep their content but lose the author.
+- **Logging.** Exceptions carry fixed messages and field names, never template content or values.
 
 ## Logging
 

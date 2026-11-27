@@ -178,7 +178,6 @@ final class GraphInboundStoreTest extends TestCase
         foreach ([
             ['INSERT INTO mail_kit_graph_delta', static fn () => $store->saveDeltaLink('acme', 'https://graph.microsoft.com/v1.0/a'), null],
             ['INSERT INTO mail_kit_graph_inbound', static fn (): bool => $store->claim('acme', 'id@x', 900), null],
-            ['INSERT INTO mail_kit_graph_inbound', static fn (): bool => $store->claim('acme', 'id@y', 900), 'nowo_mail_kit_graph_claim'],
         ] as [$prefix, $write, $drop]) {
             $connection->beginTransaction();
             $connection->insert('mail_kit_graph_delta', ['profile' => 'host-row', 'delta_link' => 'x', 'updated_at' => 1]);
@@ -191,6 +190,13 @@ final class GraphInboundStoreTest extends TestCase
             $connection->rollBack();
         }
         self::assertSame(0, (int) $connection->fetchOne('SELECT COUNT(*) FROM mail_kit_graph_inbound'));
+
+        // 2.7.0 audit ZCZ-I1: a lost savepoint (dropped by the server) closes the connection and rethrows the failure.
+        $connection->beginTransaction();
+        $state['prefix'] = 'INSERT INTO mail_kit_graph_inbound';
+        $state['drop']   = 'nowo_mail_kit_graph_claim';
+        $this->assertTransientFailure(static fn (): bool => $store->claim('acme', 'id@y', 900));
+        self::assertFalse($connection->isTransactionActive(), 'The connection was closed.');
     }
 
     public function testAnyUpdateOrDeleteFailureInsideATransactionRollsBackItsSavepoint(): void
@@ -219,7 +225,6 @@ final class GraphInboundStoreTest extends TestCase
             ['UPDATE mail_kit_graph_inbound SET claimed_at', static fn (): bool => $store->claim('acme', 'id@x', -1), false],
             ['UPDATE mail_kit_graph_inbound SET status', static fn () => $store->complete('acme', 'id@x', InboundAction::Route), false],
             ['DELETE FROM mail_kit_graph_inbound', static fn () => $store->release('acme', 'id@x'), false],
-            ['DELETE FROM mail_kit_graph_inbound', static fn () => $store->release('acme', 'id@x'), true],
         ] as [$prefix, $write, $drop]) {
             $connection->beginTransaction();
             $connection->insert('mail_kit_graph_delta', ['profile' => 'host-row', 'delta_link' => 'x', 'updated_at' => 1]);
@@ -242,6 +247,13 @@ final class GraphInboundStoreTest extends TestCase
         self::assertSame('https://graph.microsoft.com/v1.0/c', $store->deltaLink('acme'));
         self::assertSame('discard', $connection->fetchOne('SELECT status FROM mail_kit_graph_inbound'));
         self::assertSame(0, $connection->getTransactionNestingLevel());
+
+        // 2.7.0 audit ZCZ-I1: a lost savepoint (dropped by the server) closes the connection and rethrows the failure.
+        $connection->beginTransaction();
+        $state['prefix'] = 'DELETE FROM mail_kit_graph_inbound';
+        $state['drop']   = true;
+        $this->assertTransientFailure(static fn () => $store->release('acme', 'id@x'));
+        self::assertFalse($connection->isTransactionActive(), 'The connection was closed.');
     }
 
     public function testCompleteRetriesOneLockConflictOutsideATransaction(): void

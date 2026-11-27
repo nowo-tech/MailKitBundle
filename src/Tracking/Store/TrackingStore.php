@@ -351,7 +351,11 @@ final class TrackingStore implements EmailTrackingReaderInterface, EmailTracking
                 try {
                     $connection->rollbackSavepoint(self::SAVEPOINT);
                 } catch (Throwable) {
-                    // The host transaction reports its own state.
+                    // 2.7.0 (audit ZCZ-I1, lost-savepoint pattern): the server already discarded the host's
+                    // transaction; close the connection so it cannot be committed, and rethrow the original failure.
+                    $connection->close();
+
+                    throw $exception;
                 }
             }
             if (($beforeSend || $nested) && StorageConflicts::isConflict($exception)) {

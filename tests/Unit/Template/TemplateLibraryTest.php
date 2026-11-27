@@ -235,7 +235,7 @@ final class TemplateLibraryTest extends TestCase
         $textOnly = $this->h->library->create($this->ana, new TemplateDraft(TemplateKind::Snippet, TemplateScope::Personal, 'sig', 'Signature', 'es', '', '  ', '-- {{ me.first_name }}'));
         self::assertSame('', $textOnly->html);
         self::assertSame('', $textOnly->subject);
-        $html = $this->h->library->create($this->ana, self::draft(key: 'links', html: '<a href="javascript:alert(1)">x</a><img src="https://cdn.example.com/logo.png" alt="L"><a href="https://example.com/{{contact.id}}">y</a>'));
+        $html = $this->h->library->create($this->ana, self::draft(key: 'links', html: '<a href="javascript:alert(1)">x</a><img src="https://cdn.example.com/logo.png" alt="L">'));
         self::assertStringNotContainsString('javascript', $html->html);
         self::assertStringContainsString('src="https://cdn.example.com/logo.png"', $html->html);
         // https images only (owner answer Q2): http, data: and relative image sources are removed on save.

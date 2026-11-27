@@ -137,18 +137,35 @@ final class TrackingHttpTest extends TestCase
         self::assertCount(1, $schema->getTables());
     }
 
-    public function testAStoreWriteSurvivesABrokenSavepoint(): void
+    public function testALostSavepointClosesTheConnectionAndOtherwiseTheWriteIsLogged(): void
     {
         $connection = $this->createMock(Connection::class);
         $connection->method('isTransactionActive')->willReturn(true);
         $connection->expects(self::once())->method('createSavepoint');
         $connection->method('insert')->willThrowException(new RuntimeException('insert'));
         $connection->method('rollbackSavepoint')->willThrowException(new RuntimeException('rollback'));
+        // 2.7.0 (audit ZCZ-I1): a lost savepoint closes the connection and rethrows the original failure.
+        $connection->expects(self::once())->method('close');
         $registry = $this->createStub(ManagerRegistry::class);
         $registry->method('getConnection')->willReturn($connection);
         $logger = new RecordingLogger();
 
-        self::assertFalse((new TrackingStore($registry, null, '', null, $logger))->createSend(TrackingTokenSigner::newSendId(), null, null, null));
+        try {
+            (new TrackingStore($registry, null, '', null, $logger))->createSend(TrackingTokenSigner::newSendId(), null, null, null);
+            self::fail('rethrown');
+        } catch (RuntimeException $failure) {
+            self::assertSame('insert', $failure->getMessage());
+        }
+        self::assertFalse($logger->has('Mail tracking store write failed; the e-mail is sent untracked.'));
+
+        // A savepoint that rolls back keeps the old behaviour: logged, sent untracked.
+        $ok = $this->createMock(Connection::class);
+        $ok->method('isTransactionActive')->willReturn(true);
+        $ok->method('insert')->willThrowException(new RuntimeException('insert'));
+        $ok->expects(self::never())->method('close');
+        $okRegistry = $this->createStub(ManagerRegistry::class);
+        $okRegistry->method('getConnection')->willReturn($ok);
+        self::assertFalse((new TrackingStore($okRegistry, null, '', null, $logger))->createSend(TrackingTokenSigner::newSendId(), null, null, null));
         self::assertTrue($logger->has('Mail tracking store write failed; the e-mail is sent untracked.'));
     }
 

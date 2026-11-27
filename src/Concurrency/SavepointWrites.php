@@ -13,7 +13,8 @@ use Throwable;
  * Single-statement writes of the bundle's DBAL stores that never abort a caller's transaction (1.13 / audit UE2-MK-1,
  * shared by the Graph inbound store and the 2.5.0 mailbox store): inside an open transaction each statement runs in a
  * savepoint rolled back on **any** failure, so a duplicate key, a lock wait timeout, a deadlock or a serialization
- * failure leaves a PostgreSQL transaction usable. Rows and parameters are sensitive parameters (a delta link, audit
+ * failure leaves a PostgreSQL transaction usable. When the savepoint itself is lost the connection is closed and the
+ * original failure rethrown (lost-savepoint pattern, 2.7.0 audit ZCZ-I1). Rows and parameters are sensitive parameters (a delta link, audit
  * ZAT-R5): they never appear in the trace arguments of a DBAL failure. Stateless (static methods only).
  *
  * @internal
@@ -41,16 +42,28 @@ final class SavepointWrites
 
             return true;
         } catch (Throwable $failure) {
-            if ($nested) {
-                try {
-                    $connection->rollbackSavepoint($savepoint);
-                } catch (Throwable) {
-                    // The savepoint is gone (MySQL / MariaDB drop them on a deadlock): the original failure tells.
-                }
-            }
-            if (!$failure instanceof UniqueConstraintViolationException) {
+            if (($nested && !self::rollBackToEntry($connection, $savepoint)) || !$failure instanceof UniqueConstraintViolationException) {
                 throw $failure;
             }
+
+            return false;
+        }
+    }
+
+    /**
+     * Lost-savepoint pattern (REQ-RUNTIME-003, audit ZCZ-I1): roll back to the savepoint, i.e. the transaction level the
+     * write was entered at; when that fails (MySQL / MariaDB drop every savepoint on a deadlock, so the host's
+     * transaction is already gone on the server) the connection is closed, so the host cannot commit half of it and the
+     * next use reconnects. The caller then rethrows the original failure. False when the connection was closed.
+     */
+    private static function rollBackToEntry(Connection $connection, string $savepoint): bool
+    {
+        try {
+            $connection->rollbackSavepoint($savepoint);
+
+            return true;
+        } catch (Throwable) {
+            $connection->close();
 
             return false;
         }
@@ -72,11 +85,7 @@ final class SavepointWrites
         try {
             $count = (int) $connection->executeStatement($sql, $params);
         } catch (Throwable $failure) {
-            try {
-                $connection->rollbackSavepoint($savepoint);
-            } catch (Throwable) {
-                // The savepoint is gone (MySQL / MariaDB drop them on a deadlock): the original failure tells.
-            }
+            self::rollBackToEntry($connection, $savepoint);
 
             throw $failure;
         }

@@ -26,10 +26,22 @@ use Symfony\Component\Clock\NativeClock;
 use Symfony\Component\Uid\Uuid;
 
 use function explode;
+use function html_entity_decode;
+use function in_array;
 use function preg_match;
+use function preg_match_all;
+use function preg_replace;
+use function preg_replace_callback;
+use function rawurldecode;
 use function str_contains;
+use function str_replace;
 use function strlen;
+use function strtolower;
 use function trim;
+
+use const ENT_HTML5;
+use const ENT_QUOTES;
+use const PREG_SET_ORDER;
 
 /**
  * {@see TemplateLibraryInterface} on the {@see TemplateStore} (2.7.0). Access rules, in this order: the tenant is part
@@ -42,6 +54,18 @@ use function trim;
  */
 final readonly class TemplateLibrary implements TemplateLibraryInterface
 {
+    /** Private-use sentinel of a `{` written as a character reference (ZCZ-I3). */
+    private const OPEN_SENTINEL = "\u{E000}";
+
+    /** Private-use sentinel of a `}` written as a character reference (ZCZ-I3). */
+    private const CLOSE_SENTINEL = "\u{E001}";
+
+    /** The sentinels themselves, removed from the input. */
+    private const BRACE_REFERENCES = '/[\x{E000}\x{E001}]/u';
+
+    /** Character references of `{` and `}` (decimal, hexadecimal, named; the `;` is optional for numeric ones). */
+    private const BRACE_ENTITY = '/&#0*12[35](?![0-9]);?|&#x0*7[bd](?![0-9a-f]);?|&(?:lbrace|rbrace|lcub|rcub);/i';
+
     /**
      * @param int $maxBodyBytes `templates.max_body_bytes` (each body, before sanitising)
      * @param int $maxPerScope `templates.max_per_scope` (rows per tenant, kind, scope and owner; also the list cap)
@@ -175,12 +199,21 @@ final readonly class TemplateLibrary implements TemplateLibraryInterface
     {
         $current = $this->get($actor, $id);
         $this->assertManage($actor, $current->scope);
-        if ($this->store->delete($actor->tenant, $id, $current->scope, $current->owner ?? '', $expectedVersion) !== 1) {
+        // ZCZ-L2: the statement and the listeners run in one transaction on the store connection (a savepoint inside the
+        // host's), so a listener that throws rolls the delete back and a retry dispatches the event again.
+        $deleted = $this->store->transactional(function () use ($actor, $id, $current, $expectedVersion): bool {
+            if ($this->store->delete($actor->tenant, $id, $current->scope, $current->owner ?? '', $expectedVersion) !== 1) {
+                return false;
+            }
+            $this->events?->dispatch(new TemplateDeletedEvent($id, $actor->tenant, $current->kind, $current->scope));
+
+            return true;
+        });
+        if (!$deleted) {
             $this->get($actor, $id);
 
             throw new TemplateVersionConflict($expectedVersion);
         }
-        $this->events?->dispatch(new TemplateDeletedEvent($id, $actor->tenant, $current->kind, $current->scope));
     }
 
     /**
@@ -194,8 +227,44 @@ final readonly class TemplateLibrary implements TemplateLibraryInterface
             throw new InvalidTemplate('body', 'A body is larger than the configured limit.');
         }
         $this->placeholders->assertCount($draft->subject, $draft->html, $draft->text);
+        if (trim($draft->html) === '') {
+            return '';
+        }
+        // ZCZ-I3: braces written as character references (`&#123;&#123; x.y &#125;&#125;`) are decoded by the sanitiser;
+        // they travel through it as private-use sentinels and come back as references, so they never form a live
+        // placeholder. Sentinels already in the input are removed first.
+        $html = (string) preg_replace(self::BRACE_REFERENCES, '', $draft->html);
+        $html = (string) preg_replace_callback(self::BRACE_ENTITY, static fn (array $m): string => preg_match('/125|7d|rbrace|rcub/i', $m[0]) === 1 ? self::CLOSE_SENTINEL : self::OPEN_SENTINEL, $html);
+        $safe = str_replace([self::OPEN_SENTINEL, self::CLOSE_SENTINEL], ['&#123;', '&#125;'], $this->sanitizer->sanitize($html));
+        self::assertNoPlaceholderInUrls($safe);
 
-        return trim($draft->html) === '' ? '' : $this->sanitizer->sanitize($draft->html);
+        return $safe;
+    }
+
+    /**
+     * ZCZ-L1: a placeholder is refused in every attribute value of the sanitised HTML except `title` and `alt`
+     * (an address such as `href` / `src` would receive the value HTML-escaped but not URL-encoded), also in its
+     * percent-encoded or character-reference form.
+     *
+     * @throws InvalidTemplate
+     */
+    public static function assertNoPlaceholderInUrls(string $html): void
+    {
+        preg_match_all('/<[a-zA-Z][^>]*>/', $html, $tags);
+        foreach ($tags[0] as $tag) {
+            preg_match_all('/\s([a-zA-Z][a-zA-Z0-9:_.-]*)\s*=\s*"([^"]*)"/', $tag, $attributes, PREG_SET_ORDER);
+            foreach ($attributes as [, $name, $value]) {
+                if (in_array(strtolower($name), ['title', 'alt'], true)) {
+                    continue;
+                }
+                $decoded = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                foreach ([$decoded, rawurldecode($decoded), rawurldecode(rawurldecode($decoded))] as $candidate) {
+                    if (preg_match('/\{\{\s{0,8}[a-z][a-z0-9_]{0,31}\.[a-z0-9_]{1,40}\s{0,8}\}\}/', $candidate) === 1) {
+                        throw new InvalidTemplate('html', 'Placeholders cannot be used inside a link or image address; put them in the text.');
+                    }
+                }
+            }
+        }
     }
 
     /**

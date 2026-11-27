@@ -16,8 +16,8 @@ use Psr\EventDispatcher\EventDispatcherInterface;
 use function count;
 
 /**
- * {@see TemplatePersonalDataInterface} on the {@see TemplateStore} (2.7.0). The deleted-row events are dispatched
- * after the erasure transaction ran (inside an open host transaction: before the host commits). Stateless.
+ * {@see TemplatePersonalDataInterface} on the {@see TemplateStore} (2.7.0). Each deleted-row event is dispatched inside
+ * the erasure transaction right after its delete (ZCZ-L2): a listener that throws rolls the whole erasure back. Stateless.
  *
  * @internal
  */
@@ -55,10 +55,10 @@ final readonly class TemplatePersonalData implements TemplatePersonalDataInterfa
     public function eraseOwner(string $owner): TemplateErasureResult
     {
         TemplateActor::assertRef($owner);
-        $result = $this->store->eraseOwner($owner);
-        foreach ($result['deleted'] as $template) {
-            $this->events?->dispatch(new TemplateDeletedEvent($template->id, $template->tenant, $template->kind, $template->scope));
-        }
+        $events = $this->events;
+        $result = $this->store->eraseOwner($owner, $events instanceof EventDispatcherInterface ? static function (StoredTemplate $template) use ($events): void {
+            $events->dispatch(new TemplateDeletedEvent($template->id, $template->tenant, $template->kind, $template->scope));
+        } : null);
 
         return new TemplateErasureResult(count($result['deleted']), $result['anonymised']);
     }

@@ -55,7 +55,7 @@ request or a replayed Messenger message. It applies from **1.13.0**.
 | Send purge (`purgeSends`, `nowo:mail-kit:mailbox:purge`) | One `DELETE` per row of a batch | Settled states only, re-checked in the `WHERE` | Exception to the command |
 | Delegated mailbox webhook (`MailboxGraphWebhookController`) | Writes nothing itself; it only dispatches messages | — | As the Graph webhook |
 | Stored template create (`TemplateLibrary::create`, 2.7.0) | One `INSERT`, in a savepoint inside a host transaction | New UUIDv7 id; unique (tenant, kind, scope, owner, key, locale) with a caught duplicate (never check-then-insert); the per-scope cap is a soft pre-check | `TemplateKeyTaken` (422); a lock wait on a key another open transaction is inserting is the usual transient conflict (409 `CONFLICT_001`) |
-| Stored template update / delete (2.7.0) | One `UPDATE` / `DELETE`, in a savepoint inside a host transaction | Compare-and-set on `version` (always +1, so MySQL's changed-rows count is exact) plus tenant, scope and owner; 0 rows re-read: gone → `TemplateNotFound`, else `TemplateVersionConflict` | `TemplateVersionConflict` (409), `TemplateKeyTaken` on a renamed key |
+| Stored template update / delete (2.7.0) | One `UPDATE`; the `DELETE` and its `TemplateDeletedEvent` listeners in one transaction-doctrine unit (a savepoint inside a host transaction; a throwing listener rolls the delete back) | Compare-and-set on `version` (always +1, so MySQL's changed-rows count is exact) plus tenant, scope and owner; 0 rows re-read: gone → `TemplateNotFound`, else `TemplateVersionConflict` | `TemplateVersionConflict` (409), `TemplateKeyTaken` on a renamed key |
 | Template GDPR erasure (`eraseOwner`, 2.7.0) | **One transaction** (transaction-doctrine; nested in the caller's as a savepoint) | Exact re-check in PHP; delete / clear by id with the owner in the `WHERE` | Exception to the caller (UserKit eraser) |
 | Schema commands (`nowo:mail-kit:graph:schema`, `nowo:mail-kit:tracking:schema`, `nowo:mail-kit:mailbox:schema`, `nowo:mail-kit:templates:schema`) | DDL, one statement at a time | `CREATE` only for missing tables | Exception to the command |
 
@@ -124,8 +124,11 @@ stale-claim `UPDATE`, the delta-link `UPDATE` and `INSERT`, and the `complete()`
 three since audit UE2-MK-1). The savepoint is
 rolled back on **any** failure: a duplicate key (then caught), a lock wait timeout, a deadlock or a serialization
 failure (then rethrown). Your PostgreSQL transaction therefore never stays aborted, and your next statement works.
-On MySQL / MariaDB a deadlock rolls back your whole transaction anyway; the original failure is rethrown even when
-the server already dropped the savepoint.
+On MySQL / MariaDB a deadlock rolls back your whole transaction anyway. When the server already dropped the
+savepoint, MailKit closes the connection (since 2.7.0, audit ZCZ-I1: the lost-savepoint pattern — roll back to the
+level the write entered at, close the connection when that fails) and rethrows the original failure, so your code
+cannot commit the remains of a transaction the server discarded. The same applies to the tracking, delegated-mailbox
+and template stores.
 
 ## Failures that are not swallowed
 

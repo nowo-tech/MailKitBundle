@@ -1503,7 +1503,7 @@ $mailer->send($rendered->applyTo((new Email())->to($contact->email())));
 
 Snippets (`TemplateKind::Snippet`, no subject) are listed with `$library->list($actor, TemplateKind::Snippet)` and
 inserted by your editor into the draft; `renderDraft()` previews an unsaved draft. Errors: `TemplateNotFound` (404),
-`TemplateAccessDenied` (403), `TemplateVersionConflict` (409), `TemplateKeyTaken` and `InvalidTemplate` (`$field`, 422).
+`TemplateAccessDenied` (403), `TemplateVersionConflict` (409), `TemplateKeyTaken` and `InvalidTemplate` (`$field`, 422; `html` = a placeholder inside a link or image address).
 A host side table keyed by the template id listens to `TemplateDeletedEvent`.
 
 ## Open and click tracking

@@ -13,7 +13,7 @@ use InvalidArgumentException;
 final class InvalidTemplate extends InvalidArgumentException implements TemplateException
 {
     /**
-     * @param string $field `key`, `locale`, `name`, `subject`, `body`, `placeholders`, `scope` or `output`
+     * @param string $field `key`, `locale`, `name`, `subject`, `body`, `html`, `placeholders`, `scope` or `output`
      * @param string $message fixed text, no template content
      */
     public function __construct(public readonly string $field, string $message)

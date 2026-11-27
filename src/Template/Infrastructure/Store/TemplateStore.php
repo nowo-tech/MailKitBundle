@@ -215,6 +215,22 @@ final class TemplateStore
     }
 
     /**
+     * Runs `$operation` in one transaction-doctrine unit on the store connection (a savepoint inside an open host
+     * transaction); a failure rolls it back and is rethrown (ZCZ-L2).
+     *
+     * @template T
+     *
+     * @param callable(): T $operation
+     *
+     * @return T
+     */
+    public function transactional(callable $operation): mixed
+    {
+        // @igor-ignore - Closure runs synchronously inside run(); it is not stored on the service.
+        return DoctrineTransactionRunner::forConnection($this->connection(), null, $this->logger)->run($operation);
+    }
+
+    /**
      * The personal rows of an owner (every tenant), exact match re-checked in PHP.
      *
      * @return list<StoredTemplate>
@@ -254,20 +270,26 @@ final class TemplateStore
 
     /**
      * GDPR erasure of an owner reference in one transaction: deletes the owner's personal rows and clears the owner
-     * as author / last author of shared rows. Returns the deleted rows (for the events) and the anonymised count.
+     * as author / last author of shared rows. `$onDeleted` runs inside the transaction right after each delete (the
+     * events, ZCZ-L2): when it throws, the whole erasure is rolled back. Returns the deleted rows and the anonymised count.
+     *
+     * @param (callable(StoredTemplate): void)|null $onDeleted
      *
      * @return array{deleted: list<StoredTemplate>, anonymised: int}
      */
-    public function eraseOwner(string $owner): array
+    public function eraseOwner(string $owner, ?callable $onDeleted = null): array
     {
         $connection = $this->connection();
         $result     = ['deleted' => [], 'anonymised' => 0];
         // @igor-ignore - Closure runs synchronously inside run(); it is not stored on the service.
-        DoctrineTransactionRunner::forConnection($connection, null, $this->logger)->run(function () use ($connection, $owner, &$result): void {
+        DoctrineTransactionRunner::forConnection($connection, null, $this->logger)->run(function () use ($connection, $owner, $onDeleted, &$result): void {
             $result = ['deleted' => [], 'anonymised' => 0];
             foreach ($this->personalRows($owner) as $template) {
                 if ((int) $connection->executeStatement('DELETE FROM ' . $this->table() . ' WHERE id = ? AND scope = ? AND owner_id = ?', [$template->id, TemplateScope::Personal->value, $owner]) === 1) {
                     $result['deleted'][] = $template;
+                    if ($onDeleted !== null) {
+                        $onDeleted($template);
+                    }
                 }
             }
             foreach ($this->authoredSharedRows($owner) as $template) {

@@ -35,8 +35,11 @@ final readonly class TemplateDraft
     /** Longest subject, in characters. */
     public const MAX_SUBJECT = 255;
 
-    /** Control, bidi override / isolate and line / paragraph separator characters. */
-    public const UNSAFE_LINE = '/[\p{Cc}\x{202A}-\x{202E}\x{2066}-\x{2069}\p{Zl}\p{Zp}]/u';
+    /**
+     * Control, bidi override / isolate, line / paragraph separator, zero-width (U+200B, U+2060, U+FEFF) and direction
+     * mark (U+200E, U+200F, U+061C) characters (ZCZ-I3).
+     */
+    public const UNSAFE_LINE = '/[\p{Cc}\x{202A}-\x{202E}\x{2066}-\x{2069}\p{Zl}\p{Zp}\x{200B}\x{2060}\x{FEFF}\x{200E}\x{200F}\x{061C}]/u';
 
     public string $name;
 

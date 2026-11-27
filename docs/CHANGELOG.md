@@ -66,6 +66,12 @@ Beacon spec 254 T003). Opt-in, no BC break. See [UPGRADING](UPGRADING.md#to-270)
 - Template HTML keeps **https images only** (and `cid:` inline parts): `http`, `data:` and relative image sources,
   `srcset` / `background` / `style` URLs and audio / video are removed on save and on render. New
   `Mailbox\Html\RemoteImages::HttpsOnly` sanitiser mode (not offered by `mailboxes.html.remote_images`).
+- Audit ZCZ (pre-tag): placeholders inside URL attributes (`href`, `src`, …; also percent-encoded or as character
+  references) are refused on save with `InvalidTemplate('html')` (L1); `TemplateDeletedEvent` is dispatched inside the
+  delete's transaction, so a throwing listener rolls the delete or the erasure back (L2); provider values are cut at
+  64 KiB and a render stops once a part passes `max_output_bytes` (I2); zero-width and direction-mark characters are
+  removed from values and refused in subjects, and braces written as character references never form a live
+  placeholder (I3).
 - `RenderedTemplate::applyTo(Email)` puts subject, HTML and text on a Symfony `Email` and tags it with the template key
   (sent-mail log tag and tracking template id).
 - `TemplateDeletedEvent` after a delete and for each personal row a GDPR erasure deletes (dispatched inside the
@@ -79,6 +85,12 @@ Beacon spec 254 T003). Opt-in, no BC break. See [UPGRADING](UPGRADING.md#to-270)
   fifth argument `$templates`, inactive until enabled).
 
 ### Changed
+
+- **Lost savepoints close the connection** (audit ZCZ-I1, every DBAL store: Graph inbound, tracking, mailboxes,
+  templates): when a write inside a host transaction fails and its savepoint cannot be rolled back (MySQL / MariaDB
+  drop savepoints on a deadlock), the connection is now closed before the original failure is rethrown, instead of
+  leaving the host's (already server-side rolled back) transaction open. The host's commit then fails; the next use
+  reconnects.
 
 - ROADMAP: editable templates are 2.7.0 (were planned as 2.4.0), `sending_domains` moves to 2.8.0, ICS invites (planned
   as 2.3.0) are not built yet.

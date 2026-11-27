@@ -10,9 +10,10 @@ use Nowo\MailKitBundle\Template\Value\TemplateScope;
 
 /**
  * A template or snippet was deleted (2.7.0): by {@see TemplateLibraryInterface::delete()}
- * or by a GDPR erasure of its owner. Dispatched synchronously right after the statement: inside an open host
- * transaction the listener's own writes join it (a host side table keyed by the template id, such as CrmKit's consent
- * purpose, is cleaned up in the same transaction).
+ * or by a GDPR erasure of its owner. Dispatched synchronously inside the transaction of the delete (a transaction-doctrine
+ * unit on the template connection, a savepoint inside an open host transaction): a listener's writes on the same
+ * connection commit with the delete, and a listener that throws rolls the delete back (the caller gets the exception
+ * and a retry dispatches the event again).
  */
 final readonly class TemplateDeletedEvent
 {

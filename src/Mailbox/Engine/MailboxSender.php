@@ -23,6 +23,7 @@ use Nowo\MailKitBundle\Mailbox\Value\GrantFailureReason;
 use Nowo\MailKitBundle\Mailbox\Value\MailboxId;
 use Nowo\MailKitBundle\Mailbox\Value\MailboxProvider;
 use Nowo\MailKitBundle\Mailbox\Value\MailboxSettings;
+use Nowo\MailKitBundle\Mailbox\Value\OutgoingKind;
 use Nowo\MailKitBundle\Mailbox\Value\OutgoingMailboxMail;
 use Nowo\MailKitBundle\Mailbox\Value\ProviderMessageId;
 use Nowo\MailKitBundle\Mailbox\Value\SentMessage;
@@ -72,6 +73,15 @@ use function substr;
  *
  * A second call with the same key: `sent` → the stored ids with `replayed: true`; `failed` / `unknown` → the same
  * exception; in flight → {@see MailboxSendInProgress}; another message → {@see MailboxSendKeyConflict}.
+ *
+ * **Send-only providers** (phase B2: Gmail, {@see SendOnlyMailboxGatewayInterface}) have no draft and cannot read the
+ * mailbox, so the same row and claim run a shorter path: only new messages (a reply or forward is refused before the
+ * claim); claim → account check → message built in memory → `sending` (with its Message-ID) → one submit (heartbeat and
+ * submit window as above; one retry after a 401 with a fresh token). A 4xx answer proves nothing was sent: a grant,
+ * scope or token failure, a rate limit or a passed submit window → `released` (the next call sends; a grant failure
+ * pauses the mailbox first), another refusal → `failed`. Any other failure (transport, timeout, 5xx, a 2xx without a
+ * usable id) cannot be checked → `unknown`, never sent again; a `sending` row left by a crash becomes `unknown` once
+ * stale. No sent copy is delivered (no inbox).
  */
 final readonly class MailboxSender implements MailboxSenderInterface
 {
@@ -100,11 +110,14 @@ final readonly class MailboxSender implements MailboxSenderInterface
             throw new MailboxNotActive($this->engine->status($mailbox)->status);
         }
         [$settings, $gateway, $session] = $context;
-        $key                            = $mail->idempotencyKey;
-        $hash                           = $mail->fingerprint();
-        $token                          = $this->token();
+        if ($gateway instanceof SendOnlyMailboxGatewayInterface && $mail->kind !== OutgoingKind::New) {
+            throw new InvalidArgumentException('This mailbox is send-only (' . $settings->provider->value . ', no inbox): MailKit cannot read the original of a reply or forward, so only new messages are sent.');
+        }
+        $key   = $mail->idempotencyKey;
+        $hash  = $mail->fingerprint();
+        $token = $this->token();
         if ($this->store->claimSend($mailbox, $key, $hash, $token)) {
-            return $this->compose($settings, $gateway, $session, $mail, $token, null);
+            return $this->composeAny($settings, $gateway, $session, $mail, $token, null);
         }
         $row = $this->store->sendRow($mailbox, $key);
         if ($row === null) {
@@ -116,10 +129,10 @@ final readonly class MailboxSender implements MailboxSenderInterface
         }
 
         return match ($row['status']) {
-            SendState::Sent    => $this->sentMessage($row, true),
+            SendState::Sent    => $this->sentMessage($row, true, $settings->provider),
             SendState::Failed  => throw new MailboxSendFailed($row['reason'] ?? MailboxProviderFailure::REFUSED),
             SendState::Unknown => throw new MailboxSendOutcomeUnknown(),
-            SendState::Sending => $this->reconcileRow($settings, $gateway, $session, $key, $row),
+            SendState::Sending => $gateway instanceof SendOnlyMailboxGatewayInterface ? $this->settleDirect($settings, $key, $row) : $this->reconcileRow($settings, $gateway, $session, $key, $row),
             SendState::Drafting,
             SendState::Released => $this->takeOverDraft($settings, $gateway, $session, $mail, $row),
         };
@@ -150,7 +163,7 @@ final readonly class MailboxSender implements MailboxSenderInterface
         [$settings, $gateway, $session] = $context;
 
         try {
-            $this->reconcileRow($settings, $gateway, $session, $key, $row);
+            $gateway instanceof SendOnlyMailboxGatewayInterface ? $this->settleDirect($settings, $key, $row) : $this->reconcileRow($settings, $gateway, $session, $key, $row);
         } catch (MailboxSendInProgress) {
             return false;
         } catch (MailboxSendFailed|MailboxSendOutcomeUnknown) {
@@ -210,7 +223,195 @@ final readonly class MailboxSender implements MailboxSenderInterface
             throw new MailboxSendInProgress();
         }
 
-        return $this->compose($settings, $gateway, $session, $mail, $token, $row['message_id'] !== null ? new ProviderMessageId($row['message_id']) : null);
+        return $this->composeAny($settings, $gateway, $session, $mail, $token, $row['message_id'] !== null ? new ProviderMessageId($row['message_id']) : null);
+    }
+
+    /**
+     * The draft path, or the direct path of a send-only provider (it never stores a draft id, so there is no previous
+     * draft to drop).
+     */
+    private function composeAny(MailboxSettings $settings, MailboxGatewayInterface $gateway, MailboxSession $session, OutgoingMailboxMail $mail, string $token, ?ProviderMessageId $previous): SentMessage
+    {
+        if ($gateway instanceof SendOnlyMailboxGatewayInterface) {
+            return $this->composeDirect($settings, $gateway, $gateway, $session, $mail, $token);
+        }
+
+        return $this->compose($settings, $gateway, $session, $mail, $token, $previous);
+    }
+
+    /**
+     * Send-only provider, for the holder of `$token` (row `drafting`): account check, the message built in memory, then
+     * `sending` with its Message-ID. A failure here sent nothing (`released` or `failed`, as the draft path).
+     */
+    private function composeDirect(MailboxSettings $settings, MailboxGatewayInterface $gateway, SendOnlyMailboxGatewayInterface $direct, MailboxSession $session, OutgoingMailboxMail $mail, string $token): SentMessage
+    {
+        $mailbox = $settings->id;
+        $key     = $mail->idempotencyKey;
+
+        try {
+            if (!$this->engine->checkAccount($settings, $gateway, $session)) {
+                throw new MailboxGrantFailure(GrantFailureReason::AccountMismatch, 'The token belongs to another account than the mailbox; nothing was sent.');
+            }
+            $prepared = $direct->prepare($session, $mail, $this->messageId($settings, $key));
+            $since    = $this->now();
+            if (!$this->store->updateSend($mailbox, $key, $token, SendState::Drafting, SendState::Sending, ['internet_message_id' => $prepared->messageId])) {
+                throw new MailboxSendInProgress();
+            }
+        } catch (Throwable $failure) {
+            return $this->abandon($settings, $gateway, $session, $key, $token, null, $failure);
+        }
+
+        return $this->submitDirect($settings, $gateway, $direct, $session, $key, $token, $prepared, $since);
+    }
+
+    /**
+     * Send-only provider, step 5: one submit at a time, each preceded by the token, the submit window and the heartbeat
+     * (as the draft path); one retry after a 401. The answer alone decides (the mailbox cannot be read).
+     */
+    private function submitDirect(MailboxSettings $settings, MailboxGatewayInterface $gateway, SendOnlyMailboxGatewayInterface $direct, MailboxSession $session, string $key, string $token, PreparedMessage $prepared, int $since): SentMessage
+    {
+        $mailbox = $settings->id;
+        for ($attempt = 1;; ++$attempt) {
+            $submitted = false;
+            $sent      = null;
+
+            try {
+                $session->token();
+                // Past the window nothing is handed over (a 401 before it took nothing either).
+                if ($this->now() - $since <= intdiv($this->options->staleClaimSeconds, 2)) {
+                    if (!$this->store->updateSend($mailbox, $key, $token, SendState::Sending, SendState::Sending)) {
+                        // Another worker took the key over (stale): it settles it as unknown; nothing is submitted here.
+                        throw new MailboxSendInProgress(true);
+                    }
+                    $submitted = true;
+                    $sent      = $direct->submit($session, $prepared);
+                }
+            } catch (MailboxSendInProgress $stop) {
+                throw $stop;
+            } catch (SubmitTokenRejected) {
+                if ($attempt === 1) {
+                    // Audit ZBU-L2: the refreshed token must still be the mailbox's account before the one retry (another
+                    // account's Gmail would send it from its own address).
+                    try {
+                        $same = $this->engine->checkAccount($settings, $gateway, $session);
+                    } catch (Throwable $failure) {
+                        return $this->afterDirectFailure($settings, $key, $token, $failure, false);
+                    }
+                    if ($same) {
+                        continue;
+                    }
+
+                    return $this->releaseDirect($settings, $key, $token, new MailboxGrantFailure(GrantFailureReason::AccountMismatch, 'The refreshed token belongs to another account than the mailbox; nothing was sent.'));
+                }
+
+                return $this->releaseDirect($settings, $key, $token, new MailboxGrantFailure(GrantFailureReason::Revoked, 'The provider refused a fresh token of the submit (HTTP 401); nothing was sent.'));
+            } catch (Throwable $failure) {
+                return $this->afterDirectFailure($settings, $key, $token, $failure, $submitted);
+            }
+            if (!$sent instanceof SubmittedMessage) {
+                return $this->releaseDirect($settings, $key, $token, new MailboxProviderFailure('The submit window passed before the message was handed to the provider (slow token refresh); nothing was sent.', MailboxProviderFailure::TRANSIENT));
+            }
+
+            try {
+                $recorded = $this->store->updateSend($mailbox, $key, $token, SendState::Sending, SendState::Sent, ['provider_message_id' => $sent->id->value, 'thread_id' => $sent->threadId, 'sent_at' => $this->now()]);
+            } catch (Throwable $storage) {
+                // Audit ZBU-I5: Gmail sent it but the row could not be written. The row stays `sending` (settled
+                // `unknown` once stale, never resent); the caller must not send it again with a new key.
+                $this->logger?->warning('Mailbox send: the message was sent but its row could not be recorded; the key ends unknown and is never sent again.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value, 'error' => $storage::class]);
+
+                throw new MailboxSendOutcomeUnknown();
+            }
+            if (!$recorded) {
+                return $this->lostOutcome($mailbox, $key, $settings->provider);
+            }
+            $this->logger?->info('Mailbox message sent.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $mailbox->value]);
+            $row = $this->store->sendRow($mailbox, $key);
+
+            return $this->sentMessage($row ?? ['message_id' => $sent->id->value, 'internet_message_id' => $prepared->messageId, 'thread_id' => $sent->threadId, 'sent_at' => $this->now()], false, $settings->provider);
+        }
+    }
+
+    /**
+     * A failed submit of a send-only provider: a provider answer in 4xx (or a failure before the request) sent nothing:
+     * `released` for a grant, token or rate-limit failure, `failed` for another refusal; anything else is `unknown`.
+     *
+     * @throws Throwable
+     */
+    private function afterDirectFailure(MailboxSettings $settings, string $key, string $token, Throwable $failure, bool $submitted): SentMessage
+    {
+        $answered = $failure instanceof MailboxProviderFailure && $failure->status !== null && $failure->status >= 400 && $failure->status < 500;
+        if ($submitted && !$answered && !$failure instanceof MailboxGrantFailure) {
+            if (!$this->store->updateSend($settings->id, $key, $token, SendState::Sending, SendState::Unknown, ['reason' => 'submit_unconfirmed'])) {
+                return $this->lostOutcome($settings->id, $key, $settings->provider);
+            }
+            $this->logger?->warning('Mailbox send outcome unknown: the provider gave no definite answer and the mailbox cannot be read; it is never sent again.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $settings->id->value, 'error' => $failure::class]);
+
+            throw new MailboxSendOutcomeUnknown();
+        }
+        if ($failure instanceof MailboxProviderFailure && !$failure->isRetryable()) {
+            $reason = $this->reason($failure);
+            if (!$this->store->updateSend($settings->id, $key, $token, SendState::Sending, SendState::Failed, ['reason' => $reason])) {
+                return $this->lostOutcome($settings->id, $key, $settings->provider);
+            }
+            $this->logger?->notice('Mailbox send refused by the provider; nothing was sent.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $settings->id->value, 'status' => $failure->status]);
+
+            throw new MailboxSendFailed($reason);
+        }
+
+        return $this->releaseDirect($settings, $key, $token, $failure);
+    }
+
+    /**
+     * `sending` → `released` for a send-only provider that sent nothing (the next call with the key sends); a grant
+     * failure pauses the mailbox first.
+     *
+     * @throws Throwable the failure
+     */
+    private function releaseDirect(MailboxSettings $settings, string $key, string $token, Throwable $failure): SentMessage
+    {
+        if ($failure instanceof MailboxGrantFailure) {
+            $this->engine->grantFailed($settings->id, $settings->provider, $failure->reason);
+        }
+
+        $released = true;
+
+        try {
+            $released = $this->store->updateSend($settings->id, $key, $token, SendState::Sending, SendState::Released);
+        } catch (Throwable $storage) {
+            // The claim goes stale and is settled as unknown: never sent twice.
+            $this->logger?->warning('Mailbox send: the released claim could not be recorded; it is settled once stale.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $settings->id->value, 'error' => $storage::class]);
+        }
+        if (!$released) {
+            return $this->lostOutcome($settings->id, $key, $settings->provider);
+        }
+        $this->logger?->notice('Mailbox send stopped before the provider took it; nothing was sent.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $settings->id->value, 'error' => $failure::class]);
+
+        throw $failure;
+    }
+
+    /**
+     * A `sending` row of a send-only provider seen by another call: in flight while fresh; once stale (its holder
+     * stopped without an answer, e.g. a crash), taken over by one caller and settled `unknown`: the mailbox cannot be
+     * read, so it is never sent again.
+     *
+     * @param array{token: string, updated_at: int} $row
+     *
+     * @throws MailboxSendInProgress
+     * @throws MailboxSendOutcomeUnknown
+     */
+    private function settleDirect(MailboxSettings $settings, string $key, array $row): SentMessage
+    {
+        $stale = $this->staleBefore();
+        $token = $this->token();
+        if ($row['updated_at'] >= $stale || !$this->store->takeOverSend($settings->id, $key, $row['token'], SendState::Sending, $token, SendState::Sending, $stale)) {
+            throw new MailboxSendInProgress(true);
+        }
+        if (!$this->store->updateSend($settings->id, $key, $token, SendState::Sending, SendState::Unknown, ['reason' => 'submit_interrupted'])) {
+            return $this->lostOutcome($settings->id, $key, $settings->provider);
+        }
+        $this->logger?->warning('Mailbox send outcome unknown: an interrupted submit cannot be checked (send-only mailbox); it is never sent again.', ['bundle' => 'NowoMailKitBundle', 'mailbox' => $settings->id->value]);
+
+        throw new MailboxSendOutcomeUnknown();
     }
 
     /**
@@ -530,12 +731,12 @@ final readonly class MailboxSender implements MailboxSenderInterface
      * @throws MailboxSendOutcomeUnknown
      * @throws MailboxSendInProgress
      */
-    private function lostOutcome(MailboxId $mailbox, string $key): SentMessage
+    private function lostOutcome(MailboxId $mailbox, string $key, MailboxProvider $provider = MailboxProvider::Graph): SentMessage
     {
         $row = $this->store->sendRow($mailbox, $key);
 
         return match ($row['status'] ?? null) {
-            SendState::Sent    => $this->sentMessage($row, true),
+            SendState::Sent    => $this->sentMessage($row, true, $provider),
             SendState::Failed  => throw new MailboxSendFailed($row['reason'] ?? MailboxProviderFailure::REFUSED),
             SendState::Unknown => throw new MailboxSendOutcomeUnknown(),
             default            => throw new MailboxSendInProgress(true),
@@ -557,7 +758,7 @@ final readonly class MailboxSender implements MailboxSenderInterface
      *
      * @param array{message_id: string|null, internet_message_id: string, thread_id: string|null, sent_at: int|null} $row
      */
-    private function sentMessage(array $row, bool $replayed): SentMessage
+    private function sentMessage(array $row, bool $replayed, MailboxProvider $provider = MailboxProvider::Graph): SentMessage
     {
         if ($row['message_id'] === null) {
             throw new MailboxSendOutcomeUnknown();
@@ -568,7 +769,7 @@ final readonly class MailboxSender implements MailboxSenderInterface
             $id,
             $row['internet_message_id'],
             $row['thread_id'],
-            ThreadKey::for(MailboxProvider::Graph, $row['thread_id'], [], null, $row['internet_message_id'], $id),
+            ThreadKey::for($provider, $row['thread_id'], [], null, $row['internet_message_id'], $id),
             new DateTimeImmutable('@' . ($row['sent_at'] ?? $this->now())),
             $replayed,
         );

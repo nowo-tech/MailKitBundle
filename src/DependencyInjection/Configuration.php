@@ -805,7 +805,7 @@ final class Configuration implements ConfigurationInterface
         /** @var ArrayNodeDefinition $node */
         $node = (new TreeBuilder('mailboxes'))->getRootNode();
         $node
-            ->info('2.5.0: sync the folders people follow in their own Outlook mailbox (Microsoft Graph, delegated tokens from your MailboxTokenProviderInterface) into your MailboxMessageSinkInterface. Needs symfony/messenger, symfony/html-sanitizer, ext-fileinfo and a DBAL connection. Off by default.')
+            ->info('2.5.0: sync the folders people follow in their own Outlook mailbox (Microsoft Graph, delegated tokens from your MailboxTokenProviderInterface) into your MailboxMessageSinkInterface, and send from it; 2.6.0: send-only Gmail mailboxes. Needs symfony/messenger, symfony/html-sanitizer, ext-fileinfo and a DBAL connection. Off by default.')
             ->addDefaultsIfNotSet()
             ->children()
                 ->booleanNode('enabled')->info('Register the ports, services, Messenger handlers, commands and the webhook route loader.')->defaultFalse()->end()
@@ -955,6 +955,13 @@ final class Configuration implements ConfigurationInterface
                         ->end()
                     ->end()
                 ->end()
+                ->arrayNode('gmail')
+                    ->info('2.6.0 (owner decision D-20261124-09): Gmail mailboxes are SEND-ONLY. Your OAuth flow requests exactly "openid email https://www.googleapis.com/auth/gmail.send" (Mailbox\\Gmail\\GmailScopes::REQUESTED); no gmail.readonly, no inbox, no sync, no sent copy.')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->booleanNode('enabled')->info('Gmail send-only provider (MailboxSenderInterface, new messages only).')->defaultFalse()->end()
+                    ->end()
+                ->end()
             ->end()
             ->validate()
                 ->ifTrue(static fn (array $v): bool => ($v['enabled'] ?? false) === true && (!is_string($v['token_provider'] ?? null) || $v['token_provider'] === '' || !is_string($v['directory'] ?? null) || $v['directory'] === '' || !is_string($v['sink'] ?? null) || $v['sink'] === ''))
@@ -963,6 +970,10 @@ final class Configuration implements ConfigurationInterface
             ->validate()
                 ->ifTrue(static fn (array $v): bool => ($v['graph']['enabled'] ?? false) === true && ($v['enabled'] ?? false) !== true)
                 ->thenInvalid('nowo_mail_kit.mailboxes.graph.enabled needs nowo_mail_kit.mailboxes.enabled: true.')
+            ->end()
+            ->validate()
+                ->ifTrue(static fn (array $v): bool => ($v['gmail']['enabled'] ?? false) === true && ($v['enabled'] ?? false) !== true)
+                ->thenInvalid('nowo_mail_kit.mailboxes.gmail.enabled needs nowo_mail_kit.mailboxes.enabled: true.')
             ->end()
             ->validate()
                 ->ifTrue(static fn (array $v): bool => self::durationSeconds((string) ($v['sync']['initial_window'] ?? 'P7D')) > self::durationSeconds((string) ($v['sync']['max_initial_window'] ?? 'P90D'))

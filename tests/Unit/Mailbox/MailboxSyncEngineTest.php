@@ -106,7 +106,7 @@ final class MailboxSyncEngineTest extends TestCase
         self::assertSame(MailboxStatus::PausedByHost, $this->engine->start(new MailboxId('mbx-paused'))->status);
         self::assertSame([], $this->graph->requests);
 
-        $this->ports->add(new MailboxSettings(new MailboxId('mbx-gmail'), MailboxProvider::Gmail, 'ana@example.com', [FolderRef::inbox()]));
+        $this->ports->add(new MailboxSettings(new MailboxId('mbx-gmail'), MailboxProvider::Gmail, 'ana@example.com', []));
 
         try {
             $this->engine->start(new MailboxId('mbx-gmail'));
@@ -341,7 +341,7 @@ final class MailboxSyncEngineTest extends TestCase
         self::assertCount(0, $this->graph->matching('/attachments'), 'excluded before the attachment list');
 
         // A gateway the configuration does not enable drops the work.
-        $this->ports->add(new MailboxSettings($this->ana, MailboxProvider::Gmail, 'ana@example.com', [FolderRef::inbox()]));
+        $this->ports->add(new MailboxSettings($this->ana, MailboxProvider::Gmail, 'ana@example.com', []));
         $this->engine->sweepFolder($this->ana, 'inbox');
 
         // The directory forgot the mailbox: the next message deletes its rows.

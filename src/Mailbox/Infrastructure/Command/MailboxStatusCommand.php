@@ -9,6 +9,7 @@ use InvalidArgumentException;
 use Nowo\MailKitBundle\Mailbox\Service\MailboxSyncInterface;
 use Nowo\MailKitBundle\Mailbox\Value\GrantFailureReason;
 use Nowo\MailKitBundle\Mailbox\Value\MailboxId;
+use Nowo\MailKitBundle\Mailbox\Value\MailboxProvider;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
@@ -19,8 +20,8 @@ use function is_string;
 use function sprintf;
 
 /**
- * `nowo:mail-kit:mailbox:status <id>` (2.5.0): status, grant-failure reason and per folder the last complete sweep and
- * the subscription expiry. No address or other personal data.
+ * `nowo:mail-kit:mailbox:status <id>` (2.5.0): status, grant-failure reason, provider (a send-only Gmail mailbox says
+ * so) and per folder the last complete sweep and the subscription expiry. No address or other personal data.
  */
 #[AsCommand(name: self::NAME, description: 'Show the sync status of one delegated mailbox (no personal data).')]
 final class MailboxStatusCommand extends Command
@@ -55,6 +56,9 @@ final class MailboxStatusCommand extends Command
             return Command::INVALID;
         }
         $output->writeln(sprintf('Status: %s%s', $status->status->value, $status->reason instanceof GrantFailureReason ? ' (' . $status->reason->value . ')' : ''));
+        if ($status->provider instanceof MailboxProvider) {
+            $output->writeln(sprintf('Provider: %s%s', $status->provider->value, $status->isSendOnly() ? ' (send only: no inbox, nothing is synced)' : ''));
+        }
         foreach ($status->folders as $folder) {
             $output->writeln(sprintf(
                 '  %s: last complete sweep %s, subscription %s%s',

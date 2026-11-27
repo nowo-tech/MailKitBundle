@@ -129,3 +129,8 @@ log:
         sent_at: Sent at
         failed_at: Failed at
         error: Error
+mailbox:
+    provider:
+        graph: 'Microsoft 365 / Outlook'
+        gmail: 'Gmail (send only)'
+        gmail_send_only_notice: 'Gmail mailboxes only send e-mail from your address. There is no inbox: received mail is not shown here and nothing is synced.'

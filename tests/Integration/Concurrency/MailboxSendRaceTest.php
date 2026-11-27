@@ -18,6 +18,9 @@ use Nowo\MailKitBundle\Mailbox\Engine\MailboxSendOptions;
 use Nowo\MailKitBundle\Mailbox\Engine\MailboxSyncEngine;
 use Nowo\MailKitBundle\Mailbox\Engine\SendState;
 use Nowo\MailKitBundle\Mailbox\Exception\MailboxSendInProgress;
+use Nowo\MailKitBundle\Mailbox\Exception\MailboxSendOutcomeUnknown;
+use Nowo\MailKitBundle\Mailbox\Gmail\GmailApiClient;
+use Nowo\MailKitBundle\Mailbox\Gmail\GmailMailboxGateway;
 use Nowo\MailKitBundle\Mailbox\Graph\GraphMailboxGateway;
 use Nowo\MailKitBundle\Mailbox\Html\MailHtmlSanitizer;
 use Nowo\MailKitBundle\Mailbox\Html\RemoteImages;
@@ -28,6 +31,7 @@ use Nowo\MailKitBundle\Mailbox\Value\OutgoingAttachment;
 use Nowo\MailKitBundle\Mailbox\Value\OutgoingKind;
 use Nowo\MailKitBundle\Mailbox\Value\OutgoingMailboxMail;
 use Nowo\MailKitBundle\Sender\MailAddress;
+use Nowo\MailKitBundle\Tests\Support\MailboxGmailFake;
 use Nowo\MailKitBundle\Tests\Support\MailboxGraphFake;
 use Nowo\MailKitBundle\Tests\Support\MemoryMailboxPorts;
 use Nowo\MailKitBundle\Tests\Support\RecordingBus;
@@ -242,6 +246,72 @@ final class MailboxSendRaceTest extends TestCase
         self::assertTrue($a->send($this->id, $mail)->replayed);
         self::assertSame(['DRAFT-2'], $graph->delivered);
         self::assertSame(SendState::Sent, $this->storeA->sendRow($this->id, self::KEY)['status'] ?? null);
+    }
+
+    public function testTwoWorkersSendingOneGmailKeyDeliverOnce(): void
+    {
+        // Phase B2: send-only Gmail has no draft to reconcile; the claim alone keeps one delivery per key.
+        $this->storeA->insertMailbox(new MailboxId('mbx-gmail'), MailboxProvider::Gmail);
+        $google = new MailboxGmailFake();
+        $ports  = (new MemoryMailboxPorts())->add(MemoryMailboxPorts::gmailSettings('mbx-gmail'));
+        $a      = $this->gmailSender($this->storeA, $google, $ports);
+        $b      = $this->gmailSender($this->storeB, $google, $ports);
+        $id     = new MailboxId('mbx-gmail');
+        $mail   = new OutgoingMailboxMail(OutgoingKind::New, null, [new MailAddress('pedro@example.org')], [], [], 'Plan', 'Hello', null, [], self::KEY);
+
+        // B runs while A is inside its submit: B sends nothing and later replays A's ids.
+        $inner            = null;
+        $google->override = static function (string $method, string $url) use (&$inner, $b, $mail, $id): ?MockResponse {
+            if ($url === GmailApiClient::SEND_URL && !$inner instanceof Throwable) {
+                try {
+                    $b->send($id, $mail);
+                } catch (Throwable $failure) {
+                    $inner = $failure;
+                }
+            }
+
+            return null;
+        };
+        $sent = $a->send($id, $mail);
+        self::assertInstanceOf(MailboxSendInProgress::class, $inner);
+        self::assertSame($sent->id->value, $b->send($id, $mail)->id->value);
+        self::assertCount(1, $google->sent);
+
+        // A hangs inside its submit past the stale delay: B settles the key unknown (never resent); A's late answer
+        // finds the key settled and reports it unknown too. One delivery.
+        $second           = new OutgoingMailboxMail(OutgoingKind::New, null, [new MailAddress('pedro@example.org')], [], [], 'Plan 2', 'Hello', null, [], 'race-send-key-0002');
+        $clock            = $this->clock;
+        $settled          = null;
+        $google->override = static function (string $method, string $url) use (&$settled, $b, $second, $id, $clock): ?MockResponse {
+            if ($url === GmailApiClient::SEND_URL && !$settled instanceof Throwable) {
+                $clock->modify('+121 seconds');
+
+                try {
+                    $b->send($id, $second);
+                } catch (Throwable $failure) {
+                    $settled = $failure;
+                }
+            }
+
+            return null;
+        };
+
+        try {
+            $a->send($id, $second);
+            self::fail('Settled by B.');
+        } catch (MailboxSendOutcomeUnknown) {
+        }
+        self::assertInstanceOf(MailboxSendOutcomeUnknown::class, $settled);
+        self::assertSame(SendState::Unknown, $this->storeB->sendRow($id, 'race-send-key-0002')['status'] ?? null);
+        self::assertCount(2, $google->sent);
+    }
+
+    private function gmailSender(MailboxStore $store, MailboxGmailFake $google, MemoryMailboxPorts $ports): MailboxSender
+    {
+        $bus    = new RecordingBus();
+        $engine = new MailboxSyncEngine($store, $ports, $ports, $ports, $ports, $ports, ['gmail' => new GmailMailboxGateway(new GmailApiClient($google->client()))], $bus, clock: $this->clock);
+
+        return new MailboxSender($engine, $store, $bus, new MailboxSendOptions(staleClaimSeconds: 120), $this->clock);
     }
 
     private function sender(MailboxStore $store, MailboxGraphFake $graph, MemoryMailboxPorts $ports): MailboxSender

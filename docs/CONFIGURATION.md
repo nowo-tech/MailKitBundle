@@ -390,6 +390,8 @@ nowo_mail_kit:
                 allowed_ips: []
                 rate_limit: { limit: 600, interval: '1 minute' }
                 client_rate_limit: { limit: 60, interval: '1 minute' }
+        gmail:
+            enabled: false           # 2.6.0: send-only (scopes openid email gmail.send)
 ```
 
 | Key | Default | Description |
@@ -429,6 +431,13 @@ nowo_mail_kit:
 | `graph.webhook.max_body_bytes` / `max_notifications` | `1048576` / `200` | Request caps (413 above). |
 | `graph.webhook.allowed_ips` | `[]` | Optional source allow-list (CIDR). |
 | `graph.webhook.rate_limit` / `client_rate_limit` | `600` / `60` per minute | Verified bucket and per-client-IP bucket of unverified requests (429 above). |
+
+
+### mailboxes.gmail (2.6.0, send-only)
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `gmail.enabled` | `false` | Gmail provider, **send-only** (owner decision D-20261124-09). Needs `mailboxes.enabled: true` (the build fails otherwise). Your OAuth flow requests exactly `openid email https://www.googleapis.com/auth/gmail.send` (`Mailbox\Gmail\GmailScopes::REQUESTED`); no `gmail.readonly`, so no CASA assessment. A Gmail mailbox has no folders, no inbox, no sync, no webhook, no attachment download and no sent copy: only `MailboxSenderInterface::send()` of new messages. It uses `http_client`, `timeout`, `connection`, `send.*` (Gmail's own limit is 35 MB for the encoded message) and `html.remote_images` (outgoing remote images are dropped unless `allowed`). Only `https://openidconnect.googleapis.com/v1/userinfo` and `https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send` receive the token. Setup: [GOOGLE-GMAIL-SETUP](GOOGLE-GMAIL-SETUP.md). |
 
 ## tracking
 

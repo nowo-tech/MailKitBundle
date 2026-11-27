@@ -1,6 +1,7 @@
 # Delegated mailboxes (Outlook and Gmail): design
 
-Status 2026-11-24: **accepted; 2.5.0 part 1 (ports, sync, attachments) and part 2 (send) built.** The owner accepted every recommendation (Q-MB-1 – Q-MB-22 as
+Status 2026-11-25: **accepted; 2.5.0 part 1 (ports, sync, attachments) and part 2 (send) built; Gmail reduced to
+send-only (phase B2, owner decision D-20261124-09) and built.** The owner accepted every recommendation (Q-MB-1 – Q-MB-22 as
 recommended, 2026-11-23). For symfony-beacon spec `255-mail-inbox` (owner decision D-20261123-14,
 task T001), spec `236` (personal Microsoft 365 mailboxes) and spec `254` block B (CRM mailboxes, FR-020 – FR-023). It
 widens the roadmap rows 2.5.0 "Personal Outlook mailboxes" and 2.6.0 "Gmail provider". The contract revision is
@@ -30,6 +31,7 @@ owner's decisions are in [section 19](#19-questions-for-the-owner-q-mb) and the 
 - [19. Questions for the owner (Q-MB)](#19-questions-for-the-owner-q-mb)
 - [20. Test plan](#20-test-plan)
 - [21. Beacon side (for reference)](#21-beacon-side-for-reference)
+- [22. Phase B2: Gmail send-only (D-20261124-09)](#22-phase-b2-gmail-send-only-d-20261124-09)
 
 ## 1. Summary
 
@@ -57,6 +59,9 @@ The 1.9 shared-mailbox inbound pipeline (`graph.inbound`, app-only) stays as it 
 - **Reuse before new bundles** (owner 2026-11-23): everything lives in MailKit; no new package. The Graph pieces of 1.8
   / 1.9 are reused, not copied.
 - **Gmail stays off** until Google's OAuth verification and the CASA assessment are through (restricted scopes).
+  *Superseded 2026-11-24 by D-20261124-09*: Gmail is **send-only** (scopes exactly `openid email gmail.send`, a
+  sensitive scope: verification, no CASA). No `gmail.readonly`, no watch, no Pub/Sub push, no history cursor, no sync,
+  no attachment download, no sent copy. See [section 22](#22-phase-b2-gmail-send-only-d-20261124-09).
 - **The host owns storage, encryption and retention** of messages (Beacon spec 255 FR-003, FR-006). MailKit keeps only
   sync state: cursors, subscriptions, the mailbox status and send idempotency rows.
 - **MailKit never deletes or edits provider mail.** The only provider writes are the drafts it creates to send, the
@@ -73,7 +78,7 @@ move up; the order does not change. Each version gets a REQ-SEC-004 audit before
 | Version | Content | Notes |
 | --- | --- | --- |
 | **2.5.0** Outlook | Provider-neutral ports, VOs, events, tables and commands (sections 5, 15, 16); Graph delegated provider: per-folder subscriptions on a new webhook route, per-folder delta sweep, fetch and normalise, exclusion, sink, thread key, on-demand attachments, sanitiser modes (section 11), send (new, reply, reply all, forward) with idempotency and the sent copy, grant-failure pause, call observer, disconnect | Two PRs (sync + attachments, then send), tagged together as one minor (Q-MB-19). Needs nothing new in composer. |
-| **2.6.0** Gmail | Gmail provider behind the same ports: `users.watch` / `users.stop` with Pub/Sub push (OIDC JWT verified), `history.list` cursor per mailbox, `messages.get` normalised to the same VO, attachments, `messages.send` with threading and idempotency, Gmail quota units in the observer | `gmail.enabled: false` by default; `firebase/php-jwt` in `suggest` (Q-MB-16). Built and tested with fakes before Google's review; switched on in Beacon after it. |
+| ~~**2.6.0** Gmail~~ (superseded by phase B2, send-only) | Gmail provider behind the same ports: `users.watch` / `users.stop` with Pub/Sub push (OIDC JWT verified), `history.list` cursor per mailbox, `messages.get` normalised to the same VO, attachments, `messages.send` with threading and idempotency, Gmail quota units in the observer | `gmail.enabled: false` by default; `firebase/php-jwt` in `suggest` (Q-MB-16). Built and tested with fakes before Google's review; switched on in Beacon after it. |
 
 Later candidates (not in either version): app-only shared mailboxes behind the same sink (Q-MB-15), rich
 notifications with encrypted resource data, IMAP.
@@ -426,7 +431,7 @@ per folder and honours `Retry-After` through a Messenger `DelayStamp`.
 
 | Scope | Why | Google classification |
 | --- | --- | --- |
-| `https://www.googleapis.com/auth/gmail.readonly` | `users.watch`, `history.list`, `messages.get`, `messages.list`, `attachments.get`, `users.getProfile` | **Restricted**: OAuth verification + yearly CASA assessment |
+| `https://www.googleapis.com/auth/gmail.readonly` | `users.watch`, `history.list`, `messages.get`, `messages.list`, `attachments.get`, `users.getProfile` | **Restricted**: OAuth verification + yearly CASA assessment. **Not requested** (superseded by section 22, D-20261124-09: send-only) |
 | `https://www.googleapis.com/auth/gmail.send` | `messages.send` | Sensitive (verification, no CASA): *to verify* in Google's console |
 
 Not requested: `gmail.modify` (would cover both but allows label and trash changes MailKit never makes),
@@ -663,3 +668,21 @@ mailbox + provider id), the exclusion policy from the person's rules (with per-r
 spec 223's counters. It listens to `MailboxGrantFailedEvent` for the bell notice, calls `disconnect()` on FR-001
 disconnect and on erasure, routes the Messenger messages to an async transport, schedules the two commands, and exposes
 the two webhook routes as public stateless routes outside its HTTP log.
+
+## 22. Phase B2: Gmail send-only (D-20261124-09)
+
+Owner decision D-20261124-09 (2026-11-24) replaces the 2.6.0 Gmail sync: Gmail is **send-only**. Outlook keeps sync and
+send (2.5.0). Q-MB-1 – Q-MB-22 stand; Q-MB-16 (Pub/Sub JWT), Q-MB-17 (`gmail.readonly`) and the Gmail half of
+Q-MB-6 (sent copy) no longer apply.
+
+| Item | Detail |
+| --- | --- |
+| Scopes | Exactly `openid email https://www.googleapis.com/auth/gmail.send` (`Mailbox\Gmail\GmailScopes::REQUESTED`). No restricted scope, so no CASA assessment; `gmail.send` is sensitive (OAuth verification for production). |
+| OAuth | Still the host's (Q-254-15 = b): PKCE S256, single-use `state`, encrypted refresh token, refresh on `rejected()`. The token port returns the granted scopes; a token without `gmail.send` pauses `ScopeMissing`. |
+| Account check | OpenID userinfo (`https://openidconnect.googleapis.com/v1/userinfo`): `sub` is the bound account id (SHA-256 stored), `email` counts only with `email_verified: true`. At start, resume and before every send; another account pauses `AccountMismatch`. |
+| Mailbox | `MailboxSettings` with `MailboxProvider::Gmail` and **no folders**. Start / resume check and bind the account only: no cursor, subscription, watch, sweep, renewal, fetch, attachment download or sent copy. `MailboxProvider::isSendOnly()` / `MailboxSyncStatus::isSendOnly()` and the `mailbox.provider.*` translations let the host say so. |
+| Send | New messages only (a reply / forward needs the original). One RFC 5322 message built by Symfony Mime (Bcc header, sanitised HTML, remote images dropped, Message-ID derived from the key, ≤ 35 MB) and one `POST https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=media` (100 quota units). |
+| Idempotency | The 2.5.0 send rows and claim. No draft, so the answer alone decides: 200 + id → `sent`; 401 → one retry with a fresh token; grant / scope / policy / rate-limit 4xx → `released` (nothing sent; a grant failure pauses); other 4xx → `failed`; timeout, 5xx or 2xx without an id → `unknown`, never resent. A stale `sending` row (a crashed worker) is settled `unknown` by one caller. |
+| Errors that pause | 401 twice → `Revoked`; 403 `insufficientPermissions` / `ACCESS_TOKEN_SCOPE_INSUFFICIENT` → `ScopeMissing`; 403 `domainPolicy` → `ConsentMissing`; 400 `failedPrecondition` (Gmail not enabled) → `MailboxNotFound`. 403 `accessNotConfigured` (API off in the project) is a refusal, not a pause. |
+| Data | MailKit stores the status row (account id hash) and the send rows (ids only, purged after `send.retention`). Nothing is logged with a body, token or address. |
+| Config | `mailboxes.gmail.enabled: false` by default; no topic, push or JWKS settings. |

@@ -2,9 +2,9 @@
 
 **Baseline spec**: [`spec.md`](spec.md)  
 **Package**: `nowo-tech/mail-kit-bundle`  
-**Last audited**: 2026-11-26
+**Last audited**: 2026-11-27
 
-Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **283** (2.5.0, audit ZBU retry guard; re-checked against `git ls-files src` on 2026-11-26: no unmapped file, no stale row).
+Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **289** (2.6.0, Gmail send-only; re-checked against `git ls-files src`: no unmapped file, no stale row).
 
 ## Bundle and dependency injection
 
@@ -319,6 +319,9 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 | `src/Mailbox/Engine/MailboxSender.php` | Send (2.5.0) | FR-MBX-009; FR-008, FR-012, FR-015 ([005](../005-delegated-mailboxes/spec.md)) |
 | `src/Mailbox/Engine/SendState.php` | Send (2.5.0) | FR-MBX-009; FR-008, FR-012, FR-015 ([005](../005-delegated-mailboxes/spec.md)) |
 | `src/Mailbox/Engine/SubmitTokenRejected.php` | Send (2.5.0) | FR-MBX-009; FR-008, FR-012, FR-015 ([005](../005-delegated-mailboxes/spec.md)) |
+| `src/Mailbox/Engine/SendOnlyMailboxGatewayInterface.php` | Send (phase B2) | FR-MBX-011; FR-019 ([005](../005-delegated-mailboxes/spec.md)) |
+| `src/Mailbox/Engine/PreparedMessage.php` | Send (phase B2) | FR-MBX-011; FR-019 ([005](../005-delegated-mailboxes/spec.md)) |
+| `src/Mailbox/Engine/SubmittedMessage.php` | Send (phase B2) | FR-MBX-011; FR-019 ([005](../005-delegated-mailboxes/spec.md)) |
 | `src/Mailbox/Exception/MailboxSendFailed.php` | Send (2.5.0) | FR-MBX-009; FR-008, FR-012, FR-015 ([005](../005-delegated-mailboxes/spec.md)) |
 | `src/Mailbox/Exception/MailboxSendInProgress.php` | Send (2.5.0) | FR-MBX-009; FR-008, FR-012, FR-015 ([005](../005-delegated-mailboxes/spec.md)) |
 | `src/Mailbox/Exception/MailboxSendKeyConflict.php` | Send (2.5.0) | FR-MBX-009; FR-008, FR-012, FR-015 ([005](../005-delegated-mailboxes/spec.md)) |
@@ -366,6 +369,14 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 | --- | --- | --- |
 | `src/Mailbox/Graph/DelegatedGraphCredential.php` | Microsoft graph provider (2.5.0) | FR-MBX-004; FR-003, FR-014 ([005](../005-delegated-mailboxes/spec.md)) |
 | `src/Mailbox/Graph/GraphMailboxGateway.php` | Microsoft graph provider (2.5.0) | FR-MBX-004; FR-003, FR-014 ([005](../005-delegated-mailboxes/spec.md)) |
+
+## Delegated mailboxes: Gmail provider (send-only, phase B2)
+
+| Source file | Spec section | Requirement IDs |
+| --- | --- | --- |
+| `src/Mailbox/Gmail/GmailApiClient.php` | Gmail provider (phase B2) | FR-MBX-011; FR-019 ([005](../005-delegated-mailboxes/spec.md)) |
+| `src/Mailbox/Gmail/GmailMailboxGateway.php` | Gmail provider (phase B2) | FR-MBX-011; FR-019 ([005](../005-delegated-mailboxes/spec.md)) |
+| `src/Mailbox/Gmail/GmailScopes.php` | Gmail provider (phase B2) | FR-MBX-011; FR-019 ([005](../005-delegated-mailboxes/spec.md)) |
 
 ## Delegated mailboxes: HTML sanitiser
 
@@ -435,12 +446,13 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 | Concurrency | 3 | 3 |
 | Delegated mailboxes: host ports and services | 10 | 10 |
 | Delegated mailboxes: sync engine | 11 | 11 |
-| Delegated mailboxes: send | 18 | 18 |
+| Delegated mailboxes: send | 21 | 21 |
 | Delegated mailboxes: value objects | 23 | 23 |
 | Delegated mailboxes: Microsoft Graph provider | 2 | 2 |
+| Delegated mailboxes: Gmail provider (send-only, phase B2) | 3 | 3 |
 | Delegated mailboxes: HTML sanitiser | 2 | 2 |
 | Delegated mailboxes: webhook | 2 | 2 |
 | Delegated mailboxes: Messenger and commands | 8 | 8 |
 | Delegated mailboxes: store | 2 | 2 |
 | Delegated mailboxes: events and exceptions | 8 | 8 |
-| **Total** | **283** | **283** |
+| **Total** | **289** | **289** |

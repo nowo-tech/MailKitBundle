@@ -72,6 +72,10 @@ final class MailboxConfigurationTest extends TestCase
         $on = $this->process(['enabled' => true, 'graph' => ['enabled' => true, 'webhook' => ['notification_url' => 'https://app.example.com/hooks/mail-kit/v1/mailbox/graph', 'allowed_ips' => ['203.0.113.0/24']]], 'sync' => ['initial_window' => 'PT12H']] + self::PORTS);
         self::assertTrue($on['graph']['enabled']);
         self::assertSame('PT12H', $on['sync']['initial_window']);
+
+        // Phase B2: Gmail is send-only and off by default.
+        self::assertSame(['enabled' => false], $mailboxes['gmail']);
+        self::assertTrue($this->process(['enabled' => true, 'gmail' => ['enabled' => true]] + self::PORTS)['gmail']['enabled']);
     }
 
     /**
@@ -81,6 +85,8 @@ final class MailboxConfigurationTest extends TestCase
     {
         yield 'enabled without ports' => [['enabled' => true]];
         yield 'graph without mailboxes' => [['graph' => ['enabled' => true]]];
+        yield 'gmail without mailboxes' => [['gmail' => ['enabled' => true]]];
+        yield 'gmail sync options' => [['gmail' => ['topic' => 'projects/x/topics/y']]];
         yield 'window in minutes' => [['sync' => ['initial_window' => 'PT30M']]];
         yield 'initial over max' => [['sync' => ['initial_window' => 'P100D']]];
         yield 'resync over max' => [['sync' => ['resync_window' => 'P30D', 'max_initial_window' => 'P14D', 'initial_window' => 'P7D']]];

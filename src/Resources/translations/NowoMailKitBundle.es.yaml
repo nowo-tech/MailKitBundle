@@ -129,3 +129,8 @@ log:
         sent_at: Enviado el
         failed_at: Falló el
         error: Error
+mailbox:
+    provider:
+        graph: 'Microsoft 365 / Outlook'
+        gmail: 'Gmail (solo envío)'
+        gmail_send_only_notice: 'Los buzones de Gmail solo envían correo desde tu dirección. No hay bandeja de entrada: el correo recibido no se muestra aquí y no se sincroniza nada.'

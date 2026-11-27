@@ -129,3 +129,8 @@ log:
         sent_at: Verstuurd op
         failed_at: Mislukt op
         error: Fout
+mailbox:
+    provider:
+        graph: 'Microsoft 365 / Outlook'
+        gmail: 'Gmail (alleen verzenden)'
+        gmail_send_only_notice: 'Gmail-postvakken verzenden alleen e-mail vanaf je adres. Er is geen inbox: ontvangen e-mail wordt hier niet getoond en er wordt niets gesynchroniseerd.'

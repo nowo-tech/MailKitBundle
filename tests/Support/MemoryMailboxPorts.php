@@ -70,6 +70,17 @@ final class MemoryMailboxPorts implements MailboxTokenProviderInterface, Mailbox
     /** @var (Closure(MailboxId): ?MailboxAccessToken)|null token override (throw to simulate the host's failures) */
     public ?Closure $tokenOverride = null;
 
+    /** @var list<string> scopes of the tokens of Gmail mailboxes (Google's answer to `openid email gmail.send`) */
+    public array $gmailScopes = ['openid', 'https://www.googleapis.com/auth/userinfo.email', 'https://www.googleapis.com/auth/gmail.send'];
+
+    /**
+     * A send-only Gmail mailbox (phase B2: no folders).
+     */
+    public static function gmailSettings(string $id = 'mbx-gmail', string $address = 'ana@example.com', bool $paused = false): MailboxSettings
+    {
+        return new MailboxSettings(new MailboxId($id), MailboxProvider::Gmail, $address, [], $paused);
+    }
+
     /**
      * @param list<string> $folders
      */
@@ -97,8 +108,9 @@ final class MemoryMailboxPorts implements MailboxTokenProviderInterface, Mailbox
             throw new MailboxGrantFailure($this->revoked[$mailbox->value]);
         }
         $this->issued[$mailbox->value] = ($this->issued[$mailbox->value] ?? 0) + 1;
+        $scopes                        = ($this->mailboxes[$mailbox->value] ?? null)?->provider === MailboxProvider::Gmail ? $this->gmailScopes : ['Mail.ReadWrite'];
 
-        return new MailboxAccessToken('fake-' . $mailbox->value . '-' . $this->issued[$mailbox->value], new DateTimeImmutable('+1 hour'), ['Mail.ReadWrite']);
+        return new MailboxAccessToken('fake-' . $mailbox->value . '-' . $this->issued[$mailbox->value], new DateTimeImmutable('+1 hour'), $scopes);
     }
 
     public function rejected(MailboxId $mailbox, string $tokenFingerprint): void

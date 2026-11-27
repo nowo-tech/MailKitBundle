@@ -1,15 +1,17 @@
 # Feature Specification: Delegated mailboxes (personal Outlook, then Gmail)
 
+> **Note (superseded text):** where this spec promises Gmail sync, push or `gmail.readonly`, FR-019 (send-only, owner decision D-20261124-09, shipped in 2.6.0) overrides it.
+
 **Feature Branch**: `feat/2.5.0-delegated-mailboxes` (2.5.0), `feat/2.6.0-gmail` (2.6.0)  
 **Created**: 2026-11-23  
-**Status**: Accepted 2026-11-23 (owner: Q-MB-1 – Q-MB-22 as recommended); 2.5.0 part 1 (sync, attachments) and part 2 (send) built 2026-11-24  
+**Status**: Accepted 2026-11-23 (owner: Q-MB-1 – Q-MB-22 as recommended); 2.5.0 part 1 (sync, attachments) and part 2 (send) built 2026-11-24; Gmail reduced to send-only (D-20261124-09, phase B2) and built 2026-11-25  
 
 **Package**: `nowo-tech/mail-kit-bundle`  
 **Baseline**: [`../001-baseline/spec.md`](../001-baseline/spec.md)  
 **Design**: [`../../docs/design/DELEGATED_MAILBOXES.md`](../../docs/design/DELEGATED_MAILBOXES.md)  
 **Requested by**: symfony-beacon spec 255 "Mail inbox" (D-20261123-14, T001), spec 236, spec 254 block B  
 **Depends on**: nothing new for 2.5.0 (`symfony/html-sanitizer`, `symfony/messenger`, `doctrine/dbal`,
-`nowo-tech/transaction-doctrine` as today); 2.6.0 adds `firebase/php-jwt` to `suggest` (Gmail push only)
+`nowo-tech/transaction-doctrine` as today); 2.6.0 adds `firebase/php-jwt` to `suggest` (Gmail push only) *(superseded by FR-019, send-only, owner decision D-20261124-09: Gmail has no sync or push and 2.6.0 adds no dependency)*
 
 ## Summary
 
@@ -50,11 +52,18 @@ dropped, nothing retries, and `resume()` after a reconnect continues from the st
 **Given** an expired delta token / history id, **When** the sweep runs, **Then** it restarts from the resync window,
 dispatches `MailboxResyncedEvent`, and already stored messages answer `Duplicate`.
 
-### US-6 — Gmail behind the same ports (P2, 2.6.0)
+### US-6 — Gmail behind the same ports (P2, 2.6.0; superseded by US-7)
 
 **Given** `gmail.enabled: true` and a verified Pub/Sub push, **When** Gmail publishes a change, **Then** only a JWT
 signed by Google for the configured audience and service account triggers a history sweep, and the host receives the
 same `SyncedMessage` shape as for Outlook.
+
+### US-7 — Send from a Gmail address, nothing read (P1, phase B2)
+
+**Given** a person connected Gmail with `openid email gmail.send` only, **When** the host sends a new message with an
+idempotency key, **Then** it leaves from that address once, `send()` returns the Gmail ids and thread key, a retry with
+the key replays them, a timeout or 5xx is reported unknown and never resent, and the mailbox shows as send-only (no
+inbox, nothing synced).
 
 ## Requirements
 
@@ -66,7 +75,7 @@ same `SyncedMessage` shape as for Outlook.
 - **FR-003** MailKit never runs an OAuth flow, never stores or caches an access or refresh token, and calls only `/me`
   paths with a delegated token. The account behind the token is checked against the directory's address at start,
   resume and every renewal. Scopes the host requests (Q-MB-2, Q-MB-17): Graph `Mail.ReadWrite`, `Mail.Send`,
-  `offline_access`, `User.Read`; Gmail `gmail.readonly`, `gmail.send` (never `gmail.modify`). No `Mail.*.Shared`
+  `offline_access`, `User.Read`; Gmail `gmail.readonly`, `gmail.send` (never `gmail.modify`). *Superseded by FR-019 (send-only, owner decision D-20261124-09): Gmail requests exactly `openid email gmail.send`; `gmail.readonly` is not requested.* No `Mail.*.Shared`
   scopes in 2.5.0 (Q-MB-15). Personal Outlook.com accounts are supported, sweep-only if their subscriptions or
   immutable ids fail the first build check (Q-MB-21).
 - **FR-004** Sync: Graph subscription per followed folder plus a per-folder delta sweep (2.5.0); Gmail watch plus a
@@ -107,9 +116,16 @@ same `SyncedMessage` shape as for Outlook.
   (Q-MB-14).
 - **FR-016** Worker mode (kernel reset off): no per-mailbox state in services; only JWKS cached (PSR-6).
 - **FR-017** Gmail (2.6.0) is off by default (`gmail.enabled: false`, no extra "verified" flag) and needs topic and push
-  settings to build; Beacon's Google phase-2 checklist (verification + CASA) gates production (Q-MB-18).
+  settings to build; Beacon's Google phase-2 checklist (verification + CASA) gates production (Q-MB-18). *Superseded by FR-019 (send-only, owner decision D-20261124-09): no topic, push or CASA; only `gmail.send` verification is needed.*
 - **FR-018** Versions (Q-MB-19): 2.5.0 = ports + Graph (sync and attachments, then send: two PRs, one tag); 2.6.0 =
-  Gmail.
+  Gmail. *Amended by D-20261124-09*: Gmail is phase B2, send-only (FR-019), after the 2.5.0 tag.
+- **FR-019** (phase B2, D-20261124-09) Gmail is **send-only**: scopes exactly `openid email gmail.send`; no
+  `gmail.readonly`, watch, push, history cursor, sync, attachment download or sent copy (FR-003, FR-004, FR-007,
+  FR-010, FR-011 and the Gmail half of FR-008 do not apply to Gmail). Account check through the OpenID userinfo
+  (verified address, bound `sub`). New messages only, one `messages.send` per key; an unconfirmed answer is `unknown`
+  and never resent; 4xx grant / scope / policy answers pause and release the key. `MailboxSettings` of a Gmail mailbox
+  has no folders; `MailboxProvider::isSendOnly()` and the `mailbox.provider.*` translations let the host's UI say
+  plainly that there is no inbox. Off by default (`mailboxes.gmail.enabled`).
 
 ## Success Criteria
 

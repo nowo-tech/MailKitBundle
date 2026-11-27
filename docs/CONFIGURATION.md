@@ -391,7 +391,7 @@ nowo_mail_kit:
                 rate_limit: { limit: 600, interval: '1 minute' }
                 client_rate_limit: { limit: 60, interval: '1 minute' }
         gmail:
-            enabled: false           # phase B2: send-only (scopes openid email gmail.send)
+            enabled: false           # 2.6.0: send-only (scopes openid email gmail.send)
 ```
 
 | Key | Default | Description |
@@ -433,7 +433,7 @@ nowo_mail_kit:
 | `graph.webhook.rate_limit` / `client_rate_limit` | `600` / `60` per minute | Verified bucket and per-client-IP bucket of unverified requests (429 above). |
 
 
-### mailboxes.gmail (phase B2, send-only)
+### mailboxes.gmail (2.6.0, send-only)
 
 | Key | Default | Description |
 | --- | --- | --- |

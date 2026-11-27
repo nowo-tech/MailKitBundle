@@ -19,7 +19,7 @@
 - [Microsoft Graph (shared mailbox)](#microsoft-graph-shared-mailbox)
 - [Inbound mail from a Graph mailbox](#inbound-mail-from-a-graph-mailbox)
 - [Delegated Outlook mailboxes (2.5.0)](#delegated-outlook-mailboxes-250)
-- [Send-only Gmail mailboxes (phase B2)](#send-only-gmail-mailboxes-phase-b2)
+- [Send-only Gmail mailboxes (2.6.0)](#send-only-gmail-mailboxes-260)
 - [Open and click tracking](#open-and-click-tracking)
 - [Admin UI](#admin-ui)
 - [Translations](#translations)
@@ -1303,7 +1303,7 @@ nowo_mail_kit:
         http_client: mail_kit.http_client
 ```
 
-## Send-only Gmail mailboxes (phase B2)
+## Send-only Gmail mailboxes (2.6.0)
 
 Owner decision D-20261124-09: a Gmail mailbox **only sends**. MailKit never reads it: no inbox, no folder, no sync, no
 webhook, no attachment download, no sent copy. That keeps the Google grant to one *sensitive* scope (`gmail.send`):

@@ -1,10 +1,10 @@
 # Google Cloud setup for send-only Gmail mailboxes (owner guide)
 
-MailKit phase B2 sends e-mail from a person's own **Gmail** (or Google Workspace) address with a delegated OAuth grant
+MailKit 2.6.0 sends e-mail from a person's own **Gmail** (or Google Workspace) address with a delegated OAuth grant
 the host application obtains. The grant is **send-only** (owner decision D-20261124-09): MailKit never reads the
 mailbox, so the only Gmail scope is `gmail.send`. This guide covers the Google Cloud steps done once per application.
-Bundle configuration is in [CONFIGURATION.md](CONFIGURATION.md#mailboxesgmail-phase-b2-send-only), code in
-[USAGE.md](USAGE.md#send-only-gmail-mailboxes-phase-b2).
+Bundle configuration is in [CONFIGURATION.md](CONFIGURATION.md#mailboxesgmail-260-send-only), code in
+[USAGE.md](USAGE.md#send-only-gmail-mailboxes-260).
 
 All identifiers below (`app.example.com`, project and client ids) are placeholders. Never commit a real client id,
 client secret, refresh or access token, or the address of a test account to a repository: keep them in environment

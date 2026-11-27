@@ -2,9 +2,9 @@
 
 **Baseline spec**: [`spec.md`](spec.md)  
 **Package**: `nowo-tech/mail-kit-bundle`  
-**Last audited**: 2026-11-25
+**Last audited**: 2026-11-27
 
-Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **289** (2.5.0 + phase B2 Gmail send-only).
+Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **289** (2.6.0, Gmail send-only; re-checked against `git ls-files src`: no unmapped file, no stale row).
 
 ## Bundle and dependency injection
 

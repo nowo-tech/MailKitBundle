@@ -3,6 +3,11 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 2.6.0](#to-260)
+  - [Gmail send-only (2.6.0, opt-in)](#gmail-send-only-260-opt-in)
+  - [Behaviour change: `MailboxSettings` refuses folders for Gmail](#behaviour-change-mailboxsettings-refuses-folders-for-gmail)
+  - [Owner / Beacon checklist before enabling Gmail](#owner--beacon-checklist-before-enabling-gmail)
+- [To 2.5.0](#to-250)
   - [Delegated mailboxes (2.5.0, opt-in)](#delegated-mailboxes-250-opt-in)
 - [To 2.2.2](#to-222)
 - [To 2.2.1](#to-221)
@@ -67,6 +72,61 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+## To 2.6.0
+
+From **2.5.0**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
+
+No new table, route, Messenger message or schedule; nothing changes unless you set `nowo_mail_kit.mailboxes.gmail.enabled: true`.
+
+### Gmail send-only (2.6.0, opt-in)
+
+Nothing changes unless you set `nowo_mail_kit.mailboxes.gmail.enabled: true` (it needs `mailboxes.enabled: true`). Owner
+decision D-20261124-09: a Gmail mailbox only sends. Usage: [USAGE — Send-only Gmail mailboxes](USAGE.md#send-only-gmail-mailboxes-260);
+Google Cloud: [GOOGLE-GMAIL-SETUP](GOOGLE-GMAIL-SETUP.md).
+
+1. Your OAuth connection requests exactly `Mailbox\Gmail\GmailScopes::REQUESTED` (`openid email
+   https://www.googleapis.com/auth/gmail.send`) with PKCE and a single-use `state`, and your
+   `MailboxTokenProviderInterface` returns the granted scopes in `MailboxAccessToken::$scopes` (a token without
+   `gmail.send` pauses the mailbox `ScopeMissing`).
+2. Your directory returns `new MailboxSettings($id, MailboxProvider::Gmail, $address, [])`: a Gmail mailbox follows no
+   folders (a non-empty list is refused).
+3. Send new messages only; `send()` refuses a reply or forward for a Gmail mailbox. No sent copy is delivered.
+4. No new table, route, Messenger message or schedule; Gmail mailboxes are skipped by the sweep and renewal commands.
+5. Show the mailbox as send-only (`MailboxProvider::isSendOnly()`, `MailboxSyncStatus::isSendOnly()`, translation keys
+   `mailbox.provider.*`).
+
+### Behaviour change: `MailboxSettings` refuses folders for Gmail
+
+`MailboxSettings` (released in 2.5.0) required at least one folder for every provider. From 2.6.0 it refuses folders
+for a send-only provider (Gmail) and still requires them for Outlook. In 2.5.0 a Gmail mailbox had no gateway and could
+never become active (`MailboxNotActive`), so only a host directory that already pre-built Gmail rows with folders is
+affected: its `directory->mailbox()` would now throw `InvalidArgumentException`. Return `[]` for Gmail. `MailboxSyncStatus`
+gains a trailing optional `$provider` argument (no break).
+
+### For code that used internal classes (2.6.0)
+
+`Mailbox\Engine\SubmitTokenRejected` takes an optional provider name; new internal `SendOnlyMailboxGatewayInterface`,
+`PreparedMessage`, `SubmittedMessage`, `Mailbox\Gmail\GmailApiClient` and `GmailMailboxGateway`.
+
+### Owner / Beacon checklist before enabling Gmail
+
+1. In Google Cloud, on the consent screen's Data access, re-add exactly `openid`, `email` and
+   `https://www.googleapis.com/auth/gmail.send`, and remove any leftover `gmail.readonly` from an earlier plan.
+2. Submit OAuth verification for the sensitive `gmail.send` scope (no CASA assessment: no restricted scope).
+3. Run the manual Bcc check with two owner-controlled test accounts.
+
+## To 2.5.0
+
+From **2.2.2**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
 
 ### Delegated mailboxes (2.5.0, opt-in)
 
@@ -136,28 +196,7 @@ CREATE INDEX idx_mail_kit_mailbox_send_message ON mail_kit_mailbox_send (mailbox
 
 SQLite: as PostgreSQL, with `cursor_value CLOB` and `INTEGER` for `cursor_version`, `attempts` and `row_version`.
 
-The send table (2.5.0 part 2) is new in this version; 2.5.0 is not tagged yet, so no migration from a released
-version is needed.
-
-### Gmail send-only (phase B2, opt-in)
-
-Nothing changes unless you set `nowo_mail_kit.mailboxes.gmail.enabled: true` (it needs `mailboxes.enabled: true`). Owner
-decision D-20261124-09: a Gmail mailbox only sends. Usage: [USAGE — Send-only Gmail mailboxes](USAGE.md#send-only-gmail-mailboxes-phase-b2);
-Google Cloud: [GOOGLE-GMAIL-SETUP](GOOGLE-GMAIL-SETUP.md).
-
-1. Your OAuth connection requests exactly `Mailbox\Gmail\GmailScopes::REQUESTED` (`openid email
-   https://www.googleapis.com/auth/gmail.send`) with PKCE and a single-use `state`, and your
-   `MailboxTokenProviderInterface` returns the granted scopes in `MailboxAccessToken::$scopes` (a token without
-   `gmail.send` pauses the mailbox `ScopeMissing`).
-2. Your directory returns `new MailboxSettings($id, MailboxProvider::Gmail, $address, [])`: a Gmail mailbox follows no
-   folders (a non-empty list is refused).
-3. Send new messages only; `send()` refuses a reply or forward for a Gmail mailbox. No sent copy is delivered.
-4. No new table, route, Messenger message or schedule; Gmail mailboxes are skipped by the sweep and renewal commands.
-5. Show the mailbox as send-only (`MailboxProvider::isSendOnly()`, `MailboxSyncStatus::isSendOnly()`, translation keys
-   `mailbox.provider.*`).
-
-`MailboxSettings` now refuses folders for a send-only provider and `MailboxSyncStatus` has a trailing optional
-`$provider` argument; both are unreleased 2.5.0 classes.
+The send table (2.5.0 part 2) is new in this version; there is no earlier send table to migrate.
 
 #### For code that used internal classes
 
@@ -165,9 +204,7 @@ Google Cloud: [GOOGLE-GMAIL-SETUP](GOOGLE-GMAIL-SETUP.md).
 and its `call()`, `callUrl()`, `download()`, `uploadChunk()` and `cancelUpload()` take
 `GraphMailbox|GraphCredentialInterface`; `call()` takes a trailing `bool $retryUnauthorized = true`.
 `Graph\Inbound\GraphMessageNormalizer` takes any `Mailbox\Html\MailHtmlSanitizer` (an `InboundHtmlSanitizer` still
-fits). Public 1.x / 2.x classes are unchanged. Phase B2: `Mailbox\Engine\SubmitTokenRejected` takes an optional
-provider name; new internal `SendOnlyMailboxGatewayInterface`, `PreparedMessage`, `SubmittedMessage`,
-`Mailbox\Gmail\GmailApiClient` and `GmailMailboxGateway`.
+fits). Public 1.x / 2.x classes are unchanged.
 
 ## To 2.2.2
 

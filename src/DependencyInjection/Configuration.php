@@ -805,7 +805,7 @@ final class Configuration implements ConfigurationInterface
         /** @var ArrayNodeDefinition $node */
         $node = (new TreeBuilder('mailboxes'))->getRootNode();
         $node
-            ->info('2.5.0: sync the folders people follow in their own Outlook mailbox (Microsoft Graph, delegated tokens from your MailboxTokenProviderInterface) into your MailboxMessageSinkInterface, and send from it; phase B2: send-only Gmail mailboxes. Needs symfony/messenger, symfony/html-sanitizer, ext-fileinfo and a DBAL connection. Off by default.')
+            ->info('2.5.0: sync the folders people follow in their own Outlook mailbox (Microsoft Graph, delegated tokens from your MailboxTokenProviderInterface) into your MailboxMessageSinkInterface, and send from it; 2.6.0: send-only Gmail mailboxes. Needs symfony/messenger, symfony/html-sanitizer, ext-fileinfo and a DBAL connection. Off by default.')
             ->addDefaultsIfNotSet()
             ->children()
                 ->booleanNode('enabled')->info('Register the ports, services, Messenger handlers, commands and the webhook route loader.')->defaultFalse()->end()
@@ -956,7 +956,7 @@ final class Configuration implements ConfigurationInterface
                     ->end()
                 ->end()
                 ->arrayNode('gmail')
-                    ->info('Phase B2 (owner decision D-20261124-09): Gmail mailboxes are SEND-ONLY. Your OAuth flow requests exactly "openid email https://www.googleapis.com/auth/gmail.send" (Mailbox\\Gmail\\GmailScopes::REQUESTED); no gmail.readonly, no inbox, no sync, no sent copy.')
+                    ->info('2.6.0 (owner decision D-20261124-09): Gmail mailboxes are SEND-ONLY. Your OAuth flow requests exactly "openid email https://www.googleapis.com/auth/gmail.send" (Mailbox\\Gmail\\GmailScopes::REQUESTED); no gmail.readonly, no inbox, no sync, no sent copy.')
                     ->addDefaultsIfNotSet()
                     ->children()
                         ->booleanNode('enabled')->info('Gmail send-only provider (MailboxSenderInterface, new messages only).')->defaultFalse()->end()

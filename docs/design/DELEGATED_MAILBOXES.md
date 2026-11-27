@@ -431,7 +431,7 @@ per folder and honours `Retry-After` through a Messenger `DelayStamp`.
 
 | Scope | Why | Google classification |
 | --- | --- | --- |
-| `https://www.googleapis.com/auth/gmail.readonly` | `users.watch`, `history.list`, `messages.get`, `messages.list`, `attachments.get`, `users.getProfile` | **Restricted**: OAuth verification + yearly CASA assessment |
+| `https://www.googleapis.com/auth/gmail.readonly` | `users.watch`, `history.list`, `messages.get`, `messages.list`, `attachments.get`, `users.getProfile` | **Restricted**: OAuth verification + yearly CASA assessment. **Not requested** (superseded by section 22, D-20261124-09: send-only) |
 | `https://www.googleapis.com/auth/gmail.send` | `messages.send` | Sensitive (verification, no CASA): *to verify* in Google's console |
 
 Not requested: `gmail.modify` (would cover both but allows label and trash changes MailKit never makes),

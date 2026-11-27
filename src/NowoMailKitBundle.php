@@ -10,6 +10,7 @@ use Nowo\MailKitBundle\DependencyInjection\Compiler\MailboxSendTransactionPass;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\MailboxUrlGuardPass;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\MailerIntegrationPass;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\SenderPortPass;
+use Nowo\MailKitBundle\DependencyInjection\Compiler\TemplatePlaceholderPass;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\TwigPathsPass;
 use Nowo\MailKitBundle\DependencyInjection\Compiler\UnauthenticatedAccessPass;
 use Nowo\MailKitBundle\DependencyInjection\NowoMailKitExtension;
@@ -35,7 +36,8 @@ final class NowoMailKitBundle extends Bundle
 
     /**
      * Registers the compiler passes: Twig paths, mailer / Instance Settings integration, the sender port gate, CSRF
-     * fail-closed guard, the demo-only unauthenticated access guard and the delegated mailboxes' Graph host pin (2.5.0).
+     * fail-closed guard, the demo-only unauthenticated access guard and the delegated mailboxes' Graph host pin (2.5.0) and the
+     * closed template placeholder registry (2.7.0).
      */
     public function build(ContainerBuilder $container): void
     {
@@ -50,6 +52,7 @@ final class NowoMailKitBundle extends Bundle
         // Before the Messenger pass (priority 0), which removes the <bus>.middleware parameters.
         $container->addCompilerPass(new MailboxSendTransactionPass(), PassConfig::TYPE_BEFORE_OPTIMIZATION, 10);
         $container->addCompilerPass(new MailboxHttpRetryPass(), PassConfig::TYPE_BEFORE_OPTIMIZATION);
+        $container->addCompilerPass(new TemplatePlaceholderPass());
     }
 
     /**

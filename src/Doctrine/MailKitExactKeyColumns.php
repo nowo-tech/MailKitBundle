@@ -6,6 +6,7 @@ namespace Nowo\MailKitBundle\Doctrine;
 
 use Nowo\MailKitBundle\Graph\Inbound\Store\GraphInboundStore;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Store\MailboxStore;
+use Nowo\MailKitBundle\Template\Infrastructure\Store\TemplateStore;
 use Nowo\MailKitBundle\Tracking\Store\TrackingStore;
 use Nowo\MigrationsKitContracts\Collation\ExactKeyColumn;
 use Nowo\MigrationsKitContracts\Collation\ExactKeyColumnsInterface;
@@ -45,6 +46,9 @@ use Nowo\MigrationsKitContracts\Collation\ExactKeyColumnsInterface;
  *   a mailbox and folder by it.
  * - `mail_kit_mailbox_send.mailbox_id`, `mail_kit_mailbox_send.idempotency_key` (2.5.0) — the primary key of one send:
  *   whether a message is sent once or twice is decided on `WHERE mailbox_id = ? AND idempotency_key = ?`.
+ * - `mail_kit_template.id`, `.tenant`, `.owner_id`, `.template_key`, `.locale`, `.created_by`, `.updated_by` (2.7.0) —
+ *   the template id, the tenant of every query, the owner of a personal row, the unique key, and the author
+ *   references the GDPR export and erasure match on.
  *
  * Deliberately **not** declared, because a declaration is a claim about identity and an untrue one is worse than
  * none (on a server without a NO PAD collation it would report `fallback` about a column that does not want NO PAD):
@@ -86,17 +90,22 @@ final readonly class MailKitExactKeyColumns implements ExactKeyColumnsInterface
     /** Condition reported for the delegated-mailbox columns when they are off (2.5.0). */
     public const MAILBOXES_CONDITION = 'nowo_mail_kit.mailboxes.enabled: true';
 
+    /** Condition reported for the template columns when they are off (2.7.0). */
+    public const TEMPLATES_CONDITION = 'nowo_mail_kit.templates.enabled: true';
+
     /**
      * @param string $tablePrefix nowo_mail_kit.doctrine.table_prefix
      * @param bool $tracking nowo_mail_kit.tracking.enabled (the tracked-sends table exists)
      * @param bool $graphInbound nowo_mail_kit.graph.inbound.enabled (the three Graph tables exist)
      * @param bool $mailboxes nowo_mail_kit.mailboxes.enabled (the delegated-mailbox tables exist, 2.5.0)
+     * @param bool $templates nowo_mail_kit.templates.enabled (the template table exists, 2.7.0)
      */
     public function __construct(
         private string $tablePrefix = '',
         private bool $tracking = false,
         private bool $graphInbound = false,
         private bool $mailboxes = false,
+        private bool $templates = false,
     ) {
     }
 
@@ -117,6 +126,8 @@ final readonly class MailKitExactKeyColumns implements ExactKeyColumnsInterface
         $cursor       = $this->tablePrefix . MailboxStore::CURSOR_TABLE;
         $mailboxSub   = $this->tablePrefix . MailboxStore::SUBSCRIPTION_TABLE;
         $mailboxSend  = $this->tablePrefix . MailboxStore::SEND_TABLE;
+        $templates    = $this->templates ? null : self::TEMPLATES_CONDITION;
+        $template     = $this->tablePrefix . TemplateStore::TABLE;
 
         return [
             new ExactKeyColumn($send, 'send_id', self::OWNER, 'id of one tracked send: the open is counted with WHERE send_id = ?', $tracking, $this->tracking),
@@ -135,6 +146,13 @@ final readonly class MailKitExactKeyColumns implements ExactKeyColumnsInterface
             new ExactKeyColumn($mailboxSub, 'folder_key', self::OWNER, 'followed folder of the subscription', $mailboxes, $this->mailboxes),
             new ExactKeyColumn($mailboxSend, 'mailbox_id', self::OWNER, 'delegated mailbox of the send (primary key)', $mailboxes, $this->mailboxes),
             new ExactKeyColumn($mailboxSend, 'idempotency_key', self::OWNER, 'idempotency key of one send: sent once or twice is decided on it (primary key)', $mailboxes, $this->mailboxes),
+            new ExactKeyColumn($template, 'id', self::OWNER, 'id of one stored template: every read and write matches WHERE id = ? AND tenant = ? (primary key)', $templates, $this->templates),
+            new ExactKeyColumn($template, 'tenant', self::OWNER, 'tenant of the template, compared with = in every query (tenant isolation)', $templates, $this->templates),
+            new ExactKeyColumn($template, 'owner_id', self::OWNER, 'owner of a personal template: visibility and the GDPR export / erasure match on it', $templates, $this->templates),
+            new ExactKeyColumn($template, 'template_key', self::OWNER, 'template key, part of the unique key per tenant, kind, scope, owner and locale', $templates, $this->templates),
+            new ExactKeyColumn($template, 'locale', self::OWNER, 'template locale, part of the unique key', $templates, $this->templates),
+            new ExactKeyColumn($template, 'created_by', self::OWNER, 'author reference: the GDPR export / anonymisation match on it', $templates, $this->templates),
+            new ExactKeyColumn($template, 'updated_by', self::OWNER, 'last author reference: the GDPR export / anonymisation match on it', $templates, $this->templates),
         ];
     }
 }

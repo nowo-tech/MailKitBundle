@@ -24,7 +24,9 @@ log with retention and erasure, readiness (Twig, AuthKit adapter). Extracted fro
 
 ## Phase 2 — branded, editable e-mail templates
 
-Out of scope for 1.0 (Beacon kit #3, `src/Shared/EmailTemplate/**`):
+Out of scope for 1.0 (Beacon kit #3, `src/Shared/EmailTemplate/**`). **2.7.0 built the store part** (stored templates
+and snippets, personal / shared scopes, locale, closed placeholder registry, HTML sanitiser, GDPR; API only, see
+[TEMPLATES](TEMPLATES.md#stored-e-mail-templates-270)). Still open from this phase:
 
 - `EmailTemplate` entity (key + locale) with table prefix; template **definitions as tagged services** (key,
   placeholders, default subject / HTML / text) instead of a hard-coded catalog.
@@ -54,13 +56,13 @@ Plan and reuse matrix: [CrmKitBundle docs/ROADMAP.md](https://github.com/nowo-te
 
 | Version | Piece | Used by |
 | --- | --- | --- |
-| 2.3.0 | **ICS invites**: an invite part on outgoing mail (`text/calendar`, `METHOD:REQUEST` / `CANCEL`, stable UID, SEQUENCE, organiser and attendees), plain-text fallback | CrmKit A-1 meetings, I booking; usable by TaskBoard and WorkingTime |
-| 2.4.0 | **Editable templates** (this roadmap's Phase 2) plus what the CRM needs: personal and shared scopes through a host owner port, snippets, locale, and a closed placeholder resolver registry by service tag (unknown placeholders shown as text, never evaluated) | CrmKit A-2 (`contact.*`, `company.*`, `deal.*`, `me.*` placeholders) |
 | 2.5.0 | **Personal Outlook mailboxes** (widened by Beacon spec 255 "Mail inbox", D-20261123-14): Graph delegated sync per followed folder (subscription + delta sweep, idempotent by provider message id), host storage through a sink port, host exclusion port before storage (sender, domain, List-Id, folder), thread key, attachments on demand, sanitised HTML (remote images blocked), send (new, reply, reply all, forward) with idempotency and the sent copy, one grant-failure event + pause, a call observer for API metering. Consumes a **token port** (`MailboxTokenProviderInterface`: current access token per mailbox, refreshed by the host). MailKit has **no OAuth flow, consent page or callback** of its own: the host keeps one connection per person and provider, obtained through TimeTrack's PKCE helpers with the extra mail scopes and encrypted with DoctrineEncrypt (Q-254-15, Decision 2026-11-23: (b)). Design: [design/DELEGATED_MAILBOXES.md](design/DELEGATED_MAILBOXES.md), contract: [specs/005](../specs/005-delegated-mailboxes/spec.md), owner decisions Q-MB-1 – Q-MB-22 (accepted 2026-11-23) | CrmKit B (spec 236 kit side), Beacon spec 255 |
 | 2.5.x | `MailboxSendSettledEvent`: dispatched when a background reconcile settles a delegated send (sent, failed or unknown), so the host gets a push instead of retrying `send()` with the key (owner answer Q2 of the 2.5.0 send PR, 2026-11-24) | Beacon spec 255 |
 | 2.6.0 | **Gmail, send-only (phase B2)** behind the same token port and send path (no OAuth flow or callback in MailKit; Q-254-15). Owner decision D-20261124-09: scopes exactly `openid email gmail.send`; no `gmail.readonly`, so no CASA assessment, no inbox, no sync, no sent copy; new messages only. `mailboxes.gmail.enabled: false` by default. Built in PR `feat/b2-gmail-send-only` (2.6.0) | CrmKit B, Beacon spec 255 |
 | later (not planned) | Gmail **sync** (`users.watch` + Pub/Sub push, `history.list`, `gmail.readonly`): only if the owner reverses D-20261124-09 (restricted scope: yearly CASA assessment). The design's section 7.2 / 10.2 stays as the reference | — |
-| 2.7.0 | **`sending_domains`**: a domain per tenant, SPF / DKIM / DMARC verification (Resend domains API on Resend, DNS checks otherwise), sends from an unverified or failing domain refused with the reason | CrmKit F (circulars, sequences, FR-064) |
+| 2.7.0 | **Editable templates** (this roadmap's Phase 2, planned as 2.4.0) plus what the CRM needs: personal and shared scopes through a host owner port, snippets, locale, and a closed placeholder resolver registry by service tag (unknown placeholders shown as text, never evaluated). **Built in PR `feat/2.7.0-templates`**, API-first (no admin UI); contract: [TEMPLATES — Stored e-mail templates](TEMPLATES.md#stored-e-mail-templates-270), spec [006](../specs/006-stored-templates/spec.md) | CrmKit A-2 (`contact.*`, `company.*`, `deal.*`, `me.*` placeholders) |
+| 2.8.0 | **`sending_domains`**: a domain per tenant, SPF / DKIM / DMARC verification (Resend domains API on Resend, DNS checks otherwise), sends from an unverified or failing domain refused with the reason | CrmKit F (circulars, sequences, FR-064) |
+| later (not built yet; was planned as 2.3.0) | **ICS invites**: an invite part on outgoing mail (`text/calendar`, `METHOD:REQUEST` / `CANCEL`, stable UID, SEQUENCE, organiser and attendees), plain-text fallback | CrmKit A-1 meetings, I booking; usable by TaskBoard and WorkingTime |
 
 Reused as they are (no change): tracking 1.10 (pixel, `MailOpenedEvent`, `MailMachineOpenedEvent`,
 `EmailTrackingPolicyInterface`), Graph inbound 1.9 with plus-address tags and `GraphInboundHandlerInterface` (ticket

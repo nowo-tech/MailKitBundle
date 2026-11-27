@@ -61,6 +61,7 @@ The transport built from the stored DSN is cached per DSN and dropped on `kernel
 - **Microsoft Graph inbound** (1.9, opt-in) — read the shared mailbox: change-notification webhook (validation echo, constant-time client state, caps, rate limit, enqueue only), subscriptions with renewal, delta sweep, and a normalised message (plus-address tags, threading ids, sanitised HTML, finfo-typed capped attachments, SPF / DKIM / DMARC, forwarded flag) handed to your route / quarantine / discard port, once per internetMessageId ([USAGE](docs/USAGE.md#inbound-mail-from-a-graph-mailbox)).
 - **Delegated Outlook mailboxes** (2.5.0, opt-in) — sync the folders a person follows in their own Outlook mailbox into your storage through host ports (delegated tokens from your OAuth connection; MailKit runs no OAuth flow), attachments on demand, and send new messages, replies and forwards from that mailbox with a mandatory idempotency key (draft + send, never twice) ([USAGE](docs/USAGE.md#delegated-outlook-mailboxes-250), [design](docs/design/DELEGATED_MAILBOXES.md)).
 - **Send-only Gmail mailboxes** (2.6.0, opt-in) — send new messages from a person's own Gmail address with the single `gmail.send` scope (no inbox, no sync, no CASA assessment), through the same token port, idempotency key and send rows; an unconfirmed submit is reported unknown and never resent ([USAGE](docs/USAGE.md#send-only-gmail-mailboxes-260), [Google setup](docs/GOOGLE-GMAIL-SETUP.md)).
+- **Stored e-mail templates** (2.7.0, opt-in) — personal and shared (tenant) templates and snippets per locale with optimistic versions, rendered through a closed placeholder registry (your tagged providers; pure substitution, never evaluated, unknown placeholders kept as text, values escaped, HTML sanitised), deny-by-default permission port, GDPR export / erasure; API only ([contract](docs/TEMPLATES.md#stored-e-mail-templates-270), [USAGE](docs/USAGE.md#stored-e-mail-templates-270)).
 - **Open and click tracking** (1.10, opt-in) — per-send opaque id, signed 1×1 pixel (`/e/o/{token}.gif`, stateless, always the GIF, human and machine opens apart, truncated IP, user-agent family only) and link rewriting through your short-link port; your policy decides per template and recipient, security e-mails, credential links and opted-out recipients are never tracked; retention purge and GDPR export / erasure ([USAGE](docs/USAGE.md#open-and-click-tracking)).
 - **Fail-closed wiring** — the container refuses to compile without Instance Settings (unless both the DSN and sender providers are host services, 1.6), with the log on but no Doctrine ORM (2.0), or without the framework mailer, with the UI on but no form CSRF, with an empty role list, or with `allow_unauthenticated` outside `kernel.debug`.
 
@@ -177,7 +178,7 @@ make release-check
 
 ### Additional documentation
 
-- [Templates (UiKit page contract)](docs/TEMPLATES.md)
+- [Templates (UiKit page contract and stored e-mail templates)](docs/TEMPLATES.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Concurrency (409 + CONFLICT codes, write paths)](docs/CONCURRENCY.md)
 - [Microsoft 365 setup for Graph sending](docs/MICROSOFT-GRAPH-SETUP.md)

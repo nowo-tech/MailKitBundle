@@ -20,6 +20,7 @@
 - [Inbound mail from a Graph mailbox](#inbound-mail-from-a-graph-mailbox)
 - [Delegated Outlook mailboxes (2.5.0)](#delegated-outlook-mailboxes-250)
 - [Send-only Gmail mailboxes (2.6.0)](#send-only-gmail-mailboxes-260)
+- [Stored e-mail templates (2.7.0)](#stored-e-mail-templates-270)
 - [Open and click tracking](#open-and-click-tracking)
 - [Admin UI](#admin-ui)
 - [Translations](#translations)
@@ -1407,6 +1408,103 @@ row and its state machine are the Outlook ones (one claim per key, conditional u
 one winner per takeover); with no draft to check, a stale `sending` row is settled `unknown` instead of resubmitted.
 MailKit stores nothing for a Gmail mailbox but its status row (account id hash) and the send rows (ids only, purged
 after `send.retention`).
+
+## Stored e-mail templates (2.7.0)
+
+Opt-in (`templates.enabled: true`). Contract and rules: [TEMPLATES — Stored e-mail templates](TEMPLATES.md#stored-e-mail-templates-270);
+keys: [CONFIGURATION — templates](CONFIGURATION.md#templates). MailKit stores the rows and renders them; your
+application owns the screens, the permission decision and the placeholder values.
+
+```yaml
+# config/packages/nowo_mail_kit.yaml
+nowo_mail_kit:
+    templates:
+        enabled: true
+        permission: App\Mail\CrmTemplatePermission
+        owner_resolver: App\Mail\TemplateOwners   # with personal_data.enabled and UserKit
+```
+
+**Permission port** (deny by default; MailKit already enforces the tenant and the owner-only rule of personal rows):
+
+```php
+use Nowo\MailKitBundle\Template\Port\TemplatePermissionInterface;
+use Nowo\MailKitBundle\Template\Value\TemplateActor;
+use Nowo\MailKitBundle\Template\Value\TemplatePermission;
+
+final readonly class CrmTemplatePermission implements TemplatePermissionInterface
+{
+    public function __construct(private Members $members) {}
+
+    public function isGranted(TemplatePermission $permission, TemplateActor $actor): bool
+    {
+        if (!$this->members->isMember($actor->tenant, $actor->owner)) {
+            return false;
+        }
+
+        return match ($permission) {
+            TemplatePermission::Personal, TemplatePermission::UseShared => $this->members->can($actor, 'crm.view'),
+            TemplatePermission::ManageShared => $this->members->can($actor, 'crm.manage'),
+        };
+    }
+}
+```
+
+**Placeholder provider** (autoconfigured; one namespace per provider; check what the actor may see; return plain text):
+
+```php
+use Nowo\MailKitBundle\Template\Placeholder\PlaceholderContext;
+use Nowo\MailKitBundle\Template\Placeholder\PlaceholderDefinition;
+use Nowo\MailKitBundle\Template\Placeholder\PlaceholderProviderInterface;
+
+final readonly class ContactPlaceholders implements PlaceholderProviderInterface
+{
+    public function __construct(private ContactFinder $contacts) {}
+
+    public static function placeholderNamespace(): string
+    {
+        return 'contact';
+    }
+
+    public function definitions(): array
+    {
+        return [new PlaceholderDefinition('first_name', 'crm.merge.contact.first_name')];
+    }
+
+    public function resolve(array $names, PlaceholderContext $context): array
+    {
+        $id      = $context->subject('contact');
+        $contact = $id === null ? null : $this->contacts->visibleTo($context->actor->tenant, $context->actor->owner, $id);
+
+        return $contact === null ? [] : ['first_name' => $contact->firstName];   // unknown names: left out
+    }
+}
+```
+
+**Store, render, send:**
+
+```php
+use Nowo\MailKitBundle\Template\Service\TemplateLibraryInterface;
+use Nowo\MailKitBundle\Template\Service\TemplateRendererInterface;
+use Nowo\MailKitBundle\Template\Value\{TemplateActor, TemplateDraft, TemplateKind, TemplateScope};
+
+$actor = new TemplateActor($organisation->id(), $user->id());          // from your security context
+$saved = $library->create($actor, new TemplateDraft(
+    TemplateKind::Template, TemplateScope::Shared, 'proposal-follow-up', 'Proposal follow-up', 'es',
+    'Seguimiento de la propuesta, {{ contact.first_name }}',
+    '<p>Hola {{ contact.first_name }},</p><p>…</p>',
+    '',                                                                 // empty: text derived from the HTML
+));
+$saved = $library->update($actor, $saved->id, $saved->version, $draft); // TemplateVersionConflict when stale
+
+$rendered = $renderer->render($actor, $saved->id, ['contact' => (string) $contact->id()]);
+if ($rendered->unresolved !== []) { /* warn the user: shown as {{ … }} text */ }
+$mailer->send($rendered->applyTo((new Email())->to($contact->email())));
+```
+
+Snippets (`TemplateKind::Snippet`, no subject) are listed with `$library->list($actor, TemplateKind::Snippet)` and
+inserted by your editor into the draft; `renderDraft()` previews an unsaved draft. Errors: `TemplateNotFound` (404),
+`TemplateAccessDenied` (403), `TemplateVersionConflict` (409), `TemplateKeyTaken` and `InvalidTemplate` (`$field`, 422).
+A host side table keyed by the template id listens to `TemplateDeletedEvent`.
 
 ## Open and click tracking
 

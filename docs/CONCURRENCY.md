@@ -54,7 +54,10 @@ request or a replayed Messenger message. It applies from **1.13.0**.
 | Send-only Gmail send (2.6.0, same rows and statements) | One statement each, as the delegated send | As the delegated send; the heartbeat runs right before the single submit; with no draft to check, an unconfirmed answer ends `unknown` and a stale `sending` row is taken over by one caller and settled `unknown` (never resubmitted); a 4xx answer releases (`released`) or fails (`failed`) the key | As the delegated send |
 | Send purge (`purgeSends`, `nowo:mail-kit:mailbox:purge`) | One `DELETE` per row of a batch | Settled states only, re-checked in the `WHERE` | Exception to the command |
 | Delegated mailbox webhook (`MailboxGraphWebhookController`) | Writes nothing itself; it only dispatches messages | — | As the Graph webhook |
-| Schema commands (`nowo:mail-kit:graph:schema`, `nowo:mail-kit:tracking:schema`, `nowo:mail-kit:mailbox:schema`) | DDL, one statement at a time | `CREATE` only for missing tables | Exception to the command |
+| Stored template create (`TemplateLibrary::create`, 2.7.0) | One `INSERT`, in a savepoint inside a host transaction | New UUIDv7 id; unique (tenant, kind, scope, owner, key, locale) with a caught duplicate (never check-then-insert); the per-scope cap is a soft pre-check | `TemplateKeyTaken` (422); a lock wait on a key another open transaction is inserting is the usual transient conflict (409 `CONFLICT_001`) |
+| Stored template update / delete (2.7.0) | One `UPDATE` / `DELETE`, in a savepoint inside a host transaction | Compare-and-set on `version` (always +1, so MySQL's changed-rows count is exact) plus tenant, scope and owner; 0 rows re-read: gone → `TemplateNotFound`, else `TemplateVersionConflict` | `TemplateVersionConflict` (409), `TemplateKeyTaken` on a renamed key |
+| Template GDPR erasure (`eraseOwner`, 2.7.0) | **One transaction** (transaction-doctrine; nested in the caller's as a savepoint) | Exact re-check in PHP; delete / clear by id with the owner in the `WHERE` | Exception to the caller (UserKit eraser) |
+| Schema commands (`nowo:mail-kit:graph:schema`, `nowo:mail-kit:tracking:schema`, `nowo:mail-kit:mailbox:schema`, `nowo:mail-kit:templates:schema`) | DDL, one statement at a time | `CREATE` only for missing tables | Exception to the command |
 
 `grep -rn "flush()" src/` finds nothing: MailKit has no ORM write.
 
@@ -162,6 +165,10 @@ twice:
   (one delivery, also after an ambiguous submit), with an injected `MockClock`. 2.6.0 adds two workers sending one
   Gmail key (one delivery; a submit that hangs past the stale delay is settled `unknown` by the other worker, never
   resubmitted).
+- `tests/Integration/Concurrency/TemplateConcurrencyRaceTest.php` (2.7.0): two people saving one key (one winner,
+  `TemplateKeyTaken`), two editors of one version (one winner, `TemplateVersionConflict`, no lost update), an
+  overlapping save against an open transaction (a transient conflict, then the duplicate after the commit, the loser's
+  transaction still usable).
 - Unit tests with injected deadlocks, lock wait timeouts, serialization failures, lost savepoints, unique violations
   and lost connections: `StorageConflictsTest`, `MailKitConflictListenerTest`, `TrackingConflictsTest`,
   `GraphInboundStoreTest`, `GraphInboundProcessorTest`, `GraphWebhookControllerTest`.

@@ -14,6 +14,7 @@
 - [brand](#brand)
 - [graph](#graph)
 - [mailboxes](#mailboxes)
+- [templates](#templates)
 - [tracking](#tracking)
 - [doctrine](#doctrine)
 - [web_ui](#web_ui)
@@ -128,6 +129,15 @@ nowo_mail_kit:
                 max_total_attachment_bytes: 52428800
                 max_html_bytes: 1048576
                 allowed_types: [application/pdf, image/png, image/jpeg, image/gif, image/webp, text/plain, text/csv, application/msword, application/vnd.ms-excel, application/vnd.ms-powerpoint, 'application/vnd.openxmlformats-officedocument.*', 'application/vnd.oasis.opendocument.*']
+    templates:                         # 2.7.0 — stored e-mail templates and snippets; off: nothing is registered
+        enabled: false
+        permission: null               # service id implementing Template\Port\TemplatePermissionInterface; null = deny everything
+        owner_resolver: null           # service id implementing Template\Port\TemplateOwnerResolverInterface (UserKit GDPR bridge)
+        connection: null               # DBAL connection of <prefix>mail_kit_template
+        max_body_bytes: 262144         # each stored body (1 KiB … 1 MiB, ≤ max_output_bytes)
+        max_output_bytes: 1048576      # each rendered body (1 KiB … 4 MiB)
+        max_placeholders: 200          # occurrences per template (1 … 2000)
+        max_per_scope: 500             # rows per tenant, kind, scope (and owner) (1 … 10000)
     tracking:                          # 1.10 — open pixel + click link rewriting; off: nothing is registered
         enabled: false
         policy: null                   # service id implementing Tracking\EmailTrackingPolicyInterface (required when enabled)
@@ -439,6 +449,24 @@ nowo_mail_kit:
 | --- | --- | --- |
 | `gmail.enabled` | `false` | Gmail provider, **send-only** (owner decision D-20261124-09). Needs `mailboxes.enabled: true` (the build fails otherwise). Your OAuth flow requests exactly `openid email https://www.googleapis.com/auth/gmail.send` (`Mailbox\Gmail\GmailScopes::REQUESTED`); no `gmail.readonly`, so no CASA assessment. A Gmail mailbox has no folders, no inbox, no sync, no webhook, no attachment download and no sent copy: only `MailboxSenderInterface::send()` of new messages. It uses `http_client`, `timeout`, `connection`, `send.*` (Gmail's own limit is 35 MB for the encoded message) and `html.remote_images` (outgoing remote images are dropped unless `allowed`). Only `https://openidconnect.googleapis.com/v1/userinfo` and `https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send` receive the token. Setup: [GOOGLE-GMAIL-SETUP](GOOGLE-GMAIL-SETUP.md). |
 
+## templates
+
+Since 2.7.0 (contract: [TEMPLATES — Stored e-mail templates](TEMPLATES.md#stored-e-mail-templates-270)). Opt-in: with
+`enabled: false` (default) no table, service, command or route is added. Needs symfony/html-sanitizer and
+doctrine/doctrine-bundle (DBAL; the ORM only adds the `postGenerateSchema` listener). Usage:
+[USAGE — Stored e-mail templates](USAGE.md#stored-e-mail-templates-270).
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `enabled` | `false` | Registers `TemplateStore`, the public `Template\Service\TemplateLibraryInterface`, `TemplateRendererInterface` and `TemplatePersonalDataInterface`, the schema listener (with the ORM) and `nowo:mail-kit:templates:schema`. Literal boolean. Classes implementing `Template\Placeholder\PlaceholderProviderInterface` are autoconfigured with the tag `nowo_mail_kit.template_placeholder_provider` whatever this value. |
+| `permission` | `null` | Service id implementing `Template\Port\TemplatePermissionInterface` (`Personal`, `UseShared`, `ManageShared`). `null`: `DenyAllTemplatePermission`, everything is refused. |
+| `owner_resolver` | `null` | Service id implementing `Template\Port\TemplateOwnerResolverInterface` (owner references of a user). Required — the build fails otherwise — when `personal_data.enabled` is true and UserKit is installed: it feeds the `email_templates` eraser and export section. |
+| `connection` | `null` | DBAL connection of `<prefix>mail_kit_template` (resolved per call). |
+| `max_body_bytes` | `262144` | Bytes of each body (HTML before sanitising, text) a template or snippet may store (`InvalidTemplate('body')`). Must not exceed `max_output_bytes`. |
+| `max_output_bytes` | `1048576` | Bytes of each rendered body after substitution (`InvalidTemplate('output')`); also the sanitiser's input cap. |
+| `max_placeholders` | `200` | Placeholder occurrences per template or snippet, subject and bodies together (`InvalidTemplate('placeholders')`). |
+| `max_per_scope` | `500` | Rows per tenant, kind and scope (and owner for personal rows); also the size of a list per scope. A soft cap (`InvalidTemplate('scope')`). |
+
 ## tracking
 
 Since 1.10 (Beacon spec 230 block B). Opt-in: with `enabled: false` (default) no service, route, table, command or
@@ -582,7 +610,7 @@ REQ-CFG-001 does not apply to the mailer: the bundle has one configuration tree.
 
 Parameters: `nowo_mail_kit.doctrine.table_prefix`, `.web_ui.enabled`, `.web_ui.path_prefix`, `.log.enabled`, `.log.retention_days`, `.resend.enabled`, `.security.allow_unauthenticated`.
 
-Public services: `Nowo\MailKitBundle\Brand\BrandedEmailHelper` (1.4), `Nowo\MailKitBundle\Mailer\RuntimeTransport`, `Readiness\OutboundMailReadiness`, `Dsn\MailerDsnValidator`, `TestMail\TestMailSender`, `Log\SentMailRecorder` and `Log\SentMailRepository` (log on), `Resend\ResendApiChecker` (Resend on), `nowo_mail_kit.outbound_mail_ready_checker` (AuthKit installed), `Graph\Send\GraphMailSender` and the `Graph\GraphMailboxProviderInterface` alias (`graph.enabled`, 1.8), `Tracking\EmailTracker` and the `Tracking\EmailTrackingReaderInterface` / `Tracking\EmailTrackingPersonalDataInterface` aliases (`tracking.enabled`, 1.10). Interfaces: `Dsn\MailerDsnProviderInterface`, `Security\MailKitAccessCheckerInterface`, `Log\SentMailErasureInterface`, `Log\SentMailPersonalDataEraserInterface`, `Log\SentMailPersonalDataExporterInterface` and `Log\SentMailPersonalDataSubjectResolverInterface` (1.7). With UserKit: `Integration\UserKit\EmailsReceivedPersonalDataEraser` and `Integration\UserKit\EmailsReceivedPersonalDataExportProvider` (private, tagged); with `tracking.enabled` also `Integration\UserKit\EmailTrackingPersonalDataEraser` / `EmailTrackingPersonalDataExportProvider` (`email_tracking`).
+Public services: `Nowo\MailKitBundle\Brand\BrandedEmailHelper` (1.4), `Nowo\MailKitBundle\Mailer\RuntimeTransport`, `Readiness\OutboundMailReadiness`, `Dsn\MailerDsnValidator`, `TestMail\TestMailSender`, `Log\SentMailRecorder` and `Log\SentMailRepository` (log on), `Resend\ResendApiChecker` (Resend on), `nowo_mail_kit.outbound_mail_ready_checker` (AuthKit installed), `Graph\Send\GraphMailSender` and the `Graph\GraphMailboxProviderInterface` alias (`graph.enabled`, 1.8), `Tracking\EmailTracker` and the `Tracking\EmailTrackingReaderInterface` / `Tracking\EmailTrackingPersonalDataInterface` aliases (`tracking.enabled`, 1.10). Interfaces: `Dsn\MailerDsnProviderInterface`, `Security\MailKitAccessCheckerInterface`, `Log\SentMailErasureInterface`, `Log\SentMailPersonalDataEraserInterface`, `Log\SentMailPersonalDataExporterInterface` and `Log\SentMailPersonalDataSubjectResolverInterface` (1.7). With UserKit: `Integration\UserKit\EmailsReceivedPersonalDataEraser` and `Integration\UserKit\EmailsReceivedPersonalDataExportProvider` (private, tagged); with `tracking.enabled` also `Integration\UserKit\EmailTrackingPersonalDataEraser` / `EmailTrackingPersonalDataExportProvider` (`email_tracking`). With `templates.enabled` (2.7.0): public `Template\Service\TemplateLibraryInterface`, `TemplateRendererInterface` and `TemplatePersonalDataInterface` aliases; with UserKit and `personal_data.enabled` also `Integration\UserKit\EmailTemplatesPersonalDataEraser` / `EmailTemplatesPersonalDataExportProvider` (`email_templates`).
 
 ## Fail-closed checks
 
@@ -597,4 +625,5 @@ The container refuses to compile when:
 - `graph.inbound.enabled` is true without `graph.enabled`, without `graph.inbound.handler`, without symfony/messenger, symfony/html-sanitizer, the fileinfo extension or DoctrineBundle, `retention_days` does not exceed `sweep.initial_window` by more than a day, or an inbound option is invalid (profile names, folder, webhook path, notification URL, sweep window);
 - `graph.enabled` is true without `graph.mailbox_provider` and without a profile named like `graph.default_profile`, or a profile name is invalid;
 - `tracking.enabled` is true without `tracking.policy`, without `tracking.public_base_url`, without DoctrineBundle or with `mailer.decorate: false`, a literal `tracking.secret` / `previous_secrets` value is shorter than 32 bytes, `tracking.bus` is set without symfony/messenger, or a tracking option is invalid (base URL, path prefix, retention, machine IP ranges);
+- `templates.enabled` is true without symfony/html-sanitizer or DoctrineBundle, `templates.max_body_bytes` exceeds `templates.max_output_bytes`, `personal_data.enabled` is true with UserKit installed and no `templates.owner_resolver`, or a tagged placeholder provider does not implement `PlaceholderProviderInterface`, declares an invalid namespace or one already provided;
 - `brand.name` is blank, too long or contains control / bidi characters, a `brand.colors` value is not `#rrggbb`, or `brand.max_image_bytes` exceeds `brand.max_total_bytes`.

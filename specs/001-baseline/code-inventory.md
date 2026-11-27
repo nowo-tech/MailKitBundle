@@ -2,9 +2,9 @@
 
 **Baseline spec**: [`spec.md`](spec.md)  
 **Package**: `nowo-tech/mail-kit-bundle`  
-**Last audited**: 2026-11-27
+**Last audited**: 2026-11-27 (2.7.0)
 
-Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **289** (2.6.0, Gmail send-only; re-checked against `git ls-files src`: no unmapped file, no stale row).
+Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **324** (2.7.0, stored e-mail templates; 2.6.0 had 289; re-checked against `git ls-files src`: no unmapped file, no stale row).
 
 ## Bundle and dependency injection
 
@@ -21,6 +21,7 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 | `src/DependencyInjection/Compiler/MailboxUrlGuardPass.php` | Bundle and dependency injection | FR-CFG-003, FR-MBX-004 |
 | `src/DependencyInjection/Compiler/MailboxSendTransactionPass.php` | Bundle and dependency injection | FR-CFG-003, FR-MBX-009 |
 | `src/DependencyInjection/Compiler/MailboxHttpRetryPass.php` | Bundle and dependency injection | FR-CFG-003, FR-MBX-009 |
+| `src/DependencyInjection/Compiler/TemplatePlaceholderPass.php` | Bundle and dependency injection | FR-TPL-007 ([006](../006-stored-templates/spec.md)) |
 
 ## Settings
 
@@ -151,6 +152,8 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 | `src/Integration/UserKit/EmailTrackingPersonalDataExportProvider.php` | Personal data (GDPR) | FR-TRK-007 |
 | `src/Integration/UserKit/EmailsReceivedPersonalDataEraser.php` | Personal data (GDPR) | FR-GDPR-001, FR-GDPR-002 |
 | `src/Integration/UserKit/EmailsReceivedPersonalDataExportProvider.php` | Personal data (GDPR) | FR-GDPR-003 |
+| `src/Integration/UserKit/EmailTemplatesPersonalDataEraser.php` | Personal data (GDPR) | FR-TPL-011 ([006](../006-stored-templates/spec.md)) |
+| `src/Integration/UserKit/EmailTemplatesPersonalDataExportProvider.php` | Personal data (GDPR) | FR-TPL-011 ([006](../006-stored-templates/spec.md)) |
 | `src/Log/DefaultSentMailPersonalDataSubjectResolver.php` | Personal data (GDPR) | FR-GDPR-001, FR-GDPR-002 |
 | `src/Log/NullSentMailErasure.php` | Personal data (GDPR) | FR-GDPR-001 |
 | `src/Log/NullSentMailPersonalDataExporter.php` | Personal data (GDPR) | FR-GDPR-003 |
@@ -425,11 +428,48 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 | `src/Mailbox/Exception/MailboxProviderFailure.php` | Events and exceptions (2.5.0) | FR-MBX-010; FR-013 ([005](../005-delegated-mailboxes/spec.md)) |
 | `src/Mailbox/Exception/MailboxTokenUnavailable.php` | Events and exceptions (2.5.0) | FR-MBX-010; FR-013 ([005](../005-delegated-mailboxes/spec.md)) |
 
+## Stored e-mail templates
+
+| Source file | Spec section | Requirement IDs |
+| --- | --- | --- |
+| `src/Template/Engine/PlaceholderResolver.php` | Stored e-mail templates | FR-TPL-008 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Engine/TemplateLibrary.php` | Stored e-mail templates | FR-TPL-005, FR-TPL-006 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Engine/TemplatePersonalData.php` | Stored e-mail templates | FR-TPL-011 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Engine/TemplateRenderer.php` | Stored e-mail templates | FR-TPL-009 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Event/TemplateDeletedEvent.php` | Stored e-mail templates | FR-TPL-010 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Exception/InvalidTemplate.php` | Stored e-mail templates | FR-TPL-003, FR-TPL-006 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Exception/TemplateAccessDenied.php` | Stored e-mail templates | FR-TPL-005 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Exception/TemplateException.php` | Stored e-mail templates | FR-TPL-005 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Exception/TemplateKeyTaken.php` | Stored e-mail templates | FR-TPL-006, FR-TPL-012 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Exception/TemplateNotFound.php` | Stored e-mail templates | FR-TPL-005 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Exception/TemplateVersionConflict.php` | Stored e-mail templates | FR-TPL-006, FR-TPL-012 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Infrastructure/Command/TemplateSchemaCommand.php` | Stored e-mail templates | FR-TPL-002 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Infrastructure/Store/TemplateSchemaListener.php` | Stored e-mail templates | FR-TPL-002 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Infrastructure/Store/TemplateStore.php` | Stored e-mail templates | FR-TPL-002, FR-TPL-012 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Placeholder/PlaceholderContext.php` | Stored e-mail templates | FR-TPL-007 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Placeholder/PlaceholderDefinition.php` | Stored e-mail templates | FR-TPL-007 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Placeholder/PlaceholderProviderInterface.php` | Stored e-mail templates | FR-TPL-007 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Port/DenyAllTemplatePermission.php` | Stored e-mail templates | FR-TPL-004 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Port/TemplateOwnerResolverInterface.php` | Stored e-mail templates | FR-TPL-004, FR-TPL-011 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Port/TemplatePermissionInterface.php` | Stored e-mail templates | FR-TPL-004 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Service/TemplateLibraryInterface.php` | Stored e-mail templates | FR-TPL-006 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Service/TemplatePersonalDataInterface.php` | Stored e-mail templates | FR-TPL-011 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Service/TemplateRendererInterface.php` | Stored e-mail templates | FR-TPL-009 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Value/RenderedTemplate.php` | Stored e-mail templates | FR-TPL-009 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Value/StoredTemplate.php` | Stored e-mail templates | FR-TPL-006 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Value/TemplateActor.php` | Stored e-mail templates | FR-TPL-004 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Value/TemplateDraft.php` | Stored e-mail templates | FR-TPL-003 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Value/TemplateErasureResult.php` | Stored e-mail templates | FR-TPL-011 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Value/TemplateKind.php` | Stored e-mail templates | FR-TPL-002 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Value/TemplatePermission.php` | Stored e-mail templates | FR-TPL-004 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Value/TemplateScope.php` | Stored e-mail templates | FR-TPL-002 ([006](../006-stored-templates/spec.md)) |
+| `src/Template/Value/TemplateSummary.php` | Stored e-mail templates | FR-TPL-006 ([006](../006-stored-templates/spec.md)) |
+
 ## Coverage summary
 
 | Category | Files | Mapped |
 | --- | ---: | ---: |
-| Bundle and dependency injection | 11 | 11 |
+| Bundle and dependency injection | 12 | 12 |
 | Settings | 6 | 6 |
 | DSN and sender | 18 | 18 |
 | Delivery | 5 | 5 |
@@ -438,7 +478,7 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 | Readiness | 6 | 6 |
 | Admin UI | 20 | 20 |
 | Events | 5 | 5 |
-| Personal data (GDPR) | 13 | 13 |
+| Personal data (GDPR) | 15 | 15 |
 | Branded e-mail | 7 | 7 |
 | Microsoft Graph sending | 24 | 24 |
 | Microsoft Graph inbound | 28 | 28 |
@@ -455,4 +495,5 @@ Scope: every file under `src/`. Audit command: `find src -type f | wc -l` → **
 | Delegated mailboxes: Messenger and commands | 8 | 8 |
 | Delegated mailboxes: store | 2 | 2 |
 | Delegated mailboxes: events and exceptions | 8 | 8 |
-| **Total** | **289** | **289** |
+| Stored e-mail templates | 32 | 32 |
+| **Total** | **324** | **324** |

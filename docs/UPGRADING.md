@@ -3,6 +3,9 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 2.7.0](#to-270)
+  - [Stored e-mail templates (2.7.0, opt-in)](#stored-e-mail-templates-270-opt-in)
+  - [`MailKitExactKeyColumns` gets a fifth argument](#mailkitexactkeycolumns-gets-a-fifth-argument)
 - [To 2.6.0](#to-260)
   - [Gmail send-only (2.6.0, opt-in)](#gmail-send-only-260-opt-in)
   - [Behaviour change: `MailboxSettings` refuses folders for Gmail](#behaviour-change-mailboxsettings-refuses-folders-for-gmail)
@@ -73,6 +76,41 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+## To 2.7.0
+
+From **2.6.0**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
+
+Nothing changes unless you set `nowo_mail_kit.templates.enabled: true`: no new table, route, service, Messenger
+message or schedule otherwise. No BC break.
+
+### Stored e-mail templates (2.7.0, opt-in)
+
+Contract: [TEMPLATES — Stored e-mail templates](TEMPLATES.md#stored-e-mail-templates-270); usage:
+[USAGE](USAGE.md#stored-e-mail-templates-270); keys: [CONFIGURATION — templates](CONFIGURATION.md#templates).
+
+1. Require `symfony/html-sanitizer` (the build fails without it when templates are on) and keep doctrine/doctrine-bundle.
+2. Implement `Template\Port\TemplatePermissionInterface` and set `templates.permission` (without it everything is
+   denied). Beacon: `ManageShared` ⇐ `crm.manage`; `Personal` / `UseShared` ⇐ CRM members of the organisation; check
+   that the person belongs to the actor's tenant.
+3. With `personal_data.enabled` and UserKit: implement `Template\Port\TemplateOwnerResolverInterface` and set
+   `templates.owner_resolver` (the build fails otherwise). The new `email_templates` eraser deletes a person's personal
+   templates and clears their authorship of shared ones.
+4. Create the table: `doctrine:migrations:diff` (ORM hosts, the `postGenerateSchema` listener adds
+   `<prefix>mail_kit_template`) or `nowo:mail-kit:templates:schema` (prints the CREATE statement for your platform;
+   `--force` runs it).
+5. Register your placeholder providers (`PlaceholderProviderInterface`, autoconfigured). MailKit ships none.
+6. Build `TemplateActor(tenant, owner)` from your security context and call the services.
+
+### `MailKitExactKeyColumns` gets a fifth argument
+
+`Doctrine\MailKitExactKeyColumns::__construct()` has a new optional fifth argument `$templates` (default `false`). The
+seven key columns of `mail_kit_template` are declared (inactive until `templates.enabled`). Hosts that construct the
+class themselves keep working.
 
 ## To 2.6.0
 

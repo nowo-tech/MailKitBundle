@@ -9,6 +9,7 @@ use Doctrine\Persistence\ManagerRegistry;
 use Nowo\MailKitBundle\Doctrine\MailKitExactKeyColumns;
 use Nowo\MailKitBundle\Graph\Inbound\Store\GraphInboundStore;
 use Nowo\MailKitBundle\Mailbox\Infrastructure\Store\MailboxStore;
+use Nowo\MailKitBundle\Template\Infrastructure\Store\TemplateStore;
 use Nowo\MailKitBundle\Tracking\Store\TrackingStore;
 use Nowo\MigrationsKitBundle\Test\ExactKeyColumnsTestCase;
 
@@ -41,7 +42,7 @@ final class ExactKeyColumnsGateTest extends ExactKeyColumnsTestCase
      */
     protected function exactKeyColumnProviders(): array
     {
-        return [new MailKitExactKeyColumns(self::PREFIX, true, true, true)];
+        return [new MailKitExactKeyColumns(self::PREFIX, true, true, true, true)];
     }
 
     /**
@@ -55,9 +56,10 @@ final class ExactKeyColumnsGateTest extends ExactKeyColumnsTestCase
         $tracking = new TrackingStore($registry, null, self::PREFIX);
         $inbound  = new GraphInboundStore($registry, null, self::PREFIX);
         $mailbox  = new MailboxStore($registry, null, self::PREFIX);
+        $template = new TemplateStore($registry, null, self::PREFIX);
 
         $manager = $connection->createSchemaManager();
-        foreach ([$tracking->table(), $inbound->subscriptionTable(), $inbound->deltaTable(), $inbound->inboundTable(), $mailbox->subscriptionTable(), $mailbox->cursorTable(), $mailbox->mailboxTable()] as $table) {
+        foreach ([$tracking->table(), $inbound->subscriptionTable(), $inbound->deltaTable(), $inbound->inboundTable(), $mailbox->subscriptionTable(), $mailbox->cursorTable(), $mailbox->mailboxTable(), $template->table()] as $table) {
             if ($manager->tablesExist([$table])) {
                 $connection->executeStatement('DROP TABLE ' . $table);
             }
@@ -66,5 +68,6 @@ final class ExactKeyColumnsGateTest extends ExactKeyColumnsTestCase
         $tracking->execute($tracking->missingTablesSql());
         $inbound->execute($inbound->missingTablesSql());
         $mailbox->execute($mailbox->missingTablesSql());
+        $template->execute($template->missingTablesSql());
     }
 }

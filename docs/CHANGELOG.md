@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[2.7.0] - 2026-11-27](#270---2026-11-27)
 - [[2.6.0] - 2026-11-27](#260---2026-11-27)
 - [[2.5.0] - 2026-11-27](#250---2026-11-27)
 - [[2.2.2] - 2026-11-24](#222---2026-11-24)
@@ -39,6 +40,8 @@ All notable changes to this project are documented here. The format follows
 - [[1.0.0] - 2026-10-31](#100---2026-10-31)
 
 ## [Unreleased]
+
+## [2.7.0] - 2026-11-27
 
 Planned as **2.7.0**: editable stored e-mail templates and snippets (this roadmap's Phase 2 and the CrmKit A-2 request,
 Beacon spec 254 T003). Opt-in, no BC break. See [UPGRADING](UPGRADING.md#to-270).

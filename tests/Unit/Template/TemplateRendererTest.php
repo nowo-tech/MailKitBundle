@@ -91,6 +91,14 @@ final class TemplateRendererTest extends TestCase
         $this->h->renderer->render($this->ana, $text->id);
     }
 
+    public function testRenderingSanitisesAgainWithHttpsImagesOnly(): void
+    {
+        // A row written around the library (an import, hand-written SQL) still renders https images only.
+        $row = $this->h->library->create($this->ana, TemplateLibraryTest::draft(html: '<p>{{ me.first_name }}</p>'));
+        $this->h->connection->executeStatement('UPDATE mail_kit_template SET body_html = ?', ['<p>{{ me.first_name }}</p><img src="http://t.example/p.gif"><img src="https://cdn.example.com/l.png"><img src="data:image/gif;base64,R0lGODlh"><script>x()</script>']);
+        self::assertSame('<p>Ana</p><img /><img src="https://cdn.example.com/l.png" /><img />', $this->h->renderer->render($this->ana, $row->id)->html);
+    }
+
     public function testATextOnlySnippetKeepsAnEmptyHtmlBody(): void
     {
         $row = $this->h->library->create($this->ana, new TemplateDraft(TemplateKind::Snippet, TemplateScope::Personal, 'txt', 'Txt', 'en', '', '', 'Bye {{ me.first_name }}'));

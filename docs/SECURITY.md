@@ -291,6 +291,14 @@ Opt-in (`templates.enabled`). Contract: [TEMPLATES](TEMPLATES.md#stored-e-mail-t
   script, style, event handler, `style` attribute, relative or `javascript:` URL); the stored HTML is sanitised on
   save. The stored subject refuses control, bidi and line-break characters; substituted values lose them (header
   injection, bidi spoofing).
+- **Images: https only** (owner answer Q2, 2026-11-27). Template HTML keeps absolute `https` images and `cid:`
+  references only, on save and again on render (`RemoteImages::HttpsOnly`): no `http` image (no clear-text fetch, no
+  downgrade), no `data:` URI, no relative source, no `srcset` / `background` / `style` URL, no audio / video. An author
+  can still embed an https tracking pixel; that is the tenant's own content (use the open tracking with its policy
+  instead).
+- **Caller-passed actor** (owner answer Q1). The host's permission adapter must verify that the person belongs to
+  `actor.tenant`; MailKit only enforces the tenant it is given. No admin override for personal rows (Q3). The per-scope
+  cap is soft (Q4). Owner references must be unique host-wide (Q5).
 - **Resource limits.** `max_body_bytes`, `max_output_bytes`, `max_placeholders`, `max_per_scope`; each provider is
   asked once per render.
 - **Providers** must check that the actor may see the data they return; a provider that ignores the actor leaks

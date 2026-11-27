@@ -79,9 +79,10 @@ class MailHtmlSanitizer
             ->forceAttribute('a', 'rel', 'noopener noreferrer nofollow')
             ->withMaxInputLength($maxBytes * 2);
         $config = match ($remoteImages) {
-            RemoteImages::Allowed => $config->allowMediaSchemes(['http', 'https']),
-            RemoteImages::Dropped => $config->allowMediaSchemes(['https'])->allowMediaHosts([self::CID_HOST]),
-            RemoteImages::Blocked => $config->allowMediaSchemes(['https'])->dropElement('audio')->dropElement('video'),
+            RemoteImages::Allowed   => $config->allowMediaSchemes(['http', 'https']),
+            RemoteImages::Dropped   => $config->allowMediaSchemes(['https'])->allowMediaHosts([self::CID_HOST]),
+            RemoteImages::Blocked   => $config->allowMediaSchemes(['https'])->dropElement('audio')->dropElement('video'),
+            RemoteImages::HttpsOnly => $config->allowMediaSchemes(['https'])->dropElement('audio')->dropElement('video'),
         };
         if ($remoteImages !== RemoteImages::Allowed) {
             // 2.2.2 (audit ZAT-L4): whatever the installed sanitizer version checks, no other URL-bearing media

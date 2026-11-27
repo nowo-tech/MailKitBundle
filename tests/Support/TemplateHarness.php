@@ -69,7 +69,7 @@ final class TemplateHarness
             'me'      => fn (): MePlaceholderProvider => $this->me,
             'contact' => static fn (): ContactPlaceholderProvider => new ContactPlaceholderProvider(),
         ]), $maxPlaceholders);
-        $sanitizer          = new MailHtmlSanitizer(RemoteImages::Allowed, $maxOutputBytes);
+        $sanitizer          = new MailHtmlSanitizer(RemoteImages::HttpsOnly, $maxOutputBytes);
         $this->library      = new TemplateLibrary($this->store, $this->permission, $this->resolver, $sanitizer, $maxBodyBytes, $maxPerScope, $this->events, $this->clock);
         $this->renderer     = new TemplateRenderer($this->library, $this->resolver, $sanitizer, $maxOutputBytes);
         $this->personalData = new TemplatePersonalData($this->store, $this->events);

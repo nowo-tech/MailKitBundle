@@ -238,6 +238,10 @@ final class TemplateLibraryTest extends TestCase
         $html = $this->h->library->create($this->ana, self::draft(key: 'links', html: '<a href="javascript:alert(1)">x</a><img src="https://cdn.example.com/logo.png" alt="L"><a href="https://example.com/{{contact.id}}">y</a>'));
         self::assertStringNotContainsString('javascript', $html->html);
         self::assertStringContainsString('src="https://cdn.example.com/logo.png"', $html->html);
+        // https images only (owner answer Q2): http, data: and relative image sources are removed on save.
+        $images = $this->h->library->create($this->ana, self::draft(key: 'images', html: '<p>x</p><img src="http://cdn.example.com/pixel.gif"><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw="><img src="/logo.png"><img srcset="https://cdn.example.com/2x.png 2x" src="cid:logo@brand">'));
+        self::assertSame('<p>x</p><img /><img /><img /><img src="cid:logo@brand" />', $images->html);
+        $this->h->library->delete($this->ana, $images->id, 1);
 
         // The per-scope cap (5 here) counts per tenant, kind, scope and owner.
         for ($i = 0; $i < 4; ++$i) {

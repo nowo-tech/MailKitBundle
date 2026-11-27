@@ -67,7 +67,7 @@ final class MailHtmlSanitizerTest extends TestCase
             . '<video poster="https://t.example/7.png"><track src="https://t.example/8.vtt"></video>'
             . '<table background="https://t.example/9.png"><tr><td>x</td></tr></table>'
             . '<link rel="stylesheet" href="https://t.example/10.css"><style>p{background:url(https://t.example/11)}</style>';
-        foreach ([RemoteImages::Dropped, RemoteImages::Blocked] as $mode) {
+        foreach ([RemoteImages::Dropped, RemoteImages::Blocked, RemoteImages::HttpsOnly] as $mode) {
             $html = (new MailHtmlSanitizer($mode))->sanitize($source);
             self::assertStringNotContainsString('t.example', $html, $mode->value);
             self::assertStringContainsString('src="cid:a@b"', $html, $mode->value);
@@ -84,6 +84,15 @@ final class MailHtmlSanitizerTest extends TestCase
         $allowed = (new MailHtmlSanitizer(RemoteImages::Allowed))->sanitize($source);
         self::assertStringContainsString('src="https://cdn.example.net/a.png"', $allowed);
         self::assertSame(0, MailHtmlSanitizer::blockedImages($allowed));
+
+        // 2.7.0 templates: https and cid images only; http, data: and relative sources and audio / video are removed.
+        $https = (new MailHtmlSanitizer(RemoteImages::HttpsOnly))->sanitize($source . '<img src="http://plain.example.net/p.gif"><img src="data:image/png;base64,iVBORw0KGgo="><img src="/rel.png"><video src="https://cdn.example.net/v.mp4"></video><audio src="https://cdn.example.net/a.mp3"></audio>');
+        self::assertStringContainsString('src="https://cdn.example.net/a.png"', $https);
+        self::assertStringContainsString('src="cid:a@b"', $https);
+        foreach (['plain.example.net', 'data:', 'rel.png', 'v.mp4', 'a.mp3', '<video', '<audio'] as $gone) {
+            self::assertStringNotContainsString($gone, $https);
+        }
+        self::assertSame(0, MailHtmlSanitizer::blockedImages($https));
     }
 
     public function testInputIsCutAndTextDerived(): void

@@ -5,6 +5,7 @@
 - [Unreleased](#unreleased)
 - [To 2.7.0](#to-270)
   - [Stored e-mail templates (2.7.0, opt-in)](#stored-e-mail-templates-270-opt-in)
+  - [Images in template HTML: https only](#images-in-template-html-https-only)
   - [`MailKitExactKeyColumns` gets a fifth argument](#mailkitexactkeycolumns-gets-a-fifth-argument)
 - [To 2.6.0](#to-260)
   - [Gmail send-only (2.6.0, opt-in)](#gmail-send-only-260-opt-in)
@@ -96,7 +97,7 @@ Contract: [TEMPLATES — Stored e-mail templates](TEMPLATES.md#stored-e-mail-tem
 1. Require `symfony/html-sanitizer` (the build fails without it when templates are on) and keep doctrine/doctrine-bundle.
 2. Implement `Template\Port\TemplatePermissionInterface` and set `templates.permission` (without it everything is
    denied). Beacon: `ManageShared` ⇐ `crm.manage`; `Personal` / `UseShared` ⇐ CRM members of the organisation; check
-   that the person belongs to the actor's tenant.
+   that the person belongs to the actor's tenant (required: MailKit trusts the tenant it is given).
 3. With `personal_data.enabled` and UserKit: implement `Template\Port\TemplateOwnerResolverInterface` and set
    `templates.owner_resolver` (the build fails otherwise). The new `email_templates` eraser deletes a person's personal
    templates and clears their authorship of shared ones.
@@ -105,6 +106,13 @@ Contract: [TEMPLATES — Stored e-mail templates](TEMPLATES.md#stored-e-mail-tem
    `--force` runs it).
 5. Register your placeholder providers (`PlaceholderProviderInterface`, autoconfigured). MailKit ships none.
 6. Build `TemplateActor(tenant, owner)` from your security context and call the services.
+
+### Images in template HTML: https only
+
+Template HTML keeps absolute `https` images and `cid:` references only (owner decision 2026-11-27); `http`, `data:` and
+relative image sources are removed on save and again on render (`MailHtmlSanitizer` mode `RemoteImages::HttpsOnly`,
+new enum case in 2.7.0). Host logos must be served over https or attached inline (`cid:`). If you `match` exhaustively
+on `Mailbox\Html\RemoteImages`, add the `HttpsOnly` case; `mailboxes.html.remote_images` does not offer it.
 
 ### `MailKitExactKeyColumns` gets a fifth argument
 

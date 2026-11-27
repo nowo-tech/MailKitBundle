@@ -64,7 +64,8 @@ lists her personal rows with content and the shared ones without content; the er
 - **FR-TPL-005** Fixed access rules: tenant in every query; personal rows owner-only; invisible = `TemplateNotFound`;
   visible but not manageable = `TemplateAccessDenied`.
 - **FR-TPL-006** `TemplateLibraryInterface`: list (visible rows, capped), get, findByKey (locale, then language),
-  create, update and delete with optimistic versions; HTML sanitised on save; size, placeholder and per-scope limits.
+  create, update and delete with optimistic versions; HTML sanitised on save with https images only (`RemoteImages::HttpsOnly`,
+  owner answer Q2); size, placeholder and per-scope limits.
 - **FR-TPL-007** Closed placeholder registry: `PlaceholderProviderInterface`, autoconfigured tag, build-time check of
   namespaces (`TemplatePlaceholderPass`).
 - **FR-TPL-008** `PlaceholderResolver`: grammar, one provider call per namespace, one-pass substitution, unknown as

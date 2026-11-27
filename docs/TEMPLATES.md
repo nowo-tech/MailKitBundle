@@ -156,14 +156,16 @@ MariaDB, `TEXT` elsewhere.
   `personal_data.enabled` and UserKit are on.
 - Tenant and owner come from the **caller** as a `TemplateActor(tenant, owner)` on every call, built by the host from
   its security context (or, in a worker running a sequence step, from the job). MailKit never derives them from input
-  and never holds a "current" actor (worker mode). The permission port receives the actor and should also check that
-  the person belongs to that tenant.
+  and never holds a "current" actor (worker mode). The permission port receives the actor and **must** check that
+  the person belongs to `actor.tenant` (owner answer Q1, 2026-11-27: the actor stays caller-passed, so this check is
+  the host adapter's job; MailKit cannot verify membership).
 
 **C4 — Fixed access rules (MailKit, not overridable).** Every query names the tenant. A personal row is visible only
 to its owner and only while `Personal` is granted; a shared row with `UseShared` or `ManageShared`. A row the actor
 may not see — another tenant's, another person's personal row, a missing id — raises `TemplateNotFound` (map to 404);
 a visible row the actor may not change raises `TemplateAccessDenied` (403). Lists contain only visible rows (empty
-when nothing is granted).
+when nothing is granted). There is no admin or support override for personal rows (owner answer Q3): only their owner
+reads them; the GDPR export is the only other way out.
 
 **C5 — Placeholders: closed registry.** Grammar `{{ namespace.name }}` (up to 8 spaces inside the braces),
 namespace `[a-z][a-z0-9_]{0,31}`, name `[a-z0-9_]{1,40}`; anything else is text. Providers implement
@@ -182,12 +184,17 @@ HTML-escaped (`ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5`), then the whole HTML is
 plain (line breaks and tabs kept); in the subject plain with line breaks turned into spaces, cut at 998 characters.
 Limits: `max_body_bytes` per stored body, `max_placeholders` occurrences per template, `max_output_bytes` per rendered
 body (larger renders raise `InvalidTemplate('output')`), `max_per_scope` rows per tenant, kind, scope and owner (a soft
-cap checked before the insert; concurrent creates may pass it together). Providers check that the actor may see what
+cap checked before the insert; concurrent creates may pass it together, bounded by the number of concurrent requests;
+owner answer Q4: kept soft). Providers check that the actor may see what
 they return (CrmKit: may view the contact).
 
-**C7 — Sanitiser.** MailKit's `MailHtmlSanitizer` (symfony/html-sanitizer, required with `templates.enabled`) in
-`allowed` remote-image mode: W3C safe elements and attributes, no script / style / event handler / `style`
-attribute, links `http` / `https` / `mailto` only (no relative URLs), remote `http(s)` images kept (a logo). A
+**C7 — Sanitiser.** MailKit's `MailHtmlSanitizer` (symfony/html-sanitizer, required with `templates.enabled`) in the
+`https_only` remote-image mode (`RemoteImages::HttpsOnly`, owner answer Q2, 2026-11-27), applied on save **and** again
+on every render: W3C safe elements and attributes, no script / style / event handler / `style` attribute, links
+`http` / `https` / `mailto` only (no relative URLs). Images: absolute `https` sources and `cid:` references to the
+message's own inline parts (for instance the brand logo `BrandedEmailHelper` attaches) are kept; `http`, `data:` and
+relative sources are removed (the `<img>` stays without `src`), and so are `srcset`, `poster`, `background`, `style`
+and the other URL-bearing media attributes, the `source` / `track` / `link` / `style` elements and audio / video. A
 placeholder inside an attribute value (`href="{{ x.y }}"`) is not a valid URL and is dropped on save: placeholders
 belong in text.
 

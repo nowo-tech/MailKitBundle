@@ -1036,7 +1036,7 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             $container->setDefinition(DenyAllTemplatePermission::class, new Definition(DenyAllTemplatePermission::class));
             $container->setAlias(TemplatePermissionInterface::class, DenyAllTemplatePermission::class);
         }
-        $sanitizer = new Definition(MailHtmlSanitizer::class, [RemoteImages::Allowed, $templates['max_output_bytes']]);
+        $sanitizer = new Definition(MailHtmlSanitizer::class, [RemoteImages::HttpsOnly, $templates['max_output_bytes']]);
         $container->setDefinition(PlaceholderResolver::class, new Definition(PlaceholderResolver::class, [new ServiceLocatorArgument([]), $templates['max_placeholders']]));
         $container->setDefinition(TemplateLibrary::class, new Definition(TemplateLibrary::class, [
             new Reference(TemplateStore::class),

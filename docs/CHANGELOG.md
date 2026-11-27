@@ -63,6 +63,9 @@ Beacon spec 254 T003). Opt-in, no BC break. See [UPGRADING](UPGRADING.md#to-270)
   evaluated or re-expanded; unknown placeholders stay as literal text (`RenderedTemplate::$unresolved`); values
   HTML-escaped in the HTML body and sanitised again, plain in subject and text, control / bidi characters removed;
   `max_body_bytes`, `max_output_bytes`, `max_placeholders` and `max_per_scope` limits. MailKit ships no provider.
+- Template HTML keeps **https images only** (and `cid:` inline parts): `http`, `data:` and relative image sources,
+  `srcset` / `background` / `style` URLs and audio / video are removed on save and on render. New
+  `Mailbox\Html\RemoteImages::HttpsOnly` sanitiser mode (not offered by `mailboxes.html.remote_images`).
 - `RenderedTemplate::applyTo(Email)` puts subject, HTML and text on a Symfony `Email` and tags it with the template key
   (sent-mail log tag and tracking template id).
 - `TemplateDeletedEvent` after a delete and for each personal row a GDPR erasure deletes (dispatched inside the

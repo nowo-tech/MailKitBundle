@@ -120,7 +120,7 @@ Schedule `php bin/console nowo:mail-kit:log:purge` daily.
 
 ## Requirements
 
-- PHP **8.2+** (`>=8.2 <8.6`; Symfony 8.x requires PHP 8.4+)
+- PHP **8.2+** (`>=8.2 <8.7`; Symfony 8.x requires PHP 8.4+)
 - Symfony **7.4**, **8.0** or **8.1** (FrameworkBundle with the mailer, Form, Validator, Security CSRF, RateLimiter, HttpClient, TwigBundle; SecurityBundle for the admin UI)
 - `nowo-tech/ui-kit-bundle` **^2.23**, `nowo-tech/form-kit-bundle` **^2.17**, `nowo-tech/outbound-url-guard-bundle` **^1.3**, DoctrineBundle with the DBAL, `twig/extra-bundle`
 - Default setup (suggested since 2.0, require them yourself): `nowo-tech/instance-settings-bundle` **^1.3.1** (settings store, encrypted secrets with `nowo-tech/doctrine-encrypt-bundle` **^2.10**, settings UI) and Doctrine ORM **3.3+** (the sent-mail log)

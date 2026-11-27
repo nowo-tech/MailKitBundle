@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[2.6.0] - 2026-11-27](#260---2026-11-27)
 - [[2.5.0] - 2026-11-27](#250---2026-11-27)
 - [[2.2.2] - 2026-11-24](#222---2026-11-24)
 - [[2.2.1] - 2026-11-23](#221---2026-11-23)
@@ -38,6 +39,8 @@ All notable changes to this project are documented here. The format follows
 - [[1.0.0] - 2026-10-31](#100---2026-10-31)
 
 ## [Unreleased]
+
+## [2.6.0] - 2026-11-27
 
 Gmail send-only mailboxes (phase B2), on top of the 2.5.0 Outlook mailboxes. Owner decision D-20261124-09: Gmail is **send-only**. See [UPGRADING](UPGRADING.md#to-260).
 

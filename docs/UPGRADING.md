@@ -6,6 +6,7 @@
 - [To 2.6.0](#to-260)
   - [Gmail send-only (2.6.0, opt-in)](#gmail-send-only-260-opt-in)
   - [Behaviour change: `MailboxSettings` refuses folders for Gmail](#behaviour-change-mailboxsettings-refuses-folders-for-gmail)
+  - [For code that used internal classes (2.6.0)](#for-code-that-used-internal-classes-260)
   - [Owner / Beacon checklist before enabling Gmail](#owner--beacon-checklist-before-enabling-gmail)
 - [To 2.5.0](#to-250)
   - [Delegated mailboxes (2.5.0, opt-in)](#delegated-mailboxes-250-opt-in)

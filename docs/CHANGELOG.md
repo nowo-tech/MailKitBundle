@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[2.5.0] - 2026-11-27](#250---2026-11-27)
 - [[2.2.2] - 2026-11-24](#222---2026-11-24)
 - [[2.2.1] - 2026-11-23](#221---2026-11-23)
 - [[2.2.0] - 2026-11-23](#220---2026-11-23)
@@ -37,6 +38,10 @@ All notable changes to this project are documented here. The format follows
 - [[1.0.0] - 2026-10-31](#100---2026-10-31)
 
 ## [Unreleased]
+
+## [2.5.0] - 2026-11-27
+
+Delegated Outlook mailboxes: per-person folder sync and send through Microsoft Graph delegated tokens the host provides. See [UPGRADING](https://github.com/nowo-tech/MailKitBundle/blob/v2.5.0/docs/UPGRADING.md#to-250).
 
 ### Added
 

@@ -7,10 +7,11 @@ namespace Nowo\MailKitBundle\Log;
 use DateTimeImmutable;
 
 /**
- * {@see SentMailErasureInterface} and {@see SentMailPersonalDataEraserInterface} (1.7) on a host without Doctrine (the log requires it): the bundle cannot have stored
+ * {@see SentMailErasureInterface}, {@see SentMailPersonalDataEraserInterface} (1.7) and
+ * {@see SentMailTaggedPersonalDataEraserInterface} (2.8) on a host without Doctrine (the log requires it): the bundle cannot have stored
  * anything, so there is nothing to erase. With Doctrine registered the port is always {@see SentMailRecorder}.
  */
-final readonly class NullSentMailErasure implements SentMailErasureInterface, SentMailPersonalDataEraserInterface
+final readonly class NullSentMailErasure implements SentMailErasureInterface, SentMailPersonalDataEraserInterface, SentMailTaggedPersonalDataEraserInterface
 {
     /**
      * Nothing stored.
@@ -27,6 +28,16 @@ final readonly class NullSentMailErasure implements SentMailErasureInterface, Se
      */
     public function erase(SentMailPersonalDataSubject $subject): SentMailErasureResult
     {
+        return new SentMailErasureResult();
+    }
+
+    /**
+     * Nothing stored; the tag is still validated like {@see SentMailRecorder::eraseTagged()}.
+     */
+    public function eraseTagged(SentMailPersonalDataSubject $subject, string $tag): SentMailErasureResult
+    {
+        SentMailRecorder::tagFilter($tag);
+
         return new SentMailErasureResult();
     }
 

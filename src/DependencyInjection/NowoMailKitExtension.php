@@ -84,6 +84,8 @@ use Nowo\MailKitBundle\Log\SentMailPersonalDataExporterInterface;
 use Nowo\MailKitBundle\Log\SentMailPersonalDataSubjectResolverInterface;
 use Nowo\MailKitBundle\Log\SentMailRecorder;
 use Nowo\MailKitBundle\Log\SentMailRepository;
+use Nowo\MailKitBundle\Log\SentMailTaggedPersonalDataEraserInterface;
+use Nowo\MailKitBundle\Log\SentMailTaggedPersonalDataExporterInterface;
 use Nowo\MailKitBundle\Mailbox\Engine\MailboxAttachmentReader;
 use Nowo\MailKitBundle\Mailbox\Engine\MailboxSender;
 use Nowo\MailKitBundle\Mailbox\Engine\MailboxSendOptions;
@@ -1255,6 +1257,8 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
             $container->setAlias(SentMailPersonalDataEraserInterface::class, NullSentMailErasure::class)->setPublic(true);
             $container->setDefinition(NullSentMailPersonalDataExporter::class, new Definition(NullSentMailPersonalDataExporter::class));
             $container->setAlias(SentMailPersonalDataExporterInterface::class, NullSentMailPersonalDataExporter::class)->setPublic(true);
+            $container->setAlias(SentMailTaggedPersonalDataEraserInterface::class, NullSentMailErasure::class)->setPublic(true);
+            $container->setAlias(SentMailTaggedPersonalDataExporterInterface::class, NullSentMailPersonalDataExporter::class)->setPublic(true);
 
             return;
         }
@@ -1262,6 +1266,8 @@ final class NowoMailKitExtension extends Extension implements PrependExtensionIn
         $container->setAlias(SentMailErasureInterface::class, SentMailRecorder::class)->setPublic(true);
         $container->setAlias(SentMailPersonalDataEraserInterface::class, SentMailRecorder::class)->setPublic(true);
         $container->setAlias(SentMailPersonalDataExporterInterface::class, SentMailRecorder::class)->setPublic(true);
+        $container->setAlias(SentMailTaggedPersonalDataEraserInterface::class, SentMailRecorder::class)->setPublic(true);
+        $container->setAlias(SentMailTaggedPersonalDataExporterInterface::class, SentMailRecorder::class)->setPublic(true);
         $container->setDefinition(SentMailRecorder::class, (new Definition(SentMailRecorder::class, [
             new Reference('doctrine'),
             $doctrine['entity_manager'],

@@ -132,6 +132,11 @@ when not every admin may change the transport.
   on SQLite, MySQL / MariaDB and PostgreSQL, also for addresses with `/` or non-ASCII characters) and masks the address
   in the subjects and stored bodies of the other rows (also URL-encoded). Internationalised addresses are accepted.
   Call it from your account-deletion flow. Not covered: copies outside the log (provider dashboards, mailboxes).
+- Tag-scoped erasure and export (2.8): `SentMailTaggedPersonalDataEraserInterface::eraseTagged()` and
+  `SentMailTaggedPersonalDataExporterInterface::exportTagged()` read and change only the rows whose tag is exactly the
+  given one (SQL pre-filter, `===` re-check in PHP). A module that shares the log with other tenants or the host tags
+  every message it sends with its own tag and erases or exports with that tag, so it never touches rows it did not
+  send. The tag is not a secret and not an access control: pick one per owner that no other sender uses.
 - `log.enabled: false` disables the log entirely.
 - **CSV export** (`web_ui.export`, on by default for whoever opens the log): a downloaded file is a copy outside the
   retention purge and the erasure command. Limit it with `web_ui.export.access_roles`, keep `include_bodies` off, and

@@ -61,17 +61,12 @@ final class RuntimeTransportTest extends TestCase
 
     public function testCloseStopsTheFallbackAndTheCachedTransportsThatCanClose(): void
     {
-        $closed   = [];
-        $fallback = new class($this->store, $closed) extends MemoryTransport {
-            /** @param list<string> $closed */
-            public function __construct(MemoryMailStore $store, private array &$closed)
-            {
-                parent::__construct('fallback', $store);
-            }
+        $fallback = new class('fallback', $this->store) extends MemoryTransport {
+            public int $closes = 0;
 
             public function close(): void
             {
-                $this->closed[] = 'fallback';
+                ++$this->closes;
             }
         };
         $factory   = new Transport([new MemoryTransportFactory($this->store)]);
@@ -84,11 +79,11 @@ final class RuntimeTransportTest extends TestCase
         );
 
         $transport->close();
-        self::assertSame(['fallback'], $closed, 'nothing cached yet');
+        self::assertSame(1, $fallback->closes, 'nothing cached yet');
 
         $transport->send($this->email());
         $transport->close();
-        self::assertSame(['fallback', 'fallback'], $closed, 'a cached transport without close() is left alone');
+        self::assertSame(2, $fallback->closes, 'a cached transport without close() is left alone');
 
         // a plain TransportInterface (no close()) as the fallback is left alone too
         $plain = new RuntimeTransport(
@@ -109,7 +104,7 @@ final class RuntimeTransportTest extends TestCase
             new SenderPolicy(new MailSettings(new FakeSettings(['mailer.from' => 'noreply@example.com']))),
         );
         $plain->close();
-        self::assertSame(['fallback', 'fallback'], $closed);
+        self::assertSame(2, $fallback->closes);
     }
 
     public function testFallbackRawMessagesAndSendVia(): void

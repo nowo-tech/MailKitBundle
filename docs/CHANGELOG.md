@@ -43,6 +43,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `RuntimeTransport::close()`: Symfony 8.2 calls `close()` on the transports service at `kernel.reset`, and the tag moves to this decorator, so the call failed with an undefined method. It now closes the framework transport and the cached runtime one when they can be closed.
+
 ### Changed
 
 - PHP 8.6: `composer.json` allows PHP below 8.7 (was below 8.6). CI adds a forward-compatibility workflow with a

@@ -13,7 +13,7 @@ final readonly class NullSentMailPersonalDataExporter implements SentMailPersona
     /**
      * Nothing stored.
      *
-     * @return list<array{id: string, roles: list<'recipient'|'sender'>, status: string, template: string|null, subject: string, queued_at: string|null, sent_at: string|null, failed_at: string|null}>
+     * @return list<array{id: string, roles: list<'recipient'|'sender'>, status: string, template: string|null, subject: string, queued_at: string|null, sent_at: string|null, failed_at: string|null, error: string|null, html_body: string|null, text_body: string|null}>
      */
     public function export(SentMailPersonalDataSubject $subject): array
     {
@@ -23,7 +23,7 @@ final readonly class NullSentMailPersonalDataExporter implements SentMailPersona
     /**
      * Nothing stored; the tag is still validated like {@see SentMailRecorder::exportTagged()}.
      *
-     * @return list<array{id: string, roles: list<'recipient'|'sender'>, status: string, template: string|null, subject: string, queued_at: string|null, sent_at: string|null, failed_at: string|null}>
+     * @return list<array{id: string, roles: list<'recipient'|'sender'>, status: string, template: string|null, subject: string, queued_at: string|null, sent_at: string|null, failed_at: string|null, error: string|null, html_body: string|null, text_body: string|null}>
      */
     public function exportTagged(SentMailPersonalDataSubject $subject, string $tag): array
     {

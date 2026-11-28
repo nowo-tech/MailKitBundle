@@ -263,6 +263,12 @@ here (it would be compiled into the container). See [USAGE](USAGE.md#db-only-mod
 Since 1.7. The ports themselves (`Log\SentMailErasureInterface`, `Log\SentMailPersonalDataEraserInterface`, `Log\SentMailPersonalDataExporterInterface`, and since 2.8 the tag-scoped
 `Log\SentMailTaggedPersonalDataEraserInterface` / `Log\SentMailTaggedPersonalDataExporterInterface`) are always registered; this node only drives the UserKit bridge. See [USAGE — GDPR erasure and export](USAGE.md#gdpr-erasure-and-export).
 
+The tag-scoped aliases (2.8) point straight at `Log\SentMailRecorder`, not at the 1.7 aliases. If you
+decorate or replace `Log\SentMailPersonalDataEraserInterface` or `Log\SentMailPersonalDataExporterInterface` (to add
+an audit trail, for example), that decoration does **not** apply to `eraseTagged()` / `exportTagged()`. Decorate
+`Log\SentMailTaggedPersonalDataEraserInterface` and `Log\SentMailTaggedPersonalDataExporterInterface` as well. MailKit
+will not change this wiring in a patch release.
+
 | Key | Default | Description |
 | --- | --- | --- |
 | `enabled` | `false` | Opt-in. `true`: with `nowo-tech/user-kit-bundle` installed and the log entities mapped (`log.map_entities` resolving to true, the ORM registered), register the UserKit eraser `emails_received` (priority 110, before the host identity eraser) and the export section `emails_received`. Remove your own `emails_received` export provider first: UserKit throws a `LogicException` on a duplicate section key. Keep `false` when your application erases / exports the log tables itself or must retain the log. Literal boolean. |

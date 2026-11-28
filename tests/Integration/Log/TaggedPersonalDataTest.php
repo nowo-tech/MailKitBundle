@@ -17,6 +17,7 @@ use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\Mime\Email;
 
 use function array_column;
+use function json_decode;
 use function sort;
 use function str_repeat;
 
@@ -86,6 +87,34 @@ final class TaggedPersonalDataTest extends KernelTestCase
         $bodies = $db->fetchFirstColumn('SELECT text_body FROM mail_kit_sent_mail_body WHERE text_body LIKE ?', ['%ody%']);
         sort($bodies);
         self::assertSame(['Body [redacted]', 'Body ana@example.com', 'Host body ana@example.com'], $bodies);
+    }
+
+    /**
+     * Audit ZDL-MK-I2: a stored tag with a trailing space (writable only through a raw header) is another tag, also
+     * where MySQL's PAD SPACE collation compares it equal; and an unlinked shared row keeps the other recipient, loses
+     * the erased one everywhere (list, index, body).
+     */
+    public function testTrailingSpaceTagSurvivesAndUnlinkedRowKeepsTheOtherRecipient(): void
+    {
+        $kernel   = $this->bootKernel(['log' => ['store_bodies' => true]]);
+        $recorder = $this->service($kernel, SentMailRecorder::class);
+        $db       = $this->connection($kernel);
+        $this->send($recorder, 'ana@example.com', 'Padded', 'crm:aaa');
+        $db->executeStatement('UPDATE mail_kit_sent_mail SET tag = ? WHERE subject = ?', ['crm:aaa ', 'Padded']);
+        $this->send($recorder, ['ana@example.com', 'bob@example.com'], 'A shared', 'crm:aaa', 'Hi ana@example.com and bob@example.com');
+        $subject = SentMailPersonalDataSubject::fromEmail('ana@example.com');
+
+        self::assertSame(['A shared'], array_column($recorder->exportTagged($subject, 'crm:aaa'), 'subject'));
+        self::assertSame(['deleted' => 0, 'unlinked' => 1, 'redacted' => 1], $recorder->eraseTagged($subject, 'crm:aaa')->toArray());
+
+        self::assertSame(['crm:aaa '], $db->fetchFirstColumn('SELECT tag FROM mail_kit_sent_mail WHERE subject = ?', ['Padded']));
+        self::assertSame(['Padded'], array_column($recorder->export($subject), 'subject'));
+        $row = $db->fetchAssociative('SELECT m.recipients, m.recipient_index, b.text_body FROM mail_kit_sent_mail m JOIN mail_kit_sent_mail_body b ON b.id = m.id WHERE m.subject = ?', ['A shared']);
+        self::assertIsArray($row);
+        self::assertSame(['to' => ['bob@example.com']], json_decode((string) $row['recipients'], true));
+        self::assertSame(SentMailRecorder::recipientIndex(['to' => ['bob@example.com']]), $row['recipient_index']);
+        self::assertSame('Hi [redacted] and bob@example.com', $row['text_body']);
+        self::assertSame(['A shared'], array_column($recorder->exportTagged(SentMailPersonalDataSubject::fromEmail('bob@example.com'), 'crm:aaa'), 'subject'));
     }
 
     public function testEventCarriesTheTagAndCallerTransactionDispatchesNothing(): void

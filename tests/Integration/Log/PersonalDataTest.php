@@ -7,6 +7,7 @@ namespace Nowo\MailKitBundle\Tests\Integration\Log;
 use ArrayObject;
 use DateTimeImmutable;
 use DateTimeInterface;
+use Doctrine\Persistence\ManagerRegistry;
 use Nowo\MailKitBundle\Event\SentMailPersonalDataErasedEvent;
 use Nowo\MailKitBundle\Log\SentMailErasureInterface;
 use Nowo\MailKitBundle\Log\SentMailLogTableMissingException;
@@ -17,12 +18,18 @@ use Nowo\MailKitBundle\Log\SentMailRecorder;
 use Nowo\MailKitBundle\Mailer\MailHeaders;
 use Nowo\MailKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\MailKitBundle\Tests\Integration\Kernel\MailKitTestKernel;
+use Nowo\MailKitBundle\Tests\Support\RecordingLogger;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\Mime\Email;
 use Symfony\Component\Uid\Uuid;
 
 use function array_column;
+use function array_filter;
 use function array_keys;
+use function array_map;
+use function array_values;
+use function json_encode;
+use function str_contains;
 use function str_starts_with;
 
 /**
@@ -31,7 +38,7 @@ use function str_starts_with;
  */
 final class PersonalDataTest extends KernelTestCase
 {
-    public function testExportIsEnvelopeOnlyAndExact(): void
+    public function testExportIsExactAndCarriesErrorAndBody(): void
     {
         $kernel   = $this->bootKernel(['log' => ['store_bodies' => true]]);
         $recorder = $this->service($kernel, SentMailRecorder::class);
@@ -48,7 +55,9 @@ final class PersonalDataTest extends KernelTestCase
         $rows = $exporter->export(SentMailPersonalDataSubject::fromEmail('JOSÉ@ejemplo.es'));
         self::assertCount(1, $rows);
         $row = $rows[0];
-        self::assertSame(['id', 'roles', 'status', 'template', 'subject', 'queued_at', 'sent_at', 'failed_at'], array_keys($row));
+        self::assertSame(['id', 'roles', 'status', 'template', 'subject', 'queued_at', 'sent_at', 'failed_at', 'error', 'html_body', 'text_body'], array_keys($row));
+        // 2.9.0 (ZDL-MK-L3): the stored body and the error are exported too.
+        self::assertSame([null, '<p>secret body</p>', 'secret body'], [$row['error'], $row['html_body'], $row['text_body']]);
         self::assertSame(['recipient'], $row['roles']);
         self::assertSame(['sent', 'welcome', 'Welcome', null], [$row['status'], $row['template'], $row['subject'], $row['failed_at']]);
         self::assertNotNull($row['queued_at']);
@@ -59,6 +68,7 @@ final class PersonalDataTest extends KernelTestCase
         $jose = $exporter->export(SentMailPersonalDataSubject::fromEmail('jose@ejemplo.es'));
         self::assertSame([['Not you', 'failed']], array_map(static fn (array $r): array => [$r['subject'], $r['status']], $jose));
         self::assertNotNull($jose[0]['failed_at']);
+        self::assertSame(['boom', null, 't'], [$jose[0]['error'], $jose[0]['html_body'], $jose[0]['text_body']]);
         self::assertNull($jose[0]['sent_at']);
 
         // The log folds case on write: Ana@ and ana@ are one address; she is both sender and recipient.
@@ -293,6 +303,99 @@ final class PersonalDataTest extends KernelTestCase
         $this->connection($mapped)->executeStatement('DROP TABLE mail_kit_sent_mail');
         $this->expectException(SentMailLogTableMissingException::class);
         $this->service($mapped, SentMailPersonalDataExporterInterface::class)->export(SentMailPersonalDataSubject::fromEmail('a@example.com'));
+    }
+
+    /**
+     * 2.9.0 (ZDL-MK-L3): the export carries the error and the stored body, with the addresses of the row's other
+     * recipients and sender masked; the other recipients themselves are still never exported.
+     */
+    public function testExportCarriesTheErrorAndTheBodyWithTheOtherPeopleMasked(): void
+    {
+        $kernel   = $this->bootKernel(['log' => ['store_bodies' => true]]);
+        $recorder = $this->service($kernel, SentMailRecorder::class);
+        $email    = (new Email())->from('app@example.com')->to('ana@example.com')->cc('bob@example.com')->subject('Team')
+            ->text('Hi ana@example.com and bob@example.com, from app@example.com')->html('<p>Hi ana@example.com and bob@example.com</p>');
+        $recorder->failed(null, $email, 'smtp', '550 <bob@example.com> and <ana@example.com> rejected');
+        // A row without a stored body (no text, no HTML) exports null bodies.
+        $recorder->sent(null, (new Email())->from('app@example.com')->to('ana@example.com')->subject('Empty'), 'smtp', null, null);
+
+        $rows = $recorder->export(SentMailPersonalDataSubject::fromEmail('Ana@Example.com'));
+        self::assertSame(['Team', 'Empty'], array_column($rows, 'subject'));
+        self::assertSame('550 <[redacted]> and <ana@example.com> rejected', $rows[0]['error']);
+        self::assertSame('Hi ana@example.com and [redacted], from [redacted]', $rows[0]['text_body']);
+        self::assertSame('<p>Hi ana@example.com and [redacted]</p>', $rows[0]['html_body']);
+        self::assertSame([null, null, null], [$rows[1]['error'], $rows[1]['html_body'], $rows[1]['text_body']]);
+        self::assertStringNotContainsString('bob@example.com', (string) json_encode($rows));
+
+        // Bob's own export shows Ana masked instead.
+        $bob = $recorder->export(SentMailPersonalDataSubject::fromEmail('bob@example.com'));
+        self::assertSame('550 <bob@example.com> and <[redacted]> rejected', $bob[0]['error']);
+        self::assertSame('Hi [redacted] and bob@example.com, from [redacted]', $bob[0]['text_body']);
+
+        // ZDT-MK-L1: a sender-only row (mail from the subject's address to other people) exports no body; the error
+        // stays, with the recipients masked.
+        $app = $recorder->export(SentMailPersonalDataSubject::fromEmail('app@example.com'));
+        self::assertSame(['sender'], $app[0]['roles']);
+        self::assertSame([null, null], [$app[0]['html_body'], $app[0]['text_body']]);
+        self::assertSame('550 <[redacted]> and <[redacted]> rejected', $app[0]['error']);
+
+        // Sender and recipient of the same row (a copy to oneself): the body was received, so it is exported.
+        $recorder->sent(null, (new Email())->from('carl@example.com')->to('dana@example.com')->cc('carl@example.com')->subject('Copy')->text('For dana@example.com, copy to carl@example.com'), 'smtp', null, null);
+        $carl = $recorder->export(SentMailPersonalDataSubject::fromEmail('carl@example.com'));
+        self::assertSame(['recipient', 'sender'], $carl[0]['roles']);
+        self::assertSame('For [redacted], copy to carl@example.com', $carl[0]['text_body']);
+    }
+
+    public function testExportWithoutStoredBodiesHasNullBodies(): void
+    {
+        $kernel   = $this->bootKernel();
+        $recorder = $this->service($kernel, SentMailRecorder::class);
+        $recorder->sent(null, (new Email())->from('app@example.com')->to('ana@example.com')->subject('S')->text('Hi ana@example.com'), 'smtp', null, null);
+        // A redacted sender (an earlier erasure) has no address to mask.
+        $this->connection($kernel)->executeStatement('UPDATE mail_kit_sent_mail SET sender = ?', [SentMailRecorder::REDACTED]);
+
+        $rows = $recorder->export(SentMailPersonalDataSubject::fromEmail('ana@example.com'));
+        self::assertCount(1, $rows);
+        self::assertSame([null, null, null], [$rows[0]['error'], $rows[0]['html_body'], $rows[0]['text_body']]);
+    }
+
+    /**
+     * 2.9.0 (ZDL-MK-L2): an erasure that removes the queued row of a message still waiting in a queue or a retry is
+     * not undone by the later outcome: nothing is written back, and an info line without the address says so.
+     */
+    public function testAQueuedRowErasedBeforeItsOutcomeIsNotWrittenBack(): void
+    {
+        $kernel   = $this->bootKernel(['log' => ['store_bodies' => true]]);
+        $logger   = new RecordingLogger();
+        $doctrine = $this->container($kernel)->get('doctrine');
+        self::assertInstanceOf(ManagerRegistry::class, $doctrine);
+        $recorder = new SentMailRecorder($doctrine, storeBodies: true, logger: $logger);
+        $db       = $this->connection($kernel);
+        $email    = (new Email())->from('app@example.com')->to('ana@example.com')->subject('For ana@example.com')->text('Body ana@example.com');
+
+        $queued = $recorder->queued($email);
+        self::assertNotNull($queued);
+        self::assertSame(['deleted' => 1, 'unlinked' => 0, 'redacted' => 0], $recorder->forgetAddress('ana@example.com'));
+
+        self::assertNull($recorder->sent($queued, $email, 'smtp', 'provider-1', 10));
+        self::assertNull($recorder->failed($queued, $email, 'smtp', 'retry failed for ana@example.com'));
+        self::assertSame(0, (int) $db->fetchOne('SELECT COUNT(*) FROM mail_kit_sent_mail'));
+        self::assertSame(0, (int) $db->fetchOne('SELECT COUNT(*) FROM mail_kit_sent_mail_body'));
+        self::assertSame([], $recorder->export(SentMailPersonalDataSubject::fromEmail('ana@example.com')));
+        self::assertTrue($logger->has('removed while the message was queued'));
+        self::assertSame(['info', 'info'], array_values(array_map(static fn (array $record): mixed => $record['level'], array_filter($logger->records, static fn (array $record): bool => str_contains($record['message'], 'removed while the message was queued')))));
+        foreach ($logger->records as $record) {
+            self::assertStringNotContainsString('ana@example.com', (string) json_encode($record));
+        }
+
+        // The same after the retention purge; a row that still exists is updated as before.
+        $other = $recorder->queued($email);
+        self::assertNotNull($other);
+        self::assertSame(1, $recorder->purgeBefore(new DateTimeImmutable('+1 day')));
+        self::assertNull($recorder->sent($other, $email, 'smtp', null, null));
+        $kept = $recorder->queued($email);
+        self::assertSame($kept, $recorder->sent($kept, $email, 'smtp', null, null));
+        self::assertSame(['sent'], $db->fetchFirstColumn('SELECT status FROM mail_kit_sent_mail'));
     }
 
     /**

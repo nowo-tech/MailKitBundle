@@ -31,6 +31,7 @@ use Symfony\Component\Mime\RawMessage;
 use Symfony\Contracts\Service\ResetInterface;
 use Throwable;
 
+use function method_exists;
 use function sprintf;
 use function strlen;
 
@@ -153,6 +154,20 @@ final class RuntimeTransport implements TransportInterface, ResetInterface
         $this->checkedDsn   = null;
         $this->checkedError = null;
         $this->notifying    = false;
+    }
+
+    /**
+     * Stops the SMTP-like transports behind this one (the framework transport and the cached runtime one), which
+     * reconnect on the next message. Symfony 8.2 calls `close()` on the transports service at `kernel.reset`, and the
+     * tag moves to this decorator; transports without `close()` (earlier versions, other kinds) are left alone.
+     */
+    public function close(): void
+    {
+        foreach ([$this->fallback, $this->resolved] as $transport) {
+            if ($transport instanceof TransportInterface && method_exists($transport, 'close')) {
+                $transport->close();
+            }
+        }
     }
 
     /**

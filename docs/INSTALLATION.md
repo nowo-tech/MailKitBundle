@@ -14,7 +14,7 @@
 
 ## Requirements
 
-- PHP `>=8.2 <8.6`; Symfony **7.4**, **8.0** or **8.1** (8.x requires PHP 8.4+)
+- PHP `>=8.2 <8.7`; Symfony **7.4**, **8.0** or **8.1** (8.x requires PHP 8.4+)
 - `symfony/mailer` with `framework.mailer` configured (the fallback transport)
 - `nowo-tech/instance-settings-bundle` ^1.3.1 — **suggested since 2.0, require it yourself** for the default setup (the
   `mailer` settings section); it needs `nowo-tech/doctrine-encrypt-bundle` configured (the DSN and the API key are

@@ -43,6 +43,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `RuntimeTransport::close()`: Symfony 8.2 calls `close()` on the transports service at `kernel.reset`, and the tag moves to this decorator, so the call failed with an undefined method. It now closes the framework transport and the cached runtime one when they can be closed.
+
+### Changed
+
+- PHP 8.6: `composer.json` allows PHP below 8.7 (was below 8.6). CI adds a forward-compatibility workflow with a
+  PHP 8.6 cell and a Symfony 8.2 cell (stable Symfony 8.2.0).
+
 ## [2.9.0] - 2026-11-28
 
 Planned as **2.9.0**: fixes to the GDPR erasure of the sent-mail log, and a more complete personal-data export (pre-tag

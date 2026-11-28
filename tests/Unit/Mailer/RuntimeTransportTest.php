@@ -23,7 +23,9 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Component\Mailer\Envelope;
 use Symfony\Component\Mailer\Exception\TransportException;
 use Symfony\Component\Mailer\MailerInterface;
+use Symfony\Component\Mailer\SentMessage;
 use Symfony\Component\Mailer\Transport;
+use Symfony\Component\Mailer\Transport\TransportInterface;
 use Symfony\Component\Mime\Address;
 use Symfony\Component\Mime\Email;
 use Symfony\Component\Mime\RawMessage;
@@ -55,6 +57,54 @@ final class RuntimeTransportTest extends TestCase
         self::assertSame('mail-kit://runtime', (string) $transport);
         $provider->dsn = null;
         self::assertSame('default', $transport->currentLabel());
+    }
+
+    public function testCloseStopsTheFallbackAndTheCachedTransportsThatCanClose(): void
+    {
+        $fallback = new class('fallback', $this->store) extends MemoryTransport {
+            public int $closes = 0;
+
+            public function close(): void
+            {
+                ++$this->closes;
+            }
+        };
+        $factory   = new Transport([new MemoryTransportFactory($this->store)]);
+        $transport = new RuntimeTransport(
+            $fallback,
+            new StaticDsnProvider('memory://one'),
+            new MailerDsnValidator(['memory'], new DsnHostGuard(['one'], resolveDns: false), $factory),
+            $factory,
+            new SenderPolicy(new MailSettings(new FakeSettings(['mailer.from' => 'noreply@example.com']))),
+        );
+
+        $transport->close();
+        self::assertSame(1, $fallback->closes, 'nothing cached yet');
+
+        $transport->send($this->email());
+        $transport->close();
+        self::assertSame(2, $fallback->closes, 'a cached transport without close() is left alone');
+
+        // a plain TransportInterface (no close()) as the fallback is left alone too
+        $plain = new RuntimeTransport(
+            new class implements TransportInterface {
+                public function send(RawMessage $message, ?Envelope $envelope = null): ?SentMessage
+                {
+                    return null;
+                }
+
+                public function __toString(): string
+                {
+                    return 'plain://';
+                }
+            },
+            new StaticDsnProvider(),
+            new MailerDsnValidator(['memory'], new DsnHostGuard(['one'], resolveDns: false), $factory),
+            $factory,
+            new SenderPolicy(new MailSettings(new FakeSettings(['mailer.from' => 'noreply@example.com']))),
+        );
+        $plain->close();
+        self::assertSame(2, $fallback->closes);
     }
 
     public function testFallbackRawMessagesAndSendVia(): void

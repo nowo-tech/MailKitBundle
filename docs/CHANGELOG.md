@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[2.9.0] - 2026-11-28](#290---2026-11-28)
 - [[2.8.0] - 2026-11-27](#280---2026-11-27)
 - [[2.7.0] - 2026-11-27](#270---2026-11-27)
 - [[2.6.0] - 2026-11-27](#260---2026-11-27)
@@ -42,9 +43,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-11-28
+
 Planned as **2.9.0**: fixes to the GDPR erasure of the sent-mail log, and a more complete personal-data export (pre-tag
 audit of 2.8.0). No schema change, no configuration change. Two contract changes (the exception of a lock conflict in
-the erasure's own transaction, and three new keys in the export rows): see [UPGRADING](UPGRADING.md#unreleased).
+the erasure's own transaction, and three new keys in the export rows): see [UPGRADING](UPGRADING.md#to-290).
 
 ### Changed
 

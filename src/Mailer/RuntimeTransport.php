@@ -164,7 +164,7 @@ final class RuntimeTransport implements TransportInterface, ResetInterface
     public function close(): void
     {
         foreach ([$this->fallback, $this->resolved] as $transport) {
-            if ($transport !== null && method_exists($transport, 'close')) {
+            if ($transport instanceof TransportInterface && method_exists($transport, 'close')) {
                 $transport->close();
             }
         }

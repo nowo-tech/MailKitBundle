@@ -260,8 +260,14 @@ here (it would be compiled into the container). See [USAGE](USAGE.md#db-only-mod
 
 ## personal_data
 
-Since 1.7. The ports themselves (`Log\SentMailErasureInterface`, `Log\SentMailPersonalDataEraserInterface`, `Log\SentMailPersonalDataExporterInterface`) are
-always registered; this node only drives the UserKit bridge. See [USAGE — GDPR erasure and export](USAGE.md#gdpr-erasure-and-export).
+Since 1.7. The ports themselves (`Log\SentMailErasureInterface`, `Log\SentMailPersonalDataEraserInterface`, `Log\SentMailPersonalDataExporterInterface`, and since 2.8 the tag-scoped
+`Log\SentMailTaggedPersonalDataEraserInterface` / `Log\SentMailTaggedPersonalDataExporterInterface`) are always registered; this node only drives the UserKit bridge. See [USAGE — GDPR erasure and export](USAGE.md#gdpr-erasure-and-export).
+
+The tag-scoped aliases (2.8) point straight at `Log\SentMailRecorder`, not at the 1.7 aliases. If you
+decorate or replace `Log\SentMailPersonalDataEraserInterface` or `Log\SentMailPersonalDataExporterInterface` (to add
+an audit trail, for example), that decoration does **not** apply to `eraseTagged()` / `exportTagged()`. Decorate
+`Log\SentMailTaggedPersonalDataEraserInterface` and `Log\SentMailTaggedPersonalDataExporterInterface` as well. MailKit
+will not change this wiring in a patch release.
 
 | Key | Default | Description |
 | --- | --- | --- |
@@ -610,7 +616,7 @@ REQ-CFG-001 does not apply to the mailer: the bundle has one configuration tree.
 
 Parameters: `nowo_mail_kit.doctrine.table_prefix`, `.web_ui.enabled`, `.web_ui.path_prefix`, `.log.enabled`, `.log.retention_days`, `.resend.enabled`, `.security.allow_unauthenticated`.
 
-Public services: `Nowo\MailKitBundle\Brand\BrandedEmailHelper` (1.4), `Nowo\MailKitBundle\Mailer\RuntimeTransport`, `Readiness\OutboundMailReadiness`, `Dsn\MailerDsnValidator`, `TestMail\TestMailSender`, `Log\SentMailRecorder` and `Log\SentMailRepository` (log on), `Resend\ResendApiChecker` (Resend on), `nowo_mail_kit.outbound_mail_ready_checker` (AuthKit installed), `Graph\Send\GraphMailSender` and the `Graph\GraphMailboxProviderInterface` alias (`graph.enabled`, 1.8), `Tracking\EmailTracker` and the `Tracking\EmailTrackingReaderInterface` / `Tracking\EmailTrackingPersonalDataInterface` aliases (`tracking.enabled`, 1.10). Interfaces: `Dsn\MailerDsnProviderInterface`, `Security\MailKitAccessCheckerInterface`, `Log\SentMailErasureInterface`, `Log\SentMailPersonalDataEraserInterface`, `Log\SentMailPersonalDataExporterInterface` and `Log\SentMailPersonalDataSubjectResolverInterface` (1.7). With UserKit: `Integration\UserKit\EmailsReceivedPersonalDataEraser` and `Integration\UserKit\EmailsReceivedPersonalDataExportProvider` (private, tagged); with `tracking.enabled` also `Integration\UserKit\EmailTrackingPersonalDataEraser` / `EmailTrackingPersonalDataExportProvider` (`email_tracking`). With `templates.enabled` (2.7.0): public `Template\Service\TemplateLibraryInterface`, `TemplateRendererInterface` and `TemplatePersonalDataInterface` aliases; with UserKit and `personal_data.enabled` also `Integration\UserKit\EmailTemplatesPersonalDataEraser` / `EmailTemplatesPersonalDataExportProvider` (`email_templates`).
+Public services: `Nowo\MailKitBundle\Brand\BrandedEmailHelper` (1.4), `Nowo\MailKitBundle\Mailer\RuntimeTransport`, `Readiness\OutboundMailReadiness`, `Dsn\MailerDsnValidator`, `TestMail\TestMailSender`, `Log\SentMailRecorder` and `Log\SentMailRepository` (log on), `Resend\ResendApiChecker` (Resend on), `nowo_mail_kit.outbound_mail_ready_checker` (AuthKit installed), `Graph\Send\GraphMailSender` and the `Graph\GraphMailboxProviderInterface` alias (`graph.enabled`, 1.8), `Tracking\EmailTracker` and the `Tracking\EmailTrackingReaderInterface` / `Tracking\EmailTrackingPersonalDataInterface` aliases (`tracking.enabled`, 1.10). Interfaces: `Dsn\MailerDsnProviderInterface`, `Security\MailKitAccessCheckerInterface`, `Log\SentMailErasureInterface`, `Log\SentMailPersonalDataEraserInterface`, `Log\SentMailPersonalDataExporterInterface` and `Log\SentMailPersonalDataSubjectResolverInterface` (1.7), `Log\SentMailTaggedPersonalDataEraserInterface` and `Log\SentMailTaggedPersonalDataExporterInterface` (2.8). With UserKit: `Integration\UserKit\EmailsReceivedPersonalDataEraser` and `Integration\UserKit\EmailsReceivedPersonalDataExportProvider` (private, tagged); with `tracking.enabled` also `Integration\UserKit\EmailTrackingPersonalDataEraser` / `EmailTrackingPersonalDataExportProvider` (`email_tracking`). With `templates.enabled` (2.7.0): public `Template\Service\TemplateLibraryInterface`, `TemplateRendererInterface` and `TemplatePersonalDataInterface` aliases; with UserKit and `personal_data.enabled` also `Integration\UserKit\EmailTemplatesPersonalDataEraser` / `EmailTemplatesPersonalDataExportProvider` (`email_templates`).
 
 ## Fail-closed checks
 

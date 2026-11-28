@@ -21,12 +21,14 @@ final readonly class SentMailPersonalDataErasedEvent
      * @param int $deleted log rows deleted (with their bodies)
      * @param int $redacted subjects of other rows and stored bodies where the address was masked
      * @param int $unlinked rows kept for their other recipients, with the address removed
+     * @param string|null $tag the tag the erasure was limited to (2.8, `eraseTagged()`); null = every row
      */
     public function __construct(
         public string $email,
         public int $deleted,
         public int $redacted,
         public int $unlinked = 0,
+        public ?string $tag = null,
     ) {
     }
 

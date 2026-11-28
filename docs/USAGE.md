@@ -454,6 +454,8 @@ implementations on a host without Doctrine.
 | `Log\SentMailErasureInterface` (1.6; shared rows unlinked since 1.7) | `forgetAddress(string $email)` | `['deleted' => n, 'unlinked' => n, 'redacted' => n]`, see [What is and is not erased](#what-is-and-is-not-erased). |
 | `Log\SentMailPersonalDataEraserInterface` (1.7) | `erase(SentMailPersonalDataSubject $subject)` | `Log\SentMailErasureResult` (`deleted`, `unlinked`, `redacted`, `toArray()`, `total()`): the same erasure as `forgetAddress()`, with a validated subject. |
 | `Log\SentMailPersonalDataExporterInterface` (1.7) | `export(SentMailPersonalDataSubject $subject)` | List of rows, oldest id first. |
+| `Log\SentMailTaggedPersonalDataEraserInterface` (2.8) | `eraseTagged(SentMailPersonalDataSubject $subject, string $tag)` | `Log\SentMailErasureResult`: the same erasure, limited to the rows whose tag is exactly `$tag`. |
+| `Log\SentMailTaggedPersonalDataExporterInterface` (2.8) | `exportTagged(SentMailPersonalDataSubject $subject, string $tag)` | The export rows with exactly that tag. |
 | `Log\SentMailPersonalDataSubjectResolverInterface` (1.7, SPI) | `subjectsFor(object $user, ?string $originalIdentifier)` | The addresses of a host user (used by the UserKit bridge). |
 
 `Log\SentMailPersonalDataSubject::fromEmail($email)` builds the subject. It refuses an empty value, a value without
@@ -471,17 +473,35 @@ $result  = $eraser->erase($subject);           // SentMailErasureResult: deleted
 // 1.6 port, same erasure: $erasure->forgetAddress('alice@example.com') returns ['deleted' => 3, 'unlinked' => 2, 'redacted' => 1]
 ```
 
+Tag-scoped ports (2.8): a module that shares the log with other owners (for example one tenant of a multi-tenant
+application) tags every message it sends (`MailHeaders::tag($email, 'crm:7f3a…')`) and erases or exports with that tag
+only. Rows with another tag, a case variant of it or no tag are never read or changed, also their subjects and bodies;
+everything else (exact address match, unlinking, masking, idempotency, transactions, event) is as above, and the event
+carries the tag. The tag is trimmed and must be 1 to 64 characters without control characters
+(`InvalidArgumentException` otherwise; it is never truncated).
+
+```php
+$rows   = $taggedExporter->exportTagged($subject, 'crm:7f3a…');
+$result = $taggedEraser->eraseTagged($subject, 'crm:7f3a…');
+```
+
 One exported row:
 
 ```json
 {"id": "0196…", "roles": ["recipient"], "status": "sent", "template": "welcome", "subject": "Welcome",
- "queued_at": "2026-11-11T10:00:00+00:00", "sent_at": "2026-11-11T10:00:01+00:00", "failed_at": null}
+ "queued_at": "2026-11-11T10:00:00+00:00", "sent_at": "2026-11-11T10:00:01+00:00", "failed_at": null,
+ "error": null, "html_body": "<p>Welcome</p>", "text_body": "Welcome"}
 ```
 
-`roles` holds `recipient` (to, cc or bcc), `sender` or both. `template` is the `MailHeaders::tag()` category. The
-export is envelope data only. It never includes the bodies: they may hold other people's data and masked secrets, and
-they are stored only with `log.store_bodies`. It never includes the other recipients, the transport, the provider
-message id or the error text either. Both operations are idempotent: a second erasure returns zero counts.
+`roles` holds `recipient` (to, cc or bcc), `sender` or both. `template` is the `MailHeaders::tag()` category. Since
+2.9.0 a row also carries the delivery `error` (scrubbed when it was stored) and the stored body (`html_body`,
+`text_body`; null unless `log.store_bodies` kept one). Bodies are exported only for rows the address **received** (to,
+cc or bcc): a row where it is only the sender (mail sent from that address to other people, for example a shared
+system From) exports its envelope and error but no body. The values masked when the body was stored stay masked, and
+the addresses of the row's other recipients and sender are replaced by `[redacted]` in the error and the body. Masking
+is address based (the literal and URL-encoded forms), not name based. The export
+never includes the other recipients, the transport or the provider message id. Both operations are idempotent: a
+second erasure returns zero counts.
 
 ### Matching rule
 
@@ -527,6 +547,16 @@ manager:
   Listeners must not log the address verbatim.
 - **Inside your transaction** (UserKit runs all erasers inside one): it joins it and dispatches **no event**, because
   your transaction may still roll back. The returned counts are the outcome.
+- **Concurrent erasures** (2.9.0): each row is read again under a row lock (`SELECT … FOR UPDATE` on MySQL / MariaDB
+  and PostgreSQL) before it is written back, so two erasures of people who share a row never put each other's address
+  back. The second one waits for the first. A deadlock or a lock wait timeout rolls the erasure back: in its own
+  transaction it is thrown as `Nowo\TransactionContract\TransientStorageFailure` (nothing was committed, run it again);
+  inside yours the database error reaches you, and your transaction decides.
+- **Mail still in a queue** (2.9.0): when an erasure or the retention purge removes the `queued` row of a message that
+  is still waiting in Messenger or in a retry, the later "sent" or "failed" outcome is not written back. Nothing about
+  the erased person returns to the log; the outcome is logged at info level without the address. A queued row that
+  your own transaction rolled back (the message had already gone to a non-transactional transport) is not re-created
+  either: send after your commit.
 
 With a separate entity manager / connection for the log (`doctrine.entity_manager`), the erasure is not part of the
 transaction of your user's connection (UserKit's): it commits on its own. If a later eraser fails and UserKit rolls

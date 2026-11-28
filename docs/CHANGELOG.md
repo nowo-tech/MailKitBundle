@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[2.9.0] - 2026-11-28](#290---2026-11-28)
+- [[2.8.0] - 2026-11-27](#280---2026-11-27)
 - [[2.7.0] - 2026-11-27](#270---2026-11-27)
 - [[2.6.0] - 2026-11-27](#260---2026-11-27)
 - [[2.5.0] - 2026-11-27](#250---2026-11-27)
@@ -44,7 +46,85 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 
 - PHP 8.6: `composer.json` allows PHP below 8.7 (was below 8.6). CI adds a forward-compatibility workflow with a
-  PHP 8.6 cell and a Symfony 8.2 cell (release candidates, allowed to fail until 8.2.0 is stable).
+  PHP 8.6 cell and a Symfony 8.2 cell (stable Symfony 8.2.0).
+
+## [2.9.0] - 2026-11-28
+
+Planned as **2.9.0**: fixes to the GDPR erasure of the sent-mail log, and a more complete personal-data export (pre-tag
+audit of 2.8.0). No schema change, no configuration change. Two contract changes (the exception of a lock conflict in
+the erasure's own transaction, and three new keys in the export rows): see [UPGRADING](UPGRADING.md#to-290).
+
+### Changed
+
+- **A lock conflict in the erasure's own transaction is thrown as `TransientStorageFailure`.** When no transaction is
+  open on the log connection, `forgetAddress()`, `erase()` and `eraseTagged()` now run as one
+  `nowo-tech/transaction-doctrine` unit. A deadlock or a lock wait timeout rolls it back and is thrown as
+  `Nowo\TransactionContract\TransientStorageFailure` (the database error is its previous; nothing committed, a retry
+  is safe) instead of the DBAL `RetryableException` subclasses. Inside the caller's transaction the database error
+  reaches the caller, as before. The three eraser interfaces document it with `@throws`.
+- **The personal-data export also returns the error text and the stored body.** `export()` / `exportTagged()` and the
+  UserKit `emails_received` section return three more keys per row: `error`, `html_body` and `text_body` (null when
+  there is none; bodies exist only when `log.store_bodies` kept one). Bodies are exported only for rows the address
+  received (to, cc, bcc), never for rows where it is only the sender. The addresses of the row's other recipients and
+  sender are masked in the error and the body, and the other recipients are still never exported. Released versions
+  (>= 1.7.0) left the error and the body out of the export.
+
+### Fixed
+
+- **Concurrent erasures could restore an erased address** (affected releases >= 1.0.0 for the masking of subjects,
+  errors and stored bodies; >= 1.7.0 for the unlink of shared rows). The erasure read a row and wrote it back without
+  a lock. When two erasures touched the same row at the same time (Ana and Bob, both recipients of one message, or
+  both named in one subject), the second could write back the recipient list, subject, error or stored body it had
+  read before the first one committed, and put the first person's address back. Every row is now read again under a
+  row lock (`SELECT … FOR UPDATE` on MySQL / MariaDB and PostgreSQL, by id, in id order within each statement) inside
+  the erasure's transaction before it is written back; the second erasure waits for the first and works on its
+  result. Two erasures can still deadlock across their steps: one is rolled back and can be run again (see
+  [CONCURRENCY — Residual risks](CONCURRENCY.md#residual-risks)). Race tests on MySQL 8.4, MariaDB 11.4 and
+  PostgreSQL 16 / 17.
+- **The outcome of a queued message could re-create an erased row** (affected releases >= 1.0.0). When an erasure
+  (or the retention purge) removed the `queued` row of a message still waiting in Messenger or in a retry, the later
+  `sent()` / `failed()` found no row and inserted a new full one, with the erased address, subject, tag and stored
+  body. A known row id whose row is gone is now treated as removed: nothing is written back, and an info line without
+  the address is logged. A message that was never queued (no id) is still recorded as before.
+
+### Notes
+
+- No security advisory: the fixed issues are contention and timing windows of the erasure, recorded in this
+  changelog.
+- The tag-scoped ports of 2.8.0 point straight at `SentMailRecorder`. A host that decorated the 1.7 eraser or exporter
+  alias must decorate the tag-scoped aliases as well; see
+  [CONFIGURATION — personal_data](CONFIGURATION.md#personal_data). The wiring is unchanged.
+
+## [2.8.0] - 2026-11-27
+
+Planned as **2.8.0**: tag-scoped GDPR erasure and export of the sent-mail log, for a module that owns only the rows it
+tagged (for example one tenant's messages). Additive, no BC break, no schema change; hosts need not act.
+
+### Added
+
+- `Log\SentMailTaggedPersonalDataEraserInterface::eraseTagged(SentMailPersonalDataSubject, string $tag)`: the erasure of
+  `SentMailPersonalDataEraserInterface::erase()` limited to the rows whose tag (`MailHeaders::tag()`) is exactly the
+  given one. Same semantics within the tag: exact address match, rows with other recipients unlinked and the address
+  masked, rows with nobody else deleted with their body, the address masked in the subjects, errors and stored bodies of
+  the other rows with that tag; idempotent; joins the caller's transaction or runs its own and dispatches
+  `SentMailPersonalDataErasedEvent` after the commit. Rows with another tag, a case variant of the tag or no tag are
+  never read or changed.
+- `Log\SentMailTaggedPersonalDataExporterInterface::exportTagged(SentMailPersonalDataSubject, string $tag)`: the export
+  of `SentMailPersonalDataExporterInterface::export()` limited to the same rows, same row shape.
+- Both ports are always registered: `SentMailRecorder` whenever Doctrine is, `NullSentMailErasure` /
+  `NullSentMailPersonalDataExporter` otherwise. Separate interfaces, so existing implementations of the 1.7 ports keep
+  compiling.
+- `SentMailRecorder::tagFilter()`: the tag a scoped call matches, trimmed like `MailHeaders::tag()` stores it; an empty
+  tag, control characters, invalid UTF-8 or more than 64 characters (`MailHeaders::TAG_MAX`, the `tag` column length)
+  throw `InvalidArgumentException` instead of being truncated.
+- `Event\SentMailPersonalDataErasedEvent::$tag` (optional last constructor argument, default `null`): the tag a scoped
+  erasure was limited to.
+
+### Notes
+
+- Exact tag match: SQL pre-filters with `tag = ?` and every row is re-checked in PHP with `===`, so a case- or
+  pad-insensitive collation (MySQL / MariaDB) never widens the scope. No index on `tag` is added: the lookup keeps the
+  address pre-filter of 1.7 (`recipient_index` / `sender`) and only narrows it, so no migration is needed.
 
 ## [2.7.0] - 2026-11-27
 

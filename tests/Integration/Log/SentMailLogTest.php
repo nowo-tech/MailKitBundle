@@ -49,10 +49,11 @@ final class SentMailLogTest extends KernelTestCase
         self::assertSame('second attempt failed', $row->getError());
         self::assertNull($repository->findBody($id));
 
-        // An unknown id (purged queued row) still records the outcome; raw messages have no envelope data.
-        $inserted = $recorder->sent('018f0000-0000-7000-8000-000000000000', new RawMessage('raw'), 'default', null, null);
-        self::assertNotNull($inserted);
-        self::assertNotSame('018f0000-0000-7000-8000-000000000000', $inserted, 'a new row replaces the purged one');
+        // 2.9.0 (ZDL-MK-L2): a known id whose row is gone (erased or purged while queued) is never written back.
+        self::assertNull($recorder->sent('018f0000-0000-7000-8000-000000000000', new RawMessage('raw'), 'default', null, null));
+        self::assertNull($recorder->failed('018f0000-0000-7000-8000-000000000000', new RawMessage('raw'), 'default', 'x'));
+        // Without a queued row (id null) the outcome is still recorded; raw messages have no envelope data.
+        self::assertNotNull($recorder->sent(null, new RawMessage('raw'), 'default', null, null));
         self::assertNotNull($recorder->failed(null, new RawMessage('raw'), 'default', 'x'));
 
         $now = new DateTimeImmutable();

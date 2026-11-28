@@ -101,5 +101,21 @@ final class PersonalDataSubjectTest extends TestCase
         $none = (new NullSentMailErasure())->erase(SentMailPersonalDataSubject::fromEmail('a@example.com'));
         self::assertSame(['deleted' => 0, 'unlinked' => 0, 'redacted' => 0], $none->toArray());
         self::assertSame(0, $none->total());
+        self::assertSame(0, (new NullSentMailErasure())->eraseTagged(SentMailPersonalDataSubject::fromEmail('a@example.com'), 'crm:a')->total());
+        self::assertSame([], (new NullSentMailPersonalDataExporter())->exportTagged(SentMailPersonalDataSubject::fromEmail('a@example.com'), 'crm:a'));
+        self::assertSame('crm:a', (new SentMailPersonalDataErasedEvent('a@example.com', 0, 0, 0, 'crm:a'))->tag);
+        self::assertNull((new SentMailPersonalDataErasedEvent('a@example.com', 0, 0))->tag);
+    }
+
+    public function testNullPortsStillRefuseInvalidTags(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        (new NullSentMailErasure())->eraseTagged(SentMailPersonalDataSubject::fromEmail('a@example.com'), ' ');
+    }
+
+    public function testNullExporterRefusesInvalidTags(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        (new NullSentMailPersonalDataExporter())->exportTagged(SentMailPersonalDataSubject::fromEmail('a@example.com'), "a\x01");
     }
 }

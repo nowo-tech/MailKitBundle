@@ -3,6 +3,8 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 2.9.0](#to-290)
+- [To 2.8.0](#to-280)
 - [To 2.7.0](#to-270)
   - [Stored e-mail templates (2.7.0, opt-in)](#stored-e-mail-templates-270-opt-in)
   - [Images in template HTML: https only](#images-in-template-html-https-only)
@@ -79,6 +81,48 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+## To 2.9.0
+
+From **2.8.0**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
+
+No schema or configuration change. Two contract changes may need a code change:
+
+- **Catch `TransientStorageFailure` around an erasure that MailKit runs in its own transaction.** When no transaction
+  is open on the log connection, `forgetAddress()`, `erase()` and `eraseTagged()` now throw
+  `Nowo\TransactionContract\TransientStorageFailure` on a deadlock or a lock wait timeout (nothing was committed; run
+  the erasure again). Code that caught Doctrine DBAL's `RetryableException` (or `DeadlockException`,
+  `LockWaitTimeoutException`) for this case must catch `TransientStorageFailure` instead; the DBAL exception is its
+  previous. Inside your own transaction nothing changes: the DBAL error reaches you.
+
+  ```php
+  use Nowo\TransactionContract\TransientStorageFailure;
+
+  try {
+      $eraser->erase($subject);
+  } catch (TransientStorageFailure $conflict) {
+      // Nothing was committed: retry later (or answer 409 with Retry-After).
+  }
+  ```
+
+- **Implementers and decorators of the exporter ports add three keys.** The row shape of
+  `SentMailPersonalDataExporterInterface::export()` and `SentMailTaggedPersonalDataExporterInterface::exportTagged()`
+  gains `error`, `html_body` and `text_body` (`string|null` each). Your own implementation or decorator must return
+  them (null is fine) to match the documented `@return` shape. Code that only reads the existing keys needs no change.
+  The export now carries the stored body of the rows the person received: see
+  [USAGE — GDPR erasure and export](USAGE.md#gdpr-erasure-and-export).
+
+## To 2.8.0
+
+From **2.7.0**:
+
+```bash
+composer update nowo-tech/mail-kit-bundle
+```
 
 ## To 2.7.0
 

@@ -5,18 +5,30 @@ declare(strict_types=1);
 namespace Nowo\MailKitBundle\Log;
 
 /**
- * {@see SentMailPersonalDataExporterInterface} on a host without Doctrine (the log requires it): the bundle cannot have
+ * {@see SentMailPersonalDataExporterInterface} and {@see SentMailTaggedPersonalDataExporterInterface} (2.8) on a host without Doctrine (the log requires it): the bundle cannot have
  * stored anything, so there is nothing to export. With Doctrine registered the port is always {@see SentMailRecorder}.
  */
-final readonly class NullSentMailPersonalDataExporter implements SentMailPersonalDataExporterInterface
+final readonly class NullSentMailPersonalDataExporter implements SentMailPersonalDataExporterInterface, SentMailTaggedPersonalDataExporterInterface
 {
     /**
      * Nothing stored.
      *
-     * @return list<array{id: string, roles: list<'recipient'|'sender'>, status: string, template: string|null, subject: string, queued_at: string|null, sent_at: string|null, failed_at: string|null}>
+     * @return list<array{id: string, roles: list<'recipient'|'sender'>, status: string, template: string|null, subject: string, queued_at: string|null, sent_at: string|null, failed_at: string|null, error: string|null, html_body: string|null, text_body: string|null}>
      */
     public function export(SentMailPersonalDataSubject $subject): array
     {
+        return [];
+    }
+
+    /**
+     * Nothing stored; the tag is still validated like {@see SentMailRecorder::exportTagged()}.
+     *
+     * @return list<array{id: string, roles: list<'recipient'|'sender'>, status: string, template: string|null, subject: string, queued_at: string|null, sent_at: string|null, failed_at: string|null, error: string|null, html_body: string|null, text_body: string|null}>
+     */
+    public function exportTagged(SentMailPersonalDataSubject $subject, string $tag): array
+    {
+        SentMailRecorder::tagFilter($tag);
+
         return [];
     }
 }

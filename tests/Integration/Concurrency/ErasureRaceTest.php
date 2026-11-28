@@ -36,10 +36,10 @@ use function str_starts_with;
 use const JSON_THROW_ON_ERROR;
 
 /**
- * Audit ZDL-MK-L1 (2.8.1): two GDPR erasures of people who share one sent-mail log row, on two real connections to the
+ * Audit ZDL-MK-L1 (2.9.0): two GDPR erasures of people who share one sent-mail log row, on two real connections to the
  * same MySQL 8.4 / MariaDB 11 / PostgreSQL database (MAIL_KIT_TEST_DATABASE_URL; skipped on SQLite, which has no row
  * locks). Connection A erases one person at a chosen point of connection B's erasure of the other (a hook on B's
- * statements). Before 2.8.1 B wrote back the values it had read without a lock and restored the address A had just
+ * statements). Before 2.9.0 B wrote back the values it had read without a lock and restored the address A had just
  * erased. Lock waits are capped at one second.
  */
 #[Group('database')]

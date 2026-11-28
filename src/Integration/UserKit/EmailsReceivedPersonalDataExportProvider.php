@@ -14,7 +14,7 @@ use function array_values;
 /**
  * UserKit personal-data export section `emails_received` (1.7; registered like {@see EmailsReceivedPersonalDataEraser}):
  * the sent-mail log rows of every address of the user ({@see SentMailPersonalDataExporterInterface}: envelope, and since
- * 2.8.1 the error and the stored body), each row once even when it involves several of the user's addresses.
+ * 2.9.0 the error and the stored body), each row once even when it involves several of the user's addresses.
  */
 final readonly class EmailsReceivedPersonalDataExportProvider implements PersonalDataExportProviderInterface
 {

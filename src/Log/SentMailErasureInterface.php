@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\MailKitBundle\Log;
 
 use DateTimeImmutable;
+use Nowo\TransactionContract\TransientStorageFailure;
 
 /**
  * Erasure and retention port of the sent-mail log (1.6, rule 1): the entry point of an account-deletion use case
@@ -22,6 +23,10 @@ interface SentMailErasureInterface
      * The address is masked in the subjects and stored bodies of the remaining rows.
      *
      * @throws SentMailLogTableMissingException when a log table is missing while the entities are mapped
+     * @throws TransientStorageFailure when the erasure runs its own transaction (none open on the log
+     *                                 connection) and meets a deadlock or lock wait timeout: rolled back,
+     *                                 nothing committed, run it again (2.9.0). Inside the caller's
+     *                                 transaction the database error is thrown instead.
      *
      * @return array{deleted: int, unlinked: int, redacted: int}
      */

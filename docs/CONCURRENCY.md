@@ -24,7 +24,7 @@ request or a replayed Messenger message. It applies from **1.13.0**.
 - Each write uses an explicit control: a unique key plus a caught duplicate for "only one" rules, an atomic
   `UPDATE … SET n = n + 1` for counters, a conditional `UPDATE` for takeovers. MailKit never reads a value and then
   writes it back without a lock: the GDPR erasure, which must rewrite recipient lists, subjects and bodies, re-reads
-  each row under `SELECT … FOR UPDATE` first (2.8.1). Key columns compare exactly (binary NO PAD collation on MySQL and MariaDB, REQ-SEC-006).
+  each row under `SELECT … FOR UPDATE` first (2.9.0). Key columns compare exactly (binary NO PAD collation on MySQL and MariaDB, REQ-SEC-006).
 - A lock conflict on one of MailKit's own routes answers **409** with `X-Conflict-Code`. Host routes are never
   answered.
 
@@ -32,8 +32,8 @@ request or a replayed Messenger message. It applies from **1.13.0**.
 
 | Path | Transaction | Control | Conflict answer |
 | --- | --- | --- | --- |
-| Sent-mail log row (`SentMailRecorder::queued/sent/failed`) | One `INSERT` (plus the optional body row), or one `UPDATE … attempts = attempts + 1` by id; autocommit | New UUIDv7 primary key; atomic counter; a queued row removed meanwhile (erasure or purge) is not written back (2.8.1) | Best effort: a failure is logged and the e-mail is not affected (see [Residual risks](#residual-risks)) |
-| GDPR erasure of an address (`forgetAddress()` / `erase()` / `eraseTagged()`) | One transaction-doctrine unit (2.8.1; it was `transactional()`), or the caller's | Every pre-filtered row is re-read by id under a row lock (`SELECT … FOR UPDATE`, id order) before the unlink or the masking writes it back (2.8.1); exact re-check in PHP; delete by id in batches of 500 | `TransientStorageFailure` (nothing committed, CONFLICT_001) from its own unit, the database error inside the caller's; to the caller (UserKit eraser, `nowo:mail-kit:forget-recipient`) |
+| Sent-mail log row (`SentMailRecorder::queued/sent/failed`) | One `INSERT` (plus the optional body row), or one `UPDATE … attempts = attempts + 1` by id; autocommit | New UUIDv7 primary key; atomic counter; a queued row removed meanwhile (erasure or purge) is not written back (2.9.0) | Best effort: a failure is logged and the e-mail is not affected (see [Residual risks](#residual-risks)) |
+| GDPR erasure of an address (`forgetAddress()` / `erase()` / `eraseTagged()`) | One transaction-doctrine unit (2.9.0; it was `transactional()`), or the caller's | Every pre-filtered row is re-read by id under a row lock (`SELECT … FOR UPDATE`, id order) before the unlink or the masking writes it back (2.9.0); exact re-check in PHP; delete by id in batches of 500 | `TransientStorageFailure` (nothing committed, CONFLICT_001) from its own unit, the database error inside the caller's; to the caller (UserKit eraser, `nowo:mail-kit:forget-recipient`) |
 | Log retention (`purgeBefore()`, `nowo:mail-kit:purge`) | One `DELETE` per keyset batch | Idempotent (delete by id) | Exception to the command; run it again |
 | Graph inbound claim (`GraphInboundStore::claim()`) | One `INSERT`; inside a host transaction it runs in a savepoint, rolled back on any failure | Unique `message_key` plus a caught duplicate; stale takeover with a conditional `UPDATE … WHERE claimed_at < ?` | Messenger retries; the retry sees the claim |
 | Graph inbound decision (`complete()`) | One `UPDATE`, in a savepoint inside a host transaction | By key; one retry on a lock conflict outside a transaction | Rethrown, and the claim is kept (no second hand-over to your handler) |
@@ -173,7 +173,7 @@ twice:
   `TemplateKeyTaken`), two editors of one version (one winner, `TemplateVersionConflict`, no lost update), an
   overlapping save against an open transaction (a transient conflict, then the duplicate after the commit, the loser's
   transaction still usable).
-- `tests/Integration/Concurrency/ErasureRaceTest.php` (2.8.1): two erasures of people who share one row, one of them
+- `tests/Integration/Concurrency/ErasureRaceTest.php` (2.9.0): two erasures of people who share one row, one of them
   committing between the other's pre-filter and its locked read (no address comes back, the row is deleted once nobody
   is left), the same for the masking of subjects, errors and stored bodies, and an erasure that waits on a row another
   open transaction holds (`TransientStorageFailure`, nothing committed, the replay succeeds).
@@ -189,6 +189,10 @@ twice:
   row, and the e-mail is not affected. If you send mail **inside** your own database transaction, a deadlock on the
   log row can roll back your transaction on MySQL / MariaDB while MailKit only logs it. Send after your commit, or
   through Messenger (rule 9: no mail while holding locks).
+- **A queued row that is gone is not re-created.** When the queued row of a message was erased or purged, or was
+  rolled back with your own transaction while the message had already gone to a non-transactional transport (Redis,
+  AMQP, a synchronous send), the later "sent" / "failed" outcome is not written (2.9.0). The mail is delivered without
+  a log row, and an info line without the address records it. Send after your commit (rule 9).
 - **Two erasures can deadlock.** Each erasure locks the rows it unlinks, then the rows it masks. Two erasures that
   meet on rows in a different order can deadlock: the database rolls one back, and it is thrown as a
   `TransientStorageFailure` with nothing committed. Run it again. No address is ever written back from a stale read.

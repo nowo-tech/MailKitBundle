@@ -7,6 +7,7 @@ namespace Nowo\MailKitBundle\Log;
 use InvalidArgumentException;
 use Nowo\MailKitBundle\Event\SentMailPersonalDataErasedEvent;
 use Nowo\MailKitBundle\Mailer\MailHeaders;
+use Nowo\TransactionContract\TransientStorageFailure;
 
 /**
  * Erasure port of the sent-mail log limited to one tag (2.8): {@see SentMailPersonalDataEraserInterface::erase()} for
@@ -36,6 +37,10 @@ interface SentMailTaggedPersonalDataEraserInterface
      * @throws InvalidArgumentException for an empty tag, a tag with control characters or longer than
      *                                  {@see MailHeaders::TAG_MAX} characters
      * @throws SentMailLogTableMissingException when a log table is missing while the entities are mapped
+     * @throws TransientStorageFailure when the erasure runs its own transaction (none open on the log
+     *                                 connection) and meets a deadlock or lock wait timeout: rolled back,
+     *                                 nothing committed, run it again (2.9.0). Inside the caller's
+     *                                 transaction the database error is thrown instead.
      */
     public function eraseTagged(SentMailPersonalDataSubject $subject, string $tag): SentMailErasureResult;
 }

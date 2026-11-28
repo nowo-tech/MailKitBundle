@@ -140,7 +140,7 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
 
     /**
      * Marks the row sent (or inserts one when the message was never queued, id null); returns the row id (null when the
-     * write failed, or when the queued row was erased or purged meanwhile: it is not written back, 2.8.1).
+     * write failed, or when the queued row was erased or purged meanwhile: it is not written back, 2.9.0).
      */
     public function sent(?string $id, RawMessage $message, string $transport, ?string $providerMessageId, ?int $size): ?string
     {
@@ -157,7 +157,7 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
     /**
      * Marks the row failed with the (already public) error, scrubbed again and capped (or inserts one when there is no
      * queued row, id null); returns the row id (null when the write failed, or when the queued row was erased or purged
-     * meanwhile: it is not written back, 2.8.1).
+     * meanwhile: it is not written back, 2.9.0).
      */
     public function failed(?string $id, RawMessage $message, string $transport, string $error): ?string
     {
@@ -224,7 +224,7 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
      * runs in its own and {@see SentMailPersonalDataErasedEvent} is dispatched after the commit; inside the caller's
      * transaction it joins it and dispatches nothing (the returned counts are the outcome).
      *
-     * 2.8.1: every row is re-read under a row lock (`SELECT … FOR UPDATE` on MySQL / MariaDB and PostgreSQL) before it
+     * 2.9.0: every row is re-read under a row lock (`SELECT … FOR UPDATE` on MySQL / MariaDB and PostgreSQL) before it
      * is written back, so two concurrent erasures of people who share a row never restore each other's address. Its
      * own transaction is a transaction-doctrine unit: a deadlock or lock wait timeout rolls it back and is thrown as a
      * `TransientStorageFailure` (nothing committed: run it again).
@@ -343,16 +343,20 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
                 'queued_at' => $this->atom($connection, $row['queued_at']),
                 'sent_at'   => $this->atom($connection, $row['sent_at']),
                 'failed_at' => $this->atom($connection, $row['failed_at']),
-                // 2.8.1 (ZDL-MK-L3): the error and the stored body are data held about the subject too; the other
+                // 2.9.0 (ZDL-MK-L3): the error and the stored body are data held about the subject too; the other
                 // people of the row stay out (their addresses are masked, the recipient list is never exported).
                 'error'     => is_string($row['error']) ? $this->maskOthers($row['error'], $row, $forms) : null,
                 'html_body' => null,
                 'text_body' => null,
             ];
-            $source[(string) $row['id']] = $row;
+            // ZDT-MK-L1: bodies only of messages the subject received; a sender-only row (mail sent from the
+            // subject's address to other people) exports its envelope and error, never the body.
+            if (in_array('recipient', $roles, true)) {
+                $source[(string) $row['id']] = $row;
+            }
         }
-        if ($body && $rows !== []) {
-            foreach (array_chunk(array_keys($rows), self::PERSONAL_DATA_BATCH) as $batch) {
+        if ($body && $source !== []) {
+            foreach (array_chunk(array_keys($source), self::PERSONAL_DATA_BATCH) as $batch) {
                 foreach ($connection->fetchAllAssociative('SELECT id, html_body, text_body FROM ' . $this->bodyTable() . ' WHERE id IN (?)', [$batch], [ArrayParameterType::STRING]) as $stored) {
                     $id = (string) $stored['id'];
                     // `id IN (?)` may widen under a case-insensitive collation: only the exact ids.
@@ -369,7 +373,7 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
 
     /**
      * The text with the addresses of the row's other people (recipients and sender that are not the subject's forms)
-     * masked (2.8.1, export of the error and the stored body).
+     * masked (2.9.0, export of the error and the stored body).
      *
      * @param array<string, mixed> $row
      * @param list<string> $forms
@@ -504,7 +508,7 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
             // The caller's transaction may still roll back: no event, the counts are the outcome.
             $result = $this->eraseRows($connection, $forms, $body, $tag);
         } else {
-            // 2.8.1: one transaction-doctrine unit (REQ-RUNTIME-003): a lock conflict on the locked rows (ZDL-MK-L1) is
+            // 2.9.0: one transaction-doctrine unit (REQ-RUNTIME-003): a lock conflict on the locked rows (ZDL-MK-L1) is
             // rolled back and rethrown as a TransientStorageFailure (CONFLICT_001: nothing committed, a retry is safe).
             // @igor-ignore - Closure runs synchronously inside run(); it is not stored on the service.
             $result = DoctrineTransactionRunner::forConnection($connection, null, $this->logger)->run(fn (): array => $this->eraseRows($connection, $forms, $body, $tag));
@@ -528,7 +532,7 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
     {
         $ids      = [];
         $unlinked = 0;
-        // 2.8.1 (ZDL-MK-L1): every row is re-read under a row lock before it is written back, so two erasures of
+        // 2.9.0 (ZDL-MK-L1): every row is re-read under a row lock before it is written back, so two erasures of
         // people who share a row never restore each other's address from a stale read.
         foreach ($this->rowsOf($connection, $forms, ', recipients, subject, error', $tag, true) as [$row, $roles]) {
             $recipients = $this->withoutAddress($this->decodeRecipients($row['recipients']), $forms);
@@ -563,7 +567,7 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
         $scope     = $tag === null ? [] : [$tag];
         foreach ($forms as $form) {
             $pattern = '%' . self::likeEscape($form) . '%';
-            // The LIKE only picks the candidates; their values are re-read under a row lock (2.8.1).
+            // The LIKE only picks the candidates; their values are re-read under a row lock (2.9.0).
             $candidates = $this->withTag($connection->fetchAllAssociative('SELECT id, tag FROM ' . $this->table() . " WHERE (LOWER(subject) LIKE ? ESCAPE '!' OR LOWER(error) LIKE ? ESCAPE '!')" . $mainScope, [$pattern, $pattern, ...$scope]), $tag, 'tag');
             foreach ($this->locked($connection, $this->table(), 'id, tag, subject, error', $candidates) as $row) {
                 $subject = $this->mask((string) $row['subject'], $forms);
@@ -593,7 +597,7 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
     /**
      * Current values of the candidate rows, read by id under a row lock (`FOR UPDATE` on MySQL / MariaDB and
      * PostgreSQL; SQLite locks the whole database for a writer and has no row lock), in id order and batches of
-     * {@see self::PERSONAL_DATA_BATCH}, inside the erasure's transaction (2.8.1, ZDL-MK-L1). Rows deleted since the
+     * {@see self::PERSONAL_DATA_BATCH}, inside the erasure's transaction (2.9.0, ZDL-MK-L1). Rows deleted since the
      * pre-filter are gone; only exact ids are kept (a case-insensitive collation may widen `id IN (?)`).
      *
      * @param list<array<string, mixed>> $candidates rows with an `id`
@@ -660,7 +664,7 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
      * (index LIKE, sender IN), then an exact re-check in PHP (`===` on the index entries and the sender), in id batches.
      *
      * With a tag (2.8) only rows whose tag is exactly that one (SQL `tag = ?`, then `===` in PHP). With `$lock`
-     * (erasure, 2.8.1) the pre-filter reads only the ids and each page is re-read under a row lock ({@see self::locked()}).
+     * (erasure, 2.9.0) the pre-filter reads only the ids and each page is re-read under a row lock ({@see self::locked()}).
      *
      * @param list<string> $forms
      * @param string $columns extra columns, each preceded by a comma
@@ -687,7 +691,7 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
             $last  = $page === [] ? $last : (string) $page[count($page) - 1]['id'];
             $found = $this->withTag($page, $tag, 'row_tag');
             if ($lock) {
-                // 2.8.1 (ZDL-MK-L1): the roles and the values come from the row re-read under its lock.
+                // 2.9.0 (ZDL-MK-L1): the roles and the values come from the row re-read under its lock.
                 $found = $this->withTag($this->locked($connection, $this->table(), $select, $found), $tag, 'row_tag');
             }
             foreach ($found as $row) {
@@ -800,9 +804,10 @@ final readonly class SentMailRecorder implements SentMailErasureInterface, SentM
                 $types,
             );
             if ($updated === 0) {
-                // 2.8.1 (ZDL-MK-L2): the queued row was written and later removed (an erasure or a purge while the
-                // message waited in a queue or a retry). Writing it back would undo the erasure: nothing is stored.
-                $this->logger?->debug('Sent-mail log row removed while the message was queued; outcome not recorded.', ['bundle' => 'NowoMailKitBundle', 'status' => $status->value]);
+                // 2.9.0 (ZDL-MK-L2): the queued row was written and later removed (an erasure or a purge while the
+                // message waited in a queue or a retry, or a host transaction that rolled back the queued insert).
+                // Writing it back would undo the erasure: nothing is stored.
+                $this->logger?->info('Sent-mail log row removed while the message was queued; outcome not recorded.', ['bundle' => 'NowoMailKitBundle', 'status' => $status->value]);
 
                 return null;
             }

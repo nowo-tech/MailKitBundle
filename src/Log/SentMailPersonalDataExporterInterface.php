@@ -11,8 +11,9 @@ use Nowo\MailKitBundle\Mailer\MailHeaders;
  * matched exactly on the normalised address ({@see SentMailPersonalDataSubject}). Erasure stays
  * {@see SentMailErasureInterface::forgetAddress()}.
  *
- * The envelope, the error text and (2.8.1) the stored body (`html_body` / `text_body`, null unless `log.store_bodies`
- * kept one), with the addresses of the row's other recipients and sender masked in the error and the body. Never
+ * The envelope, the error text and (2.9.0) the stored body (`html_body` / `text_body`, null unless `log.store_bodies`
+ * kept one; only for rows the address received, never for sender-only rows), with the addresses of the row's other
+ * recipients and sender masked in the error and the body. Never
  * exported: the other recipients, the transport and the provider message id. Secrets were already masked when the
  * body was stored.
  * Always registered: {@see SentMailRecorder} whenever Doctrine is, {@see NullSentMailPersonalDataExporter} otherwise.
@@ -21,7 +22,7 @@ interface SentMailPersonalDataExporterInterface
 {
     /**
      * Rows of the address, oldest id first. Dates are ATOM strings; `error`, `html_body` and `text_body` were added in
-     * 2.8.1 (null when there is none); `template` is the message tag
+     * 2.9.0 (null when there is none); `template` is the message tag
      * ({@see MailHeaders::tag()}); `roles` says whether the address was a recipient, the
      * sender or both.
      *

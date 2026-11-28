@@ -24,8 +24,12 @@ use Symfony\Component\Mime\Email;
 use Symfony\Component\Uid\Uuid;
 
 use function array_column;
+use function array_filter;
 use function array_keys;
+use function array_map;
+use function array_values;
 use function json_encode;
+use function str_contains;
 use function str_starts_with;
 
 /**
@@ -52,7 +56,7 @@ final class PersonalDataTest extends KernelTestCase
         self::assertCount(1, $rows);
         $row = $rows[0];
         self::assertSame(['id', 'roles', 'status', 'template', 'subject', 'queued_at', 'sent_at', 'failed_at', 'error', 'html_body', 'text_body'], array_keys($row));
-        // 2.8.1 (ZDL-MK-L3): the stored body and the error are exported too.
+        // 2.9.0 (ZDL-MK-L3): the stored body and the error are exported too.
         self::assertSame([null, '<p>secret body</p>', 'secret body'], [$row['error'], $row['html_body'], $row['text_body']]);
         self::assertSame(['recipient'], $row['roles']);
         self::assertSame(['sent', 'welcome', 'Welcome', null], [$row['status'], $row['template'], $row['subject'], $row['failed_at']]);
@@ -302,7 +306,7 @@ final class PersonalDataTest extends KernelTestCase
     }
 
     /**
-     * 2.8.1 (ZDL-MK-L3): the export carries the error and the stored body, with the addresses of the row's other
+     * 2.9.0 (ZDL-MK-L3): the export carries the error and the stored body, with the addresses of the row's other
      * recipients and sender masked; the other recipients themselves are still never exported.
      */
     public function testExportCarriesTheErrorAndTheBodyWithTheOtherPeopleMasked(): void
@@ -328,10 +332,18 @@ final class PersonalDataTest extends KernelTestCase
         self::assertSame('550 <bob@example.com> and <[redacted]> rejected', $bob[0]['error']);
         self::assertSame('Hi [redacted] and bob@example.com, from [redacted]', $bob[0]['text_body']);
 
-        // The sender's own export: the sender is not masked for itself, the recipients are.
+        // ZDT-MK-L1: a sender-only row (mail from the subject's address to other people) exports no body; the error
+        // stays, with the recipients masked.
         $app = $recorder->export(SentMailPersonalDataSubject::fromEmail('app@example.com'));
         self::assertSame(['sender'], $app[0]['roles']);
-        self::assertSame('Hi [redacted] and [redacted], from app@example.com', $app[0]['text_body']);
+        self::assertSame([null, null], [$app[0]['html_body'], $app[0]['text_body']]);
+        self::assertSame('550 <[redacted]> and <[redacted]> rejected', $app[0]['error']);
+
+        // Sender and recipient of the same row (a copy to oneself): the body was received, so it is exported.
+        $recorder->sent(null, (new Email())->from('carl@example.com')->to('dana@example.com')->cc('carl@example.com')->subject('Copy')->text('For dana@example.com, copy to carl@example.com'), 'smtp', null, null);
+        $carl = $recorder->export(SentMailPersonalDataSubject::fromEmail('carl@example.com'));
+        self::assertSame(['recipient', 'sender'], $carl[0]['roles']);
+        self::assertSame('For [redacted], copy to carl@example.com', $carl[0]['text_body']);
     }
 
     public function testExportWithoutStoredBodiesHasNullBodies(): void
@@ -348,8 +360,8 @@ final class PersonalDataTest extends KernelTestCase
     }
 
     /**
-     * 2.8.1 (ZDL-MK-L2): an erasure that removes the queued row of a message still waiting in a queue or a retry is
-     * not undone by the later outcome: nothing is written back, and a debug line without the address says so.
+     * 2.9.0 (ZDL-MK-L2): an erasure that removes the queued row of a message still waiting in a queue or a retry is
+     * not undone by the later outcome: nothing is written back, and an info line without the address says so.
      */
     public function testAQueuedRowErasedBeforeItsOutcomeIsNotWrittenBack(): void
     {
@@ -371,6 +383,7 @@ final class PersonalDataTest extends KernelTestCase
         self::assertSame(0, (int) $db->fetchOne('SELECT COUNT(*) FROM mail_kit_sent_mail_body'));
         self::assertSame([], $recorder->export(SentMailPersonalDataSubject::fromEmail('ana@example.com')));
         self::assertTrue($logger->has('removed while the message was queued'));
+        self::assertSame(['info', 'info'], array_values(array_map(static fn (array $record): mixed => $record['level'], array_filter($logger->records, static fn (array $record): bool => str_contains($record['message'], 'removed while the message was queued')))));
         foreach ($logger->records as $record) {
             self::assertStringNotContainsString('ana@example.com', (string) json_encode($record));
         }

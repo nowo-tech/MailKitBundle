@@ -494,9 +494,12 @@ One exported row:
 ```
 
 `roles` holds `recipient` (to, cc or bcc), `sender` or both. `template` is the `MailHeaders::tag()` category. Since
-2.8.1 a row also carries the delivery `error` (scrubbed when it was stored) and the stored body (`html_body`,
-`text_body`; null unless `log.store_bodies` kept one). The values masked when the body was stored stay masked, and the
-addresses of the row's other recipients and sender are replaced by `[redacted]` in the error and the body. The export
+2.9.0 a row also carries the delivery `error` (scrubbed when it was stored) and the stored body (`html_body`,
+`text_body`; null unless `log.store_bodies` kept one). Bodies are exported only for rows the address **received** (to,
+cc or bcc): a row where it is only the sender (mail sent from that address to other people, for example a shared
+system From) exports its envelope and error but no body. The values masked when the body was stored stay masked, and
+the addresses of the row's other recipients and sender are replaced by `[redacted]` in the error and the body. Masking
+is address based (the literal and URL-encoded forms), not name based. The export
 never includes the other recipients, the transport or the provider message id. Both operations are idempotent: a
 second erasure returns zero counts.
 
@@ -544,14 +547,16 @@ manager:
   Listeners must not log the address verbatim.
 - **Inside your transaction** (UserKit runs all erasers inside one): it joins it and dispatches **no event**, because
   your transaction may still roll back. The returned counts are the outcome.
-- **Concurrent erasures** (2.8.1): each row is read again under a row lock (`SELECT … FOR UPDATE` on MySQL / MariaDB
+- **Concurrent erasures** (2.9.0): each row is read again under a row lock (`SELECT … FOR UPDATE` on MySQL / MariaDB
   and PostgreSQL) before it is written back, so two erasures of people who share a row never put each other's address
   back. The second one waits for the first. A deadlock or a lock wait timeout rolls the erasure back: in its own
   transaction it is thrown as `Nowo\TransactionContract\TransientStorageFailure` (nothing was committed, run it again);
   inside yours the database error reaches you, and your transaction decides.
-- **Mail still in a queue** (2.8.1): when an erasure or the retention purge removes the `queued` row of a message that
+- **Mail still in a queue** (2.9.0): when an erasure or the retention purge removes the `queued` row of a message that
   is still waiting in Messenger or in a retry, the later "sent" or "failed" outcome is not written back. Nothing about
-  the erased person returns to the log; the outcome is logged at debug level without the address.
+  the erased person returns to the log; the outcome is logged at info level without the address. A queued row that
+  your own transaction rolled back (the message had already gone to a non-transactional transport) is not re-created
+  either: send after your commit.
 
 With a separate entity manager / connection for the log (`doctrine.entity_manager`), the erasure is not part of the
 transaction of your user's connection (UserKit's): it commits on its own. If a later eraser fails and UserKit rolls

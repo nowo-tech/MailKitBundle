@@ -489,13 +489,16 @@ One exported row:
 
 ```json
 {"id": "0196…", "roles": ["recipient"], "status": "sent", "template": "welcome", "subject": "Welcome",
- "queued_at": "2026-11-11T10:00:00+00:00", "sent_at": "2026-11-11T10:00:01+00:00", "failed_at": null}
+ "queued_at": "2026-11-11T10:00:00+00:00", "sent_at": "2026-11-11T10:00:01+00:00", "failed_at": null,
+ "error": null, "html_body": "<p>Welcome</p>", "text_body": "Welcome"}
 ```
 
-`roles` holds `recipient` (to, cc or bcc), `sender` or both. `template` is the `MailHeaders::tag()` category. The
-export is envelope data only. It never includes the bodies: they may hold other people's data and masked secrets, and
-they are stored only with `log.store_bodies`. It never includes the other recipients, the transport, the provider
-message id or the error text either. Both operations are idempotent: a second erasure returns zero counts.
+`roles` holds `recipient` (to, cc or bcc), `sender` or both. `template` is the `MailHeaders::tag()` category. Since
+2.8.1 a row also carries the delivery `error` (scrubbed when it was stored) and the stored body (`html_body`,
+`text_body`; null unless `log.store_bodies` kept one). The values masked when the body was stored stay masked, and the
+addresses of the row's other recipients and sender are replaced by `[redacted]` in the error and the body. The export
+never includes the other recipients, the transport or the provider message id. Both operations are idempotent: a
+second erasure returns zero counts.
 
 ### Matching rule
 
@@ -541,6 +544,14 @@ manager:
   Listeners must not log the address verbatim.
 - **Inside your transaction** (UserKit runs all erasers inside one): it joins it and dispatches **no event**, because
   your transaction may still roll back. The returned counts are the outcome.
+- **Concurrent erasures** (2.8.1): each row is read again under a row lock (`SELECT … FOR UPDATE` on MySQL / MariaDB
+  and PostgreSQL) before it is written back, so two erasures of people who share a row never put each other's address
+  back. The second one waits for the first. A deadlock or a lock wait timeout rolls the erasure back: in its own
+  transaction it is thrown as `Nowo\TransactionContract\TransientStorageFailure` (nothing was committed, run it again);
+  inside yours the database error reaches you, and your transaction decides.
+- **Mail still in a queue** (2.8.1): when an erasure or the retention purge removes the `queued` row of a message that
+  is still waiting in Messenger or in a retry, the later "sent" or "failed" outcome is not written back. Nothing about
+  the erased person returns to the log; the outcome is logged at debug level without the address.
 
 With a separate entity manager / connection for the log (`doctrine.entity_manager`), the erasure is not part of the
 transaction of your user's connection (UserKit's): it commits on its own. If a later eraser fails and UserKit rolls

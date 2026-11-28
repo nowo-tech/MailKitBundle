@@ -42,6 +42,40 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+Planned as **2.8.1**: fixes to the GDPR erasure and export of the sent-mail log (pre-tag audit of 2.8.0). No schema
+change, no configuration change; hosts need not act.
+
+### Fixed
+
+- **Two erasures of people who share a log row could restore an erased address** (affected releases >= 1.7.0). The
+  unlink and masking steps of `forgetAddress()`, `erase()` and `eraseTagged()` read a row and wrote it back without a
+  lock. When two erasures touched the same row at the same time (Ana and Bob, both recipients of one message), the
+  second one could write back the recipient list, subject, error or stored body it had read before the first one
+  committed, and put the first person's address back. Every row is now read again under a row lock
+  (`SELECT … FOR UPDATE` on MySQL / MariaDB and PostgreSQL, by id, in id order) inside the erasure's transaction before
+  it is written back; the second erasure waits for the first and works on its result. The erasure's own transaction is
+  now a `nowo-tech/transaction-doctrine` unit: a deadlock or a lock wait timeout rolls it back and is thrown as
+  `TransientStorageFailure` (nothing committed, a retry is safe). Inside the caller's transaction the database error
+  reaches the caller, as before. Race tests on MySQL 8.4, MariaDB 11.4 and PostgreSQL 16 / 17.
+- **The outcome of a queued message could re-create an erased row** (affected releases >= 1.7.0). When an erasure (or
+  the retention purge) removed the `queued` row of a message still waiting in Messenger or in a retry, the later
+  `sent()` / `failed()` found no row and inserted a new full one, with the erased address, subject, tag and stored
+  body. A known row id whose row is gone is now treated as removed: nothing is written back, and a debug line without
+  the address is logged. A message that was never queued (no id) is still recorded as before.
+- **The personal-data export left out the error text and the stored body** (affected releases >= 1.7.0).
+  `export()` / `exportTagged()` and the UserKit `emails_received` section now also return `error`, `html_body` and
+  `text_body` (null when there is none; bodies exist only when `log.store_bodies` kept one). The addresses of the row's
+  other recipients and sender are masked in the error and the body, and the other recipients are still never exported.
+  The row shape gains three keys; code that reads only the existing keys is not affected.
+
+### Notes
+
+- No security advisory: these are contention and timing windows of the erasure (and a completeness gap of the
+  export), fixed here and recorded in this changelog.
+- The tag-scoped ports of 2.8.0 point straight at `SentMailRecorder`. A host that decorated the 1.7 eraser or exporter
+  alias must decorate the tag-scoped aliases as well; see
+  [CONFIGURATION — personal_data](CONFIGURATION.md#personal_data). The wiring is unchanged in this patch.
+
 ## [2.8.0] - 2026-11-27
 
 Planned as **2.8.0**: tag-scoped GDPR erasure and export of the sent-mail log, for a module that owns only the rows it

@@ -13,8 +13,8 @@ use function array_values;
 
 /**
  * UserKit personal-data export section `emails_received` (1.7; registered like {@see EmailsReceivedPersonalDataEraser}):
- * the sent-mail log rows of every address of the user ({@see SentMailPersonalDataExporterInterface}, envelope only),
- * each row once even when it involves several of the user's addresses.
+ * the sent-mail log rows of every address of the user ({@see SentMailPersonalDataExporterInterface}: envelope, and since
+ * 2.8.1 the error and the stored body), each row once even when it involves several of the user's addresses.
  */
 final readonly class EmailsReceivedPersonalDataExportProvider implements PersonalDataExportProviderInterface
 {
@@ -53,7 +53,7 @@ final readonly class EmailsReceivedPersonalDataExportProvider implements Persona
     /**
      * Rows of every address of the user, oldest id first per address.
      *
-     * @return list<array{id: string, roles: list<'recipient'|'sender'>, status: string, template: string|null, subject: string, queued_at: string|null, sent_at: string|null, failed_at: string|null}>
+     * @return list<array{id: string, roles: list<'recipient'|'sender'>, status: string, template: string|null, subject: string, queued_at: string|null, sent_at: string|null, failed_at: string|null, error: string|null, html_body: string|null, text_body: string|null}>
      */
     public function export(object $user): array
     {
